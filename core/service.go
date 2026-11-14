@@ -95,6 +95,42 @@ func (s *Service) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 	return info, nil
 }
 
+// UpdateLibraryDetails renames the active library or gives it another icon.
+// The icon is empty for the default, a built-in icon name, or
+// core.LibraryIconCustom once SaveLibraryIcon wrote its picture.
+func (s *Service) UpdateLibraryDetails(name string, icon string) (*LibraryInfo, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	info, err := s.mgr.UpdateLibraryDetails(name, icon)
+	if err != nil {
+		return nil, WrapAppError(ErrCodeUpdateLibraryFailed, err)
+	}
+	s.emit(LibraryOpenedEvent, info)
+	return info, nil
+}
+
+// SaveLibraryIcon stores a cropped picture as the active library's custom icon.
+func (s *Service) SaveLibraryIcon(png []byte) (*LibraryInfo, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	info, err := s.mgr.SaveLibraryIcon(png)
+	if err != nil {
+		return nil, WrapAppError(ErrCodeUpdateLibraryFailed, err)
+	}
+	s.emit(LibraryOpenedEvent, info)
+	return info, nil
+}
+
+// GetLibraryIconPath returns where the active library's custom icon lives.
+func (s *Service) GetLibraryIconPath() string {
+	if s.mgr == nil {
+		return ""
+	}
+	return s.mgr.LibraryIconPath()
+}
+
 func (s *Service) CloseLibrary() error {
 	if s.mgr == nil {
 		return nil
@@ -305,6 +341,10 @@ func (s *Service) GetRecentLibraries() []string {
 type LibraryRef struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
+	// Name and Icon are the library's own display identity, so the switcher can
+	// show both without opening every library in the list.
+	Name string `json:"name,omitempty"`
+	Icon string `json:"icon,omitempty"`
 }
 
 // GetRecentLibraryRefs returns the recent libraries with their stable IDs.
@@ -322,12 +362,14 @@ func (s *Service) GetRecentLibraryRefs() []LibraryRef {
 			continue
 		}
 		var meta struct {
-			ID string `json:"id"`
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			Icon string `json:"icon"`
 		}
 		if err := json.Unmarshal(data, &meta); err != nil || meta.ID == "" {
 			continue
 		}
-		refs = append(refs, LibraryRef{ID: meta.ID, Path: p})
+		refs = append(refs, LibraryRef{ID: meta.ID, Path: p, Name: meta.Name, Icon: meta.Icon})
 	}
 	return refs
 }

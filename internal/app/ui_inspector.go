@@ -105,12 +105,20 @@ func (a *App) viewLibraryInspector(c *ui.Context) {
 		}
 	}
 	ui.Column(c).FillWidth().Gap(10).Children(func() {
-		// The name is the header: no "current library" caption repeats it.
+		// The editable tile and name are the header: no "current library"
+		// caption repeats them.
 		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Size(42, 42).Radius(10).Background(p.surface2).Center().Children(func() {
-				ui.Icon(c, iconLibrary).Size(20, 20).TextColor(p.accent)
-			})
-			ui.Text(c, lib.Name).FontSize(15).FontWeight(650).TextColor(p.text).Grow(1).Shrink(1).MinWidth(0).SingleLine()
+			a.libraryIconTrigger(c, lib)
+			if a.libNameEdit {
+				ui.Row(c).Grow(1).Shrink(1).MinWidth(0).AlignItems(ui.Center).Gap(4).Children(func() {
+					ui.TextInput(c.Key("library-name"), &a.libNameValue).FontSize(13.5).
+						Grow(1).Shrink(1).MinWidth(0).AutoFocus().OnSubmit(a.commitLibraryRename)
+					a.iconButton(c, "library-name-save", iconCheck, false, a.t("common.save"), a.commitLibraryRename)
+				})
+			} else {
+				ui.Text(c, lib.Name).FontSize(15).FontWeight(650).TextColor(p.text).Grow(1).Shrink(1).MinWidth(0).SingleLine()
+				a.iconButton(c, "library-rename", iconPencil, false, a.t("inspector.renameLibrary"), a.beginLibraryRename)
+			}
 		})
 		a.inspectorDivider(c)
 		a.metaRow(c, a.t("settings.storage.items"), fmt.Sprintf("%d", a.stats.Total))

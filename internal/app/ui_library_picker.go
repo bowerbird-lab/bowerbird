@@ -24,6 +24,15 @@ func libraryDisplayName(path string) string {
 	return base
 }
 
+// libraryRefName is the name the switcher shows for a library: the name its
+// manifest carries, or the folder name for a manifest without one.
+func libraryRefName(ref core.LibraryRef) string {
+	if strings.TrimSpace(ref.Name) != "" {
+		return ref.Name
+	}
+	return libraryDisplayName(ref.Path)
+}
+
 // libraryRefsInOrder merges the recent libraries with the active one and
 // applies the order the user arranged. The active library keeps its place:
 // switching libraries must never reshuffle the list.
@@ -41,7 +50,7 @@ func (a *App) libraryRefsInOrder() []core.LibraryRef {
 		add(ref)
 	}
 	if a.library != nil {
-		add(core.LibraryRef{ID: a.library.ID, Path: a.library.Path})
+		add(core.LibraryRef{ID: a.library.ID, Path: a.library.Path, Name: a.library.Name, Icon: a.library.Icon})
 	}
 
 	if len(a.prefs.LibraryOrder) > 0 {
@@ -84,7 +93,7 @@ func (a *App) filteredLibraryRefs(all []core.LibraryRef) []core.LibraryRef {
 	visible := make([]core.LibraryRef, 0, len(all))
 	for _, ref := range all {
 		isActive := a.library != nil && ref.ID == a.library.ID
-		if isActive || strings.Contains(strings.ToLower(libraryDisplayName(ref.Path)), query) {
+		if isActive || strings.Contains(strings.ToLower(libraryRefName(ref)), query) {
 			visible = append(visible, ref)
 		}
 	}
@@ -147,14 +156,18 @@ func (a *App) sidebarLibrarySwitcher(c *ui.Context) {
 	}
 
 	ui.Box(c).Padding(8, 12, 4, 12).Children(func() {
-		trigger := ui.ButtonBase(c.Key("library-switcher")).FillWidth().Height(34).PaddingX(8).Radius(8).FocusRing(false).AlignItems(ui.Center).Gap(8)
+		trigger := ui.ButtonBase(c.Key("library-switcher")).FillWidth().Height(38).PaddingX(8).Radius(8).FocusRing(false).AlignItems(ui.Center).Gap(8)
 		bg := p.hover
 		if trigger.Hovered() || a.libraryPickerOpen {
 			bg = p.press
 		}
 		trigger.Background(trigger.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
 		trigger.Children(func() {
-			ui.Icon(c, iconLibrary).Size(16, 16).TextColor(p.muted)
+			if a.library != nil {
+				a.libraryAvatar(c, a.library, 27)
+			} else {
+				ui.Icon(c, iconLibrary).Size(16, 16).TextColor(p.muted)
+			}
 			ui.Text(c, name).FontSize(12).FontWeight(600).TextColor(p.text).Grow(1).Shrink(1).MinWidth(0).SingleLine()
 			ui.Icon(c, iconChevron).Size(13, 13).TextColor(p.faint)
 		})
@@ -204,7 +217,7 @@ func (a *App) viewLibraryPicker(c *ui.Context) {
 		if canReorder {
 			a.libraryList.Reorder = a.reorderLibraries
 		}
-		const rowHeight = float32(32)
+		const rowHeight = float32(36)
 		height := float32(len(visible)) * rowHeight
 		if height > 260 {
 			height = 260
@@ -241,7 +254,7 @@ func (a *App) viewLibraryPicker(c *ui.Context) {
 func (a *App) libraryPickerRow(c *ui.Context, ref core.LibraryRef, canReorder bool) {
 	p := a.palette(c)
 	active := a.library != nil && ref.ID == a.library.ID
-	row := ui.ButtonBase(c.Key("library-pick-" + ref.ID)).FillWidth().Height(32).PaddingX(6).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(8)
+	row := ui.ButtonBase(c.Key("library-pick-" + ref.ID)).FillWidth().Height(36).PaddingX(6).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(8)
 	bg := ui.Transparent
 	if active {
 		bg = p.press
@@ -255,16 +268,19 @@ func (a *App) libraryPickerRow(c *ui.Context, ref core.LibraryRef, canReorder bo
 		} else {
 			ui.Box(c).Size(12, 12)
 		}
-		icon, iconColor := iconFolder, p.muted
+		refLib := &core.LibraryInfo{ID: ref.ID, Name: ref.Name, Path: ref.Path, Icon: ref.Icon}
 		if active {
-			icon, iconColor = iconLibrary, p.accent
+			// The live library is newer than the cached ref after an icon or
+			// name change, before the next refresh lands.
+			refLib = a.library
 		}
-		ui.Icon(c, icon).Size(14, 14).TextColor(iconColor)
+		a.libraryAvatar(c, refLib, 27)
+		name := libraryRefName(ref)
 		textColor := p.text
 		if active {
 			textColor = p.accent
 		}
-		ui.Text(c, libraryDisplayName(ref.Path)).FontSize(12).FontWeight(map[bool]int{true: 600, false: 400}[active]).TextColor(textColor).Grow(1).Shrink(1).MinWidth(0).SingleLine()
+		ui.Text(c, name).FontSize(12).FontWeight(map[bool]int{true: 600, false: 400}[active]).TextColor(textColor).Grow(1).Shrink(1).MinWidth(0).SingleLine()
 		if active {
 			ui.Icon(c, iconCheck).Size(13, 13).TextColor(p.accent)
 		}

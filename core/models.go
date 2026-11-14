@@ -2,9 +2,13 @@ package core
 
 // LibraryInfo represents metadata about an opened library.
 type LibraryInfo struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Path      string `json:"path"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// Icon names the built-in icon the library picked, or LibraryIconCustom
+	// when LibraryIconFile beside the manifest holds its picture. Empty means
+	// the default icon.
+	Icon      string `json:"icon,omitempty"`
 	CreatedAt int64  `json:"createdAt"`
 	ItemCount int64  `json:"itemCount"`
 }

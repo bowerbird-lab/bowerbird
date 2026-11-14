@@ -51,6 +51,8 @@ var (
 	iconArchive       = strokeIcon(`<path d="M4 7h16v13H4zM3 4h18v3H3zM10 11h4"/>`)
 	iconExternal      = strokeIcon(`<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>`)
 	iconCopy          = strokeIcon(`<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>`)
+	iconPencil        = strokeIcon(`<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="m14.5 5.5 4 4"/>`)
+	iconUpload        = strokeIcon(`<path d="M12 16V4m-5 5 5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>`)
 	iconEye           = strokeIcon(`<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>`)
 	iconPlay          = fillIcon(`<path d="M8 5v14l11-7z"/>`)
 	iconPause         = fillIcon(`<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>`)

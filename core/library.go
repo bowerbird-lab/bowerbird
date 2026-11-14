@@ -255,6 +255,7 @@ func (m *LibraryManager) CreateLibrary(parentDir string, libName string) (*Libra
 		ID        string `json:"id"`
 		Name      string `json:"name"`
 		Version   string `json:"version"`
+		Icon      string `json:"icon,omitempty"`
 		CreatedAt int64  `json:"createdAt"`
 	}{
 		ID:        libID,
@@ -325,6 +326,7 @@ func (m *LibraryManager) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 	var meta struct {
 		ID        string `json:"id"`
 		Name      string `json:"name"`
+		Icon      string `json:"icon"`
 		CreatedAt int64  `json:"createdAt"`
 	}
 	if err := json.Unmarshal(data, &meta); err != nil {
@@ -359,6 +361,7 @@ func (m *LibraryManager) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 		ID:        meta.ID,
 		Name:      meta.Name,
 		Path:      libraryPath,
+		Icon:      meta.Icon,
 		CreatedAt: meta.CreatedAt,
 		ItemCount: count,
 	}
@@ -385,6 +388,136 @@ func (m *LibraryManager) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 
 	RecordLog("info", "core", "Opened library", fmt.Sprintf("name=%s items=%d path=%s", meta.Name, count, libraryPath), time.Since(start).Milliseconds())
 	return m.activeLib, nil
+}
+
+// UpdateLibraryDetails rewrites the active library's editable identity: its
+// display name and its icon. The icon is "" for the default, a built-in icon
+// name, or LibraryIconCustom for the picture SaveLibraryIcon writes. Icon names
+// are opaque to core so the UI can add pictures without a core change.
+func (m *LibraryManager) UpdateLibraryDetails(name, icon string) (*LibraryInfo, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errors.New("library name is required")
+	}
+	icon = strings.TrimSpace(icon)
+	if icon == LibraryIconCustom {
+		if _, err := os.Stat(m.LibraryIconPath()); err != nil {
+			return nil, errors.New("library has no custom icon picture")
+		}
+	}
+	return m.updateLibrary(func(lib *LibraryInfo) {
+		lib.Name = name
+		lib.Icon = icon
+	})
+}
+
+// SaveLibraryIcon stores png as the active library's custom icon, points the
+// library at it, and returns the refreshed info.
+func (m *LibraryManager) SaveLibraryIcon(png []byte) (*LibraryInfo, error) {
+	if len(png) == 0 {
+		return nil, errors.New("icon picture is empty")
+	}
+	// Hold the lock across the write and the manifest so switching libraries
+	// mid-save cannot point one library at another's picture.
+	m.mu.Lock()
+	if m.activeLib == nil {
+		m.mu.Unlock()
+		return nil, ErrNoActiveLibrary
+	}
+	updated := *m.activeLib
+	if err := os.WriteFile(filepath.Join(updated.Path, LibraryIconFile), png, 0644); err != nil {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("failed to save library icon: %w", err)
+	}
+	updated.Icon = LibraryIconCustom
+	if err := writeLibraryManifest(&updated); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	m.activeLib = &updated
+	m.mu.Unlock()
+
+	m.broadcastLibrary(&updated)
+	return &updated, nil
+}
+
+// LibraryIconPath returns where the active library's custom icon picture lives,
+// or "" when no library is mounted.
+func (m *LibraryManager) LibraryIconPath() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.activeLib == nil {
+		return ""
+	}
+	return filepath.Join(m.activeLib.Path, LibraryIconFile)
+}
+
+// updateLibrary applies mutate to a copy of the active library, rewrites its
+// manifest, and publishes the copy: the UI may still hold the old pointer.
+func (m *LibraryManager) updateLibrary(mutate func(*LibraryInfo)) (*LibraryInfo, error) {
+	m.mu.Lock()
+	if m.activeLib == nil {
+		m.mu.Unlock()
+		return nil, ErrNoActiveLibrary
+	}
+	updated := *m.activeLib
+	mutate(&updated)
+	if err := writeLibraryManifest(&updated); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	m.activeLib = &updated
+	m.mu.Unlock()
+
+	m.broadcastLibrary(&updated)
+	return &updated, nil
+}
+
+// writeLibraryManifest rewrites the editable fields of library.json, keeping
+// the version and any field another build wrote for the library.
+func writeLibraryManifest(lib *LibraryInfo) error {
+	if lib == nil || lib.Path == "" {
+		return errors.New("library path is required")
+	}
+	manifestPath := filepath.Join(lib.Path, libraryManifestName)
+	raw := map[string]any{}
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return fmt.Errorf("corrupted library.json: %w", err)
+		}
+	}
+	raw["id"] = lib.ID
+	raw["name"] = lib.Name
+	if _, ok := raw["createdAt"]; !ok {
+		raw["createdAt"] = lib.CreatedAt
+	}
+	if lib.Icon == "" {
+		delete(raw, "icon")
+	} else {
+		raw["icon"] = lib.Icon
+	}
+	data, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(manifestPath, append(data, '\n'), 0644); err != nil {
+		return fmt.Errorf("failed to write library.json: %w", err)
+	}
+	return nil
+}
+
+// broadcastLibrary tells LAN clients the library changed identity.
+func (m *LibraryManager) broadcastLibrary(lib *LibraryInfo) {
+	if m.mobileServer == nil || lib == nil {
+		return
+	}
+	m.mobileServer.Broadcast("library_changed", map[string]any{
+		"id":        lib.ID,
+		"name":      lib.Name,
+		"path":      lib.Path,
+		"icon":      lib.Icon,
+		"itemCount": lib.ItemCount,
+	})
 }
 
 // CloseLibrary unmounts the active library and updates user data.
@@ -1377,6 +1510,14 @@ const (
 	itemMetadataName    = "metadata.json"
 )
 
+// LibraryIconCustom is the LibraryInfo.Icon value naming the picture saved in
+// LibraryIconFile instead of a built-in icon.
+const LibraryIconCustom = "custom"
+
+// LibraryIconFile is the picture a custom library icon lives in, inside the
+// library container beside library.json.
+const LibraryIconFile = "library-icon.png"
+
 // pathIsWithin reports whether target is base itself or below it, using
 // path components rather than a raw string prefix, so /lib does not match
 // /library.
@@ -1403,7 +1544,7 @@ func pathIsWithin(base, target string) bool {
 func isLibraryBookkeeping(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
 	switch base {
-	case libraryManifestName, libraryDBName, libraryDBName + "-wal", libraryDBName + "-shm", itemMetadataName:
+	case libraryManifestName, libraryDBName, libraryDBName + "-wal", libraryDBName + "-shm", itemMetadataName, LibraryIconFile:
 		return true
 	}
 	return false

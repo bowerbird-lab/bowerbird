@@ -1,8 +1,9 @@
 package app
 
 import (
-	"path/filepath"
 	"time"
+
+	"bowerbird/core"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -83,9 +84,9 @@ func (a *App) viewSetup(c *ui.Context) {
 								row.Background(p.hover)
 							}
 							row.Children(func() {
-								ui.Icon(c, iconFolder).Size(15, 15).TextColor(p.muted)
+								a.libraryAvatar(c, &core.LibraryInfo{ID: ref.ID, Name: ref.Name, Path: ref.Path, Icon: ref.Icon}, 24)
 								ui.Column(c).Grow(1).Shrink(1).Gap(0).Children(func() {
-									ui.Text(c, filepath.Base(ref.Path)).FontSize(12.5).TextColor(p.text).SingleLine()
+									ui.Text(c, libraryRefName(ref)).FontSize(12.5).TextColor(p.text).SingleLine()
 									ui.Text(c, ref.Path).FontSize(10).TextColor(p.faint).SingleLine()
 								})
 								ui.Icon(c, iconChevronR).Size(12, 12).TextColor(p.faint)

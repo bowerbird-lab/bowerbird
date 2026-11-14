@@ -97,6 +97,7 @@ func (a *App) viewMain(c *ui.Context) {
 		}
 		a.viewToast(c)
 		a.viewDialog(c)
+		a.viewCropDialog(c)
 	})
 }
 

@@ -131,6 +131,17 @@ type App struct {
 	librarySearchBox  ui.Handle
 	libraryList       ui.ListState
 
+	// Library identity editing: the icon picker popover, the inline name
+	// editor, cached custom icons and the crop editor opened by a dropped
+	// picture.
+	libIconPickerOpen bool
+	libNameEdit       bool
+	libNameValue      string
+	libIcons          map[string]*ui.Bitmap
+	libIconScroll     ui.ScrollState
+	crop              *CropDialog
+	libIconBusy       bool
+
 	folders             []core.Folder
 	folderPreviews      map[string]core.FolderPreview
 	subfoldersCollapsed bool
@@ -365,6 +376,7 @@ func New(svc *core.Service) *App {
 		rowHeight:      190,
 		thumbs:         newThumbCache(),
 		thumbJobs:      newThumbJobQueue(),
+		libIcons:       map[string]*ui.Bitmap{},
 		logsAutoScroll: true,
 		logsLevel:      "all",
 		start:          time.Now(),
@@ -643,6 +655,9 @@ func (a *App) refreshAll() {
 				(a.library != nil && lib != nil && a.library.ID != lib.ID)
 			if libChanged {
 				a.clearWorkspaceSelection()
+				a.libIconPickerOpen = false
+				a.libNameEdit = false
+				a.crop = nil
 			}
 			a.library = lib
 			a.folders = folders
