@@ -215,6 +215,19 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 		})
 		ui.Text(c, fmt.Sprintf("%s · %dx%d · %s", strings.ToUpper(item.Extension), item.Width, item.Height, formatBytes(item.Size))).FontSize(10.5).TextColor(p.faint).FontFeatures("tnum")
 
+		// The link and the note come first: they are what the item is for, and
+		// the facts below them only describe it.
+		a.inspectorDivider(c)
+		a.sectionLabel(c, a.t("inspector.sourceUrl"))
+		ui.TextInput(c.Key("url"), &a.urlDraft).FontSize(11.5).OnSubmit(func() { a.saveDetails(item.ID) })
+		if item.URL != "" {
+			if ui.Link(c, a.t("inspector.openSource"), item.URL).FontSize(11).Clicked() {
+				_ = a.svc.OpenExternalURL(item.URL)
+			}
+		}
+		a.sectionLabel(c, a.t("inspector.note"))
+		ui.TextArea(c.Key("note"), &a.noteDraft).FontSize(12).Height(64).OnSubmit(func() { a.saveDetails(item.ID) })
+
 		// Dominant palette: click a swatch to copy its hex.
 		if len(item.Palette) > 0 {
 			ui.Row(c).FillWidth().Height(24).Gap(4).Margin(2, 0, 0, 0).Children(func() {
@@ -236,40 +249,6 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 				}
 			})
 		}
-
-		a.inspectorDivider(c)
-		a.sectionLabel(c, a.t("inspector.rating"))
-		ui.Row(c).Gap(4).Children(func() {
-			for i := 1; i <= 5; i++ {
-				i := i
-				filled := i <= a.ratingDraft
-				b := ui.ButtonBase(c.Key(fmt.Sprintf("rate-%d", i))).Size(24, 24).Radius(5).FocusRing(false).AlignItems(ui.Center).Justify(ui.Center)
-				b.Children(func() {
-					if filled {
-						ui.Icon(c, iconStarFill).Size(16, 16).TextColor(p.starStrong)
-					} else {
-						ui.Icon(c, iconStar).Size(16, 16).TextColor(p.faint)
-					}
-				})
-				if b.Clicked() {
-					if a.ratingDraft == i {
-						a.ratingDraft = 0
-					} else {
-						a.ratingDraft = i
-					}
-					a.saveDetails(item.ID)
-				}
-			}
-			if a.ratingDraft > 0 {
-				ui.Box(c).Grow(1)
-				if ui.ButtonBase(c.Key("rate-clear")).Height(24).PaddingX(8).Radius(5).FocusRing(false).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, a.t("inspector.clear")).FontSize(10.5).TextColor(p.faint)
-				}).Clicked() {
-					a.ratingDraft = 0
-					a.saveDetails(item.ID)
-				}
-			}
-		})
 
 		a.inspectorDivider(c)
 		a.sectionLabel(c, a.t("inspector.tags"))
@@ -324,17 +303,6 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 			}
 		}
 
-		a.inspectorDivider(c)
-		a.sectionLabel(c, a.t("inspector.note"))
-		ui.TextArea(c.Key("note"), &a.noteDraft).FontSize(12).Height(64).OnSubmit(func() { a.saveDetails(item.ID) })
-		a.sectionLabel(c, a.t("inspector.sourceUrl"))
-		ui.TextInput(c.Key("url"), &a.urlDraft).FontSize(11.5).OnSubmit(func() { a.saveDetails(item.ID) })
-		if item.URL != "" {
-			if ui.Link(c, a.t("inspector.openSource"), item.URL).FontSize(11).Clicked() {
-				_ = a.svc.OpenExternalURL(item.URL)
-			}
-		}
-
 		// Built-in PSD facts (the composite preview is handled by the preview
 		// layer; the layer tree is shown there too).
 		if (strings.EqualFold(item.Extension, "psd") || strings.EqualFold(item.Extension, "psb")) && a.nativeFeature("official.psd-preview") {
@@ -378,6 +346,16 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 		a.metaRow(c, a.t("inspector.created"), formatDate(item.CreatedAt))
 		a.metaRow(c, a.t("inspector.imported"), formatDate(item.ImportedAt))
 		a.metaRow(c, a.t("inspector.hex"), item.Hex)
+		// The rating is one more fact about the item, so it reads as a metadata
+		// row: its label on the left, the stars it is set with beside it, on the
+		// same column as the other values.
+		ui.Row(c).FillWidth().Height(24).AlignItems(ui.Center).Gap(6).Children(func() {
+			ui.Text(c, a.t("inspector.rating")).FontSize(11).TextColor(p.faint).Width(104).Shrink(0)
+			a.ratingStars(c, "rate", a.ratingDraft, func(rating int) {
+				a.ratingDraft = rating
+				a.saveDetails(item.ID)
+			})
+		})
 
 		// Native audio preview for audio items.
 		if categoryOf(item) == "audio" && a.nativeFeature("official.audio-player") {
@@ -569,22 +547,21 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 			ui.Text(c, formatBytes(totalSize)).
 				FontSize(11).TextColor(p.muted).FontFeatures("tnum").TextAlign(ui.Center)
 		})
-		ui.Row(c).Gap(4).Children(func() {
-			for r := 1; r <= 5; r++ {
-				r := r
-				if ui.Button(c.Key(fmt.Sprintf("batch-rate-%d", r)), fmt.Sprintf("%d ★", r)).Clicked() {
-					ids := a.selectedIDs()
-					go func() {
-						for _, id := range ids {
-							item, err := a.svc.GetItem(id)
-							if err == nil && item != nil {
-								_, _ = a.svc.UpdateItemDetails(id, item.Note, item.URL, r, item.Prompt)
-							}
-						}
-						a.post(func() { a.refreshAll() })
-					}()
-				}
+		a.sectionLabel(c, a.t("inspector.rating"))
+		a.ratingStars(c, "batch-rate", sharedRating(items), func(rating int) {
+			if a.svc == nil {
+				return
 			}
+			ids := a.selectedIDs()
+			go func() {
+				for _, id := range ids {
+					item, err := a.svc.GetItem(id)
+					if err == nil && item != nil {
+						_, _ = a.svc.UpdateItemDetails(id, item.Note, item.URL, rating, item.Prompt)
+					}
+				}
+				a.post(func() { a.refreshAll() })
+			}()
 		})
 		// Tags are added from the picker: it lists the library's tags, where
 		// the section label alone would only repeat the button.

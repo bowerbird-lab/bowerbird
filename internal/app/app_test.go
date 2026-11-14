@@ -1945,3 +1945,97 @@ func TestTagPickerShowsAllTagsAndCreatesTheTypedOne(t *testing.T) {
 		t.Fatalf("the picker stayed open after a tag was chosen: dialog=%v items=%d", a.dialog, len(a.tagPickerItems))
 	}
 }
+
+func TestSharedRating(t *testing.T) {
+	if got := sharedRating(nil); got != 0 {
+		t.Fatalf("rating of nothing = %d, want 0", got)
+	}
+	if got := sharedRating([]core.Item{{Rating: 3}}); got != 3 {
+		t.Fatalf("rating of one item = %d, want 3", got)
+	}
+	if got := sharedRating([]core.Item{{Rating: 3}, {Rating: 3}}); got != 3 {
+		t.Fatalf("rating all items share = %d, want 3", got)
+	}
+	if got := sharedRating([]core.Item{{Rating: 3}, {Rating: 4}}); got != 0 {
+		t.Fatalf("rating of a mixed selection = %d, want 0", got)
+	}
+}
+
+// TestSelectionInspectorReusesTheRatingStars keeps one rating control: the
+// selection shows the same stars as an item, never a row of "N ★" buttons, and
+// only offers Clear when every item shares a rating.
+func TestSelectionInspectorReusesTheRatingStars(t *testing.T) {
+	a := seededApp(t)
+	a.selected = map[string]bool{"a": true, "b": true}
+	a.selectedOrder = []string{"a", "b"}
+	a.items[0].Rating, a.items[1].Rating = 4, 4
+	tester := ui.NewTester(a.viewInspector, int(defaultInspectorWidth), 1400)
+	// Section labels are drawn upper case.
+	if !tester.HasText(strings.ToUpper(a.t("inspector.rating"))) {
+		t.Fatalf("the selection has no rating section: %q", tester.Texts())
+	}
+	if !tester.HasText(a.t("inspector.clear")) {
+		t.Fatal("a rating the selection shares offers no Clear")
+	}
+	for _, text := range []string{"1 ★", "2 ★", "3 ★", "4 ★", "5 ★"} {
+		if tester.HasText(text) {
+			t.Fatalf("the selection still draws its own rating button %q", text)
+		}
+	}
+
+	// Mixed ratings show no shared value, so no Clear either.
+	a.items[1].Rating = 2
+	tester.Frame()
+	if tester.HasText(a.t("inspector.clear")) {
+		t.Fatal("a mixed selection offers to clear a rating it does not share")
+	}
+}
+
+// TestItemInspectorOrder opens with the link and the note, and keeps the rating
+// below the metadata: what the item is for first, what it is second.
+func TestItemInspectorOrder(t *testing.T) {
+	a := seededApp(t)
+	a.activeItem.URL = "https://example.com/source"
+	tester := ui.NewTester(a.viewInspector, int(defaultInspectorWidth), 2000)
+	label := func(key string) ui.Rect {
+		t.Helper()
+		r, ok := tester.Find(strings.ToUpper(a.t(key)))
+		if !ok {
+			t.Fatalf("%s has no section label in %q", key, tester.Texts())
+		}
+		return r
+	}
+	link := label("inspector.sourceUrl")
+	note := label("inspector.note")
+	metadata := label("inspector.metadata")
+	// The rating is a metadata row now, so its label is not upper cased like a
+	// section title and sits inside the metadata block.
+	rating, ok := tester.Find(a.t("inspector.rating"))
+	if !ok {
+		t.Fatalf("the metadata block has no rating row: %q", tester.Texts())
+	}
+	if link.Y > note.Y {
+		t.Errorf("link (y=%.1f) does not come before the note (y=%.1f)", link.Y, note.Y)
+	}
+	if note.Y > metadata.Y {
+		t.Errorf("note (y=%.1f) is not above the metadata (y=%.1f)", note.Y, metadata.Y)
+	}
+	if rating.Y < metadata.Y {
+		t.Errorf("rating (y=%.1f) is not inside the metadata (y=%.1f)", rating.Y, metadata.Y)
+	}
+}
+
+func TestRatingPreviewFollowsTheHover(t *testing.T) {
+	if got := ratingPreview(0, 0); got != 0 {
+		t.Fatalf("preview with nothing to show = %d, want 0", got)
+	}
+	if got := ratingPreview(3, 0); got != 3 {
+		t.Fatalf("preview off the stars = %d, want the stored 3", got)
+	}
+	if got := ratingPreview(3, 5); got != 5 {
+		t.Fatalf("preview under the fifth star = %d, want 5", got)
+	}
+	if got := ratingPreview(0, 2); got != 2 {
+		t.Fatalf("preview under the second star = %d, want 2", got)
+	}
+}

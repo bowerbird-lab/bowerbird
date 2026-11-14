@@ -229,6 +229,87 @@ func (a *App) pillIconButton(c *ui.Context, key any, icon *ui.SVG, label string,
 	}
 }
 
+// ratingStars is the star control the item inspector and the selection
+// inspector share: five stars showing value, a click setting it, and a second
+// click on the same star clearing it, as does the Clear button a rating above
+// zero offers. Hovering a star fills the stars up to it, so the rating a click
+// would give is visible before it is given. onChange receives the new rating,
+// 0 for none, so each caller saves it where it belongs.
+func (a *App) ratingStars(c *ui.Context, key string, value int, onChange func(rating int)) ui.Element {
+	p := a.palette(c)
+	row := ui.Row(c).Gap(4).AlignItems(ui.Center)
+	stars := make([]ui.Element, 0, 5)
+	hover := 0
+	var clear ui.Element
+	// The stars are made before they are filled: the star the pointer is on
+	// only reports its hover once its box exists, and that box is what decides
+	// how many of them show filled.
+	row.Children(func() {
+		for i := 1; i <= 5; i++ {
+			stars = append(stars, ui.ButtonBase(c.Key(fmt.Sprintf("%s-%d", key, i))).Size(24, 24).Radius(5).FocusRing(false).AlignItems(ui.Center).Justify(ui.Center))
+		}
+		if value > 0 {
+			clear = ui.ButtonBase(c.Key(key + "-clear")).Height(24).PaddingX(8).Radius(5).FocusRing(false).AlignItems(ui.Center)
+		}
+	})
+	for i := range stars {
+		if stars[i].Hovered() {
+			hover = i + 1
+		}
+	}
+	shown := ratingPreview(value, hover)
+	for i := range stars {
+		filled := i < shown
+		stars[i].Children(func() {
+			if filled {
+				ui.Icon(c, iconStarFill).Size(16, 16).TextColor(p.starStrong)
+			} else {
+				ui.Icon(c, iconStar).Size(16, 16).TextColor(p.faint)
+			}
+		})
+		if stars[i].Clicked() {
+			next := i + 1
+			if value == next {
+				next = 0
+			}
+			onChange(next)
+		}
+	}
+	if value > 0 {
+		clear.Children(func() {
+			ui.Text(c, a.t("inspector.clear")).FontSize(10.5).TextColor(p.faint)
+		})
+		if clear.Clicked() {
+			onChange(0)
+		}
+	}
+	return row
+}
+
+// ratingPreview is how many stars show filled: the star the pointer is on
+// while it is on one, otherwise the rating the item carries.
+func ratingPreview(value, hover int) int {
+	if hover > 0 {
+		return hover
+	}
+	return value
+}
+
+// sharedRating is the rating every item carries, 0 when they differ or none
+// carries one: what a selection can show as its own.
+func sharedRating(items []core.Item) int {
+	if len(items) == 0 {
+		return 0
+	}
+	rating := items[0].Rating
+	for _, item := range items[1:] {
+		if item.Rating != rating {
+			return 0
+		}
+	}
+	return rating
+}
+
 func (a *App) sectionLabel(c *ui.Context, text string) {
 	p := a.palette(c)
 	ui.Text(c, strings.ToUpper(text)).FontSize(10).FontWeight(650).LetterSpacing(0.6).TextColor(p.faint).Padding(0, 4).MarginY(6)
