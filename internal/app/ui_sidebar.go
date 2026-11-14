@@ -8,6 +8,14 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+const folderRowHeight float32 = 28
+
+const (
+	folderDropBefore = iota
+	folderDropInto
+	folderDropAfter
+)
+
 // viewSidebar draws the library switcher, smart views and the recursive folder
 // tree. It is also the drop target for dragging assets onto a folder.
 func (a *App) viewSidebar(c *ui.Context) {
@@ -31,7 +39,13 @@ func (a *App) viewSidebar(c *ui.Context) {
 			a.navRow(c, NavTags, iconTag, a.t("sidebar.tags"), len(a.tags))
 			a.navRow(c, NavTrash, iconTrash, a.t("sidebar.trash"), a.trashCount)
 
-			ui.Row(c).FillWidth().Height(28).PaddingX(4).Margin(12, 0, 0, 0).AlignItems(ui.Center).Children(func() {
+			foldersHeader := ui.Row(c).FillWidth().Height(folderRowHeight).PaddingX(4).Margin(12, 0, 0, 0).Radius(6).AlignItems(ui.Center)
+			rootDrag, rootOver := ui.DragOver[sidebarDrag](foldersHeader)
+			rootDropOver := rootOver && rootDrag.FolderID != "" && rootDrag.ParentID != ""
+			if rootDropOver {
+				foldersHeader.Background(p.press)
+			}
+			foldersHeader.Children(func() {
 				a.sectionLabel(c, a.t("sidebar.folders"))
 				ui.Box(c).Grow(1)
 				a.iconButton(c, "new-folder", iconFolderPlus, false, a.t("sidebar.newFolder"), func() {
@@ -43,6 +57,9 @@ func (a *App) viewSidebar(c *ui.Context) {
 					}
 				})
 			})
+			if dropped, ok := ui.Drop[sidebarDrag](foldersHeader); ok && dropped.FolderID != "" && dropped.ParentID != "" {
+				a.moveFolderToParent(dropped.FolderID, "")
+			}
 			if len(a.folders) == 0 {
 				ui.Text(c, a.t("sidebar.noFolders")).FontSize(11).TextColor(p.faint).Padding(12, 6)
 			} else {
@@ -90,19 +107,28 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 	if len(children) == 0 {
 		paddingEnd += 3
 	}
-	b := ui.ButtonBase(c.Key("folder-" + f.ID)).FillWidth().Height(28).PaddingStart(float32(8 + depth*14)).PaddingEnd(paddingEnd).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(6)
+	b := ui.ButtonBase(c.Key("folder-" + f.ID)).FillWidth().Height(folderRowHeight).PaddingStart(float32(8 + depth*14)).PaddingEnd(paddingEnd).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(6)
 	b.Drag(sidebarDrag{FolderID: f.ID, ParentID: f.ParentID})
 	// A folder row takes two kinds of in-app drags: items to classify, and
-	// sibling folders to reorder. The item payload also drives the existing
-	// drop highlight; a folder drag shows an insertion line instead.
+	// folders to reorder or nest. The middle of a sibling row nests the
+	// dragged folder; its top/bottom quarter inserts before/after it.
 	dragged, dropOver := ui.DragOver[sidebarDrag](b)
 	itemDropOver := dropOver && len(dragged.ItemIDs) > 0
-	folderDropOver := dropOver && dragged.FolderID != "" && dragged.FolderID != f.ID && dragged.ParentID == f.ParentID
-	dropAfter := folderDropOver && a.folderDropAfter(dragged.FolderID, f.ID)
+	folderDropOver := dropOver && dragged.FolderID != "" && dragged.FolderID != f.ID
+	dropZone := folderDropInto
+	if folderDropOver {
+		if _, y, ok := b.PointerPosition(); ok {
+			dropZone = folderDropZone(y)
+		}
+	}
+	sameParent := folderDropOver && dragged.ParentID == f.ParentID
+	nestOver := folderDropOver && a.folderCanNest(dragged.FolderID, f.ID) && (dropZone == folderDropInto || !sameParent)
+	reorderOver := sameParent && dropZone != folderDropInto
+	dropAfter := reorderOver && dropZone == folderDropAfter
 	bg := ui.Transparent
-	if itemDropOver || active {
+	if itemDropOver || nestOver || active {
 		bg = p.press
-	} else if b.Hovered() || folderDropOver {
+	} else if b.Hovered() || reorderOver {
 		bg = p.hover
 	}
 	b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
@@ -128,7 +154,7 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 				a.expanded[f.ID] = !open
 			}
 		}
-		if folderDropOver {
+		if reorderOver {
 			line := ui.Box(c).Absolute().Left(4).Right(4).Height(2).Radius(1).Background(p.accent)
 			if dropAfter {
 				line.Bottom(0)
@@ -146,8 +172,16 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 		switch {
 		case len(dropped.ItemIDs) > 0:
 			a.addItemsToFolder(dropped.ItemIDs, f.ID)
-		case dropped.FolderID != "" && dropped.FolderID != f.ID && dropped.ParentID == f.ParentID:
-			a.reorderFolder(dropped.FolderID, f.ID)
+		case dropped.FolderID != "" && dropped.FolderID != f.ID:
+			zone := folderDropInto
+			if _, y, ok := b.PointerPosition(); ok {
+				zone = folderDropZone(y)
+			}
+			if dropped.ParentID == f.ParentID && zone != folderDropInto {
+				a.reorderFolder(dropped.FolderID, f.ID, zone == folderDropAfter)
+			} else if a.folderCanNest(dropped.FolderID, f.ID) {
+				a.moveFolderToParent(dropped.FolderID, f.ID)
+			}
 		}
 	}
 	b.ContextMenu(func(m *ui.Menu) {
@@ -182,29 +216,36 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 	}
 }
 
-// folderDropAfter reports whether a drop of draggedID onto targetID should
-// place it after the target: moving down inserts after, moving up before.
-func (a *App) folderDropAfter(draggedID, targetID string) bool {
-	dragged, ok := findFolder(a.folders, draggedID)
-	if !ok {
-		return false
+// folderDropZone maps a pointer position in a folder row to the drop intent:
+// the edges reorder siblings, the middle nests the dragged folder.
+func folderDropZone(y float32) int {
+	switch {
+	case y < folderRowHeight*0.25:
+		return folderDropBefore
+	case y > folderRowHeight*0.75:
+		return folderDropAfter
+	default:
+		return folderDropInto
 	}
-	siblings := childFolders(a.folders, dragged.ParentID)
-	from, to := -1, -1
-	for i := range siblings {
-		if siblings[i].ID == draggedID {
-			from = i
-		}
-		if siblings[i].ID == targetID {
-			to = i
-		}
-	}
-	return from >= 0 && to >= 0 && from < to
 }
 
-// reorderFolder moves draggedID next to targetID among their shared siblings
-// and persists sort_order from zero in the new order.
-func (a *App) reorderFolder(draggedID, targetID string) {
+// folderCanNest reports whether parentID is outside folderID's subtree, so
+// moving the folder cannot create a cycle.
+func (a *App) folderCanNest(folderID, parentID string) bool {
+	if folderID == "" || folderID == parentID {
+		return false
+	}
+	for _, id := range folderGroupIDs(a.folders, folderID, true) {
+		if id == parentID {
+			return false
+		}
+	}
+	return true
+}
+
+// reorderFolder moves draggedID before or after targetID among their shared
+// siblings and persists sort_order from zero in the new order.
+func (a *App) reorderFolder(draggedID, targetID string, after bool) {
 	if a.svc == nil || draggedID == "" || targetID == "" || draggedID == targetID {
 		return
 	}
@@ -213,23 +254,17 @@ func (a *App) reorderFolder(draggedID, targetID string) {
 		return
 	}
 	siblings := childFolders(a.folders, dragged.ParentID)
-	from, to := -1, -1
-	for i := range siblings {
-		if siblings[i].ID == draggedID {
-			from = i
-		}
-		if siblings[i].ID == targetID {
-			to = i
-		}
-	}
-	if from < 0 || to < 0 {
-		return
-	}
 	next := make([]string, 0, len(siblings))
+	found := false
 	for _, sibling := range siblings {
-		if sibling.ID != draggedID {
-			next = append(next, sibling.ID)
+		if sibling.ID == draggedID {
+			found = true
+			continue
 		}
+		next = append(next, sibling.ID)
+	}
+	if !found {
+		return
 	}
 	at := -1
 	for i, id := range next {
@@ -241,7 +276,7 @@ func (a *App) reorderFolder(draggedID, targetID string) {
 	if at < 0 {
 		return
 	}
-	if from < to {
+	if after {
 		at++
 	}
 	next = append(next, "")
@@ -250,6 +285,22 @@ func (a *App) reorderFolder(draggedID, targetID string) {
 	if err := a.svc.SetFolderOrder(dragged.ParentID, next); err != nil {
 		a.showToast(err.Error())
 		return
+	}
+	a.refreshAll()
+}
+
+// moveFolderToParent reparents a folder and reveals its new parent. An empty
+// parentID moves it back to the root level.
+func (a *App) moveFolderToParent(folderID, parentID string) {
+	if a.svc == nil || folderID == "" || folderID == parentID || !a.folderCanNest(folderID, parentID) {
+		return
+	}
+	if err := a.svc.MoveFolder(folderID, parentID); err != nil {
+		a.showToast(err.Error())
+		return
+	}
+	if parentID != "" {
+		a.expanded[parentID] = true
 	}
 	a.refreshAll()
 }

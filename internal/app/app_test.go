@@ -523,7 +523,8 @@ func TestFolderContextMenuCreatesSubfolderUnderFolder(t *testing.T) {
 	}
 }
 
-func TestDraggingFolderReordersSiblings(t *testing.T) {
+func newFolderOrderApp(t *testing.T) (*App, *core.Service) {
+	t.Helper()
 	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
 	mgr := core.NewLibraryManager()
 	t.Cleanup(func() { _ = mgr.CloseLibrary() })
@@ -531,6 +532,32 @@ func TestDraggingFolderReordersSiblings(t *testing.T) {
 		t.Fatalf("create library: %v", err)
 	}
 	svc := core.NewService(mgr)
+	lib, err := svc.GetActiveLibrary()
+	if err != nil || lib == nil {
+		t.Fatalf("active library = %v, err=%v", lib, err)
+	}
+	a := New(svc)
+	a.library = lib
+	a.prefs.SidebarOpen = true
+	a.prefs.InspectorOpen = false
+	a.stats = core.WorkspaceStats{}
+	a.tags = nil
+	a.trashCount = 0
+	return a, svc
+}
+
+func loadFolderTree(t *testing.T, a *App, svc *core.Service) []core.Folder {
+	t.Helper()
+	folders, err := svc.GetFolders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.folders = folders
+	return folders
+}
+
+func TestDraggingFolderReordersSiblings(t *testing.T) {
+	a, svc := newFolderOrderApp(t)
 	first, err := svc.CreateFolder("AAA", "")
 	if err != nil {
 		t.Fatal(err)
@@ -543,23 +570,7 @@ func TestDraggingFolderReordersSiblings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lib, err := svc.GetActiveLibrary()
-	if err != nil || lib == nil {
-		t.Fatalf("active library = %v, err=%v", lib, err)
-	}
-	folders, err := svc.GetFolders()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	a := New(svc)
-	a.library = lib
-	a.folders = folders
-	a.prefs.SidebarOpen = true
-	a.prefs.InspectorOpen = false
-	a.stats = core.WorkspaceStats{}
-	a.tags = nil
-	a.trashCount = 0
+	loadFolderTree(t, a, svc)
 	tester := ui.NewTester(a.viewMain, 900, 700)
 	tester.Frame()
 
@@ -574,19 +585,109 @@ func TestDraggingFolderReordersSiblings(t *testing.T) {
 	tester.Press(src.X+src.W/2, src.Y+src.H/2)
 	for k := 1; k <= 4; k++ {
 		f := float32(k) / 4
-		tester.Move(src.X+src.W/2+(dst.X+src.W/2-(src.X+src.W/2))*f, src.Y+src.H/2+(dst.Y+src.H/2-(src.Y+src.H/2))*f)
+		tester.Move(src.X+src.W/2+(dst.X-src.X)*f, src.Y+src.H/2+(dst.Y+dst.H+3-(src.Y+src.H/2))*f)
 	}
-	tester.Release(dst.X+dst.W/2, dst.Y+dst.H/2)
+	// The bottom edge of the target row reorders instead of nesting.
+	tester.Release(dst.X+dst.W/2, dst.Y+dst.H+3)
 
-	folders, err = svc.GetFolders()
-	if err != nil {
-		t.Fatal(err)
-	}
+	folders := loadFolderTree(t, a, svc)
 	if len(folders) != 2 || folders[0].ID != second.ID || folders[1].ID != first.ID {
 		t.Fatalf("root order after drag = %v, want BBB,AAA", folderNameList(folders))
 	}
 	if len(folders[1].Children) != 1 || folders[1].Children[0].ID != child.ID {
 		t.Fatalf("child folder moved with the wrong parent: %v", folderNameList(folders[1].Children))
+	}
+}
+
+func TestDraggingFolderNestsUnderAnotherFolder(t *testing.T) {
+	a, svc := newFolderOrderApp(t)
+	parent, err := svc.CreateFolder("Parent", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := svc.CreateFolder("Child", parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moving, err := svc.CreateFolder("Moving", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadFolderTree(t, a, svc)
+	tester := ui.NewTester(a.viewMain, 900, 700)
+	tester.Frame()
+
+	src, ok := tester.Find("Moving")
+	if !ok {
+		t.Fatal("source folder row missing")
+	}
+	dst, ok := tester.Find("Parent")
+	if !ok {
+		t.Fatal("target folder row missing")
+	}
+	tester.Press(src.X+src.W/2, src.Y+src.H/2)
+	for k := 1; k <= 4; k++ {
+		f := float32(k) / 4
+		tester.Move(src.X+src.W/2+(dst.X-src.X)*f, src.Y+src.H/2+(dst.Y+dst.H/2-(src.Y+src.H/2))*f)
+	}
+	// The middle of a sibling row nests the dragged folder under it.
+	tester.Release(dst.X+dst.W/2, dst.Y+dst.H/2)
+
+	folders := loadFolderTree(t, a, svc)
+	if len(folders) != 1 || folders[0].ID != parent.ID {
+		t.Fatalf("roots after nesting = %v, want only Parent", folderNameList(folders))
+	}
+	if len(folders[0].Children) != 2 {
+		t.Fatalf("parent children = %v, want Child,Moving", folderNameList(folders[0].Children))
+	}
+	if folders[0].Children[0].ID != child.ID || folders[0].Children[1].ID != moving.ID {
+		t.Fatalf("nested folder order = %v", folderNameList(folders[0].Children))
+	}
+	if !a.expanded[parent.ID] {
+		t.Fatal("new parent was not expanded")
+	}
+}
+
+func TestDraggingNestedFolderToFoldersHeaderReturnsToRoot(t *testing.T) {
+	a, svc := newFolderOrderApp(t)
+	parent, err := svc.CreateFolder("Parent", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := svc.CreateFolder("Child", parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moving, err := svc.CreateFolder("Moving", parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadFolderTree(t, a, svc)
+	a.expanded = map[string]bool{parent.ID: true}
+	tester := ui.NewTester(a.viewMain, 900, 700)
+	tester.Frame()
+
+	src, ok := tester.Find("Moving")
+	if !ok {
+		t.Fatal("nested folder row missing")
+	}
+	header, ok := tester.Find(strings.ToUpper(a.t("sidebar.folders")))
+	if !ok {
+		t.Fatal("folders header missing")
+	}
+	tester.Press(src.X+src.W/2, src.Y+src.H/2)
+	for k := 1; k <= 4; k++ {
+		f := float32(k) / 4
+		tester.Move(src.X+src.W/2+(header.X+header.W/2-(src.X+src.W/2))*f, src.Y+src.H/2+(header.Y+header.H/2-(src.Y+src.H/2))*f)
+	}
+	tester.Release(header.X+header.W/2, header.Y+header.H/2)
+
+	folders := loadFolderTree(t, a, svc)
+	if len(folders) != 2 || folders[0].ID != parent.ID || folders[1].ID != moving.ID {
+		t.Fatalf("roots after returning to root = %v, want Parent,Moving", folderNameList(folders))
+	}
+	if len(folders[0].Children) != 1 || folders[0].Children[0].ID != child.ID {
+		t.Fatalf("old parent children = %v, want only Child", folderNameList(folders[0].Children))
 	}
 }
 

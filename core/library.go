@@ -3042,6 +3042,130 @@ func (m *LibraryManager) SetFolderOrder(parentID string, orderedIDs []string) er
 	return tx.Commit()
 }
 
+// MoveFolder moves folderID under parentID, appending it to that level.
+// Moving a folder into itself or one of its descendants is rejected.
+func (m *LibraryManager) MoveFolder(folderID string, parentID string) error {
+	m.mu.RLock()
+	db := m.db
+	m.mu.RUnlock()
+
+	if db == nil {
+		return errors.New("no active library")
+	}
+	folderID = strings.TrimSpace(folderID)
+	parentID = strings.TrimSpace(parentID)
+	if folderID == "" {
+		return errors.New("folder id is required")
+	}
+	if folderID == parentID {
+		return errors.New("folder cannot be moved under itself")
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var oldParent string
+	if err := tx.QueryRow(
+		"SELECT COALESCE(parent_id, '') FROM folders WHERE id = ?",
+		folderID,
+	).Scan(&oldParent); err != nil {
+		if err == sql.ErrNoRows {
+			return errors.New("folder not found")
+		}
+		return err
+	}
+	if oldParent == parentID {
+		return nil
+	}
+
+	if parentID != "" {
+		var exists int
+		if err := tx.QueryRow("SELECT 1 FROM folders WHERE id = ?", parentID).Scan(&exists); err != nil {
+			if err == sql.ErrNoRows {
+				return errors.New("target folder not found")
+			}
+			return err
+		}
+		var descendant int
+		err := tx.QueryRow(`
+			WITH RECURSIVE descendants(id) AS (
+				SELECT id FROM folders WHERE COALESCE(parent_id, '') = ?
+				UNION
+				SELECT f.id FROM folders f JOIN descendants d ON f.parent_id = d.id
+			)
+			SELECT 1 FROM descendants WHERE id = ? LIMIT 1`,
+			folderID, parentID,
+		).Scan(&descendant)
+		if err == nil {
+			return errors.New("cannot move a folder into its own descendant")
+		}
+		if err != sql.ErrNoRows {
+			return err
+		}
+	}
+
+	var sortOrder int
+	if err := tx.QueryRow(
+		"SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE COALESCE(parent_id, '') = ? AND id <> ?",
+		parentID, folderID,
+	).Scan(&sortOrder); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE folders SET parent_id = ?, sort_order = ? WHERE id = ?", parentID, sortOrder, folderID); err != nil {
+		return err
+	}
+	if err := normalizeFolderOrder(tx, oldParent); err != nil {
+		return err
+	}
+	if err := normalizeFolderOrder(tx, parentID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// normalizeFolderOrder rewrites one level's sort_order as a dense 0..n-1
+// sequence while preserving the visible order.
+func normalizeFolderOrder(tx *sql.Tx, parentID string) error {
+	rows, err := tx.Query(
+		"SELECT id FROM folders WHERE COALESCE(parent_id, '') = ? ORDER BY sort_order ASC, created_at ASC",
+		parentID,
+	)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return nil
+	}
+	stmt, err := tx.Prepare("UPDATE folders SET sort_order = ? WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for i, id := range ids {
+		if _, err := stmt.Exec(i, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RenameFolder updates a folder's display name.
 func (m *LibraryManager) RenameFolder(id string, name string) error {
 	m.mu.RLock()

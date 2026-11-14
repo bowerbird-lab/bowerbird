@@ -396,6 +396,14 @@ func (s *Service) SetFolderOrder(parentID string, orderedIDs []string) error {
 	return s.mgr.SetFolderOrder(parentID, orderedIDs)
 }
 
+// MoveFolder reparents a folder, appending it under the target folder.
+func (s *Service) MoveFolder(folderID string, parentID string) error {
+	if s.mgr == nil {
+		return ErrCoreNotInitialized
+	}
+	return s.mgr.MoveFolder(folderID, parentID)
+}
+
 func (s *Service) RenameFolder(id string, name string) error {
 	if s.mgr == nil {
 		return ErrCoreNotInitialized
