@@ -3,24 +3,39 @@ package app
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"bowerbird/core"
 
 	"github.com/egoist/mygo/ui"
 )
 
-// refreshLogs loads the buffered diagnostics once when the window opens.
+// refreshLogs reads the authoritative bounded buffer when the window opens or
+// a batch of log events is ready. Queued events never retain their payloads.
 func (a *App) refreshLogs() {
 	if a.svc == nil {
 		return
 	}
 	a.logs = a.svc.GetLogs()
+	a.invalidateLogFilter()
+}
+
+func (a *App) invalidateLogFilter() {
+	clear(a.logsFiltered)
+	a.logsFiltered = a.logsFiltered[:0]
+	a.logsFilterValid = false
 }
 
 func (a *App) filteredLogs() []core.LogEntry {
 	q := strings.ToLower(strings.TrimSpace(a.logsFilter))
-	out := make([]core.LogEntry, 0, len(a.logs))
+	if q == "" && (a.logsLevel == "" || a.logsLevel == "all") {
+		a.invalidateLogFilter()
+		return a.logs
+	}
+	if a.logsFilterValid && q == a.logsFilterQuery && a.logsLevel == a.logsFilterLevel {
+		return a.logsFiltered
+	}
+	a.invalidateLogFilter()
+	out := a.logsFiltered
 	for _, e := range a.logs {
 		if a.logsLevel != "" && a.logsLevel != "all" && e.Level != a.logsLevel {
 			continue
@@ -33,6 +48,10 @@ func (a *App) filteredLogs() []core.LogEntry {
 		}
 		out = append(out, e)
 	}
+	a.logsFiltered = out
+	a.logsFilterQuery = q
+	a.logsFilterLevel = a.logsLevel
+	a.logsFilterValid = true
 	return out
 }
 
@@ -69,7 +88,7 @@ func (a *App) viewLogs(c *ui.Context) {
 			if ui.Button(c, a.t("logs.clear")).Clicked() {
 				go func() {
 					_ = a.svc.ClearLogs()
-					a.postLogs(func() { a.logs = nil })
+					a.logRefresh.request(a.refreshLogs)
 				}()
 			}
 			if ui.Button(c, a.t("logs.revealFile")).Clicked() {
@@ -126,5 +145,3 @@ func (a *App) logRow(c *ui.Context, e core.LogEntry) {
 	})
 	ui.Box(c).FillWidth().Height(1).Background(p.hairline)
 }
-
-var _ = time.Second

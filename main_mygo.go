@@ -89,6 +89,11 @@ func (h *appHost) Emit(name string, payload any) {
 	if h.views != nil {
 		h.views.HandleEvent(name, payload)
 	}
+	// Diagnostics belong to the native log viewer. Broadcasting every entry
+	// would also serialize it and enqueue it for unrelated embedded web pages.
+	if name == core.LogEntryEvent || name == core.LogsClearedEvent {
+		return
+	}
 	if name == core.LanguageChangedEvent || name == core.ShortcutsChangedEvent {
 		h.rebuildTrayMenu()
 		if runtime.GOOS == "darwin" {

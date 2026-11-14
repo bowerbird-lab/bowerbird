@@ -304,6 +304,11 @@ type App struct {
 	logsAutoScroll  bool
 	logs            []core.LogEntry
 	logsList        ui.ListState
+	logRefresh      logRefreshState
+	logsFiltered    []core.LogEntry
+	logsFilterQuery string
+	logsFilterLevel string
+	logsFilterValid bool
 
 	// Plugins.
 	plugins        []installedPluginRow
@@ -495,7 +500,21 @@ func (a *App) SetSettingsWindow(w *mygo.Window) {
 	a.loadThemes()
 	a.refreshSettings()
 }
-func (a *App) SetLogsWindow(w *mygo.Window)  { a.logsWin = w; a.syncLanguage(); a.refreshLogs() }
+func (a *App) SetLogsWindow(w *mygo.Window) {
+	a.logsWin = w
+	a.logRefresh.setPost(w.Update)
+	w.OnClosed(func() {
+		if a.logsWin == w {
+			a.logRefresh.setPost(nil)
+			a.logsWin = nil
+			a.logs = nil
+			a.invalidateLogFilter()
+			a.logsFiltered = nil
+		}
+	})
+	a.syncLanguage()
+	a.refreshLogs()
+}
 func (a *App) SetSetupWindow(w *mygo.Window) { a.setupWin = w; a.syncLanguage() }
 
 // content wraps a view so a panic is logged and the window keeps painting
@@ -550,14 +569,6 @@ func (a *App) postSettings(fn func()) {
 	a.post(fn)
 }
 
-func (a *App) postLogs(fn func()) {
-	if a.logsWin != nil {
-		a.logsWin.Update(fn)
-	} else {
-		a.post(fn)
-	}
-}
-
 // Notify is called by the host for window OnShow. It starts a refresh when the
 // window was hidden long enough to release its thumbnails.
 func (a *App) Notify(show bool) {
@@ -596,12 +607,8 @@ func (a *App) HandleEvent(name string, payload any) {
 		a.post(func() { a.refreshAll() })
 	case core.NetworkSettingsChangedEvent:
 		a.syncPluginHTTPClient()
-	case core.LogEntryEvent:
-		if entry, ok := payload.(core.LogEntry); ok {
-			a.postLogs(func() { a.appendLog(entry) })
-		}
-	case core.LogsClearedEvent:
-		a.postLogs(func() { a.logs = nil })
+	case core.LogEntryEvent, core.LogsClearedEvent:
+		a.logRefresh.request(a.refreshLogs)
 	case "import-completed":
 		// Native drops and other import entry points return before their
 		// background work finishes, so refresh once the pipeline reports the
@@ -690,10 +697,6 @@ func (a *App) refreshAll() {
 		trash, _ := a.svc.GetTrashCount()
 		recent := a.svc.GetRecentLibraryRefs()
 		plugins, _ := a.svc.ListInstalledPlugins()
-		var logs []core.LogEntry
-		if a.svc != nil {
-			logs = a.svc.GetLogs()
-		}
 		folderPreviews := a.fetchFolderPreviews(folderLookup, previewNav, previewFolder, previewSort)
 		items, total, totalSize, active, err := a.fetchWorkspace(request)
 		a.post(func() {
@@ -724,9 +727,6 @@ func (a *App) refreshAll() {
 				a.activeItem = active
 			}
 			a.plugins = a.pluginRows(plugins)
-			if len(logs) > 0 {
-				a.logs = logs
-			}
 			a.rebuildRows()
 			a.recordHistory()
 			if err != nil {
@@ -1222,18 +1222,8 @@ func clampPanelWidth(w, lo, hi, def float32) float32 {
 	return minF(maxF(w, lo), hi)
 }
 
-// LogLines returns the filtered log rows, newest last.
+// LogLines returns the current log snapshot, newest last.
 func (a *App) LogLines() []core.LogEntry { return a.logs }
-
-func (a *App) appendLog(entry core.LogEntry) {
-	a.logs = append(a.logs, entry)
-	if len(a.logs) > 2000 {
-		a.logs = a.logs[len(a.logs)-2000:]
-	}
-	if a.logsAutoScroll && a.logsWin != nil {
-		a.logsWin.Invalidate()
-	}
-}
 
 // SetDropFolder records the folder a native drop should land in.
 func (a *App) SetDropFolder(id string) { a.dropFolderID = id }
