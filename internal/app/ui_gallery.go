@@ -1329,8 +1329,8 @@ func (a *App) itemContextMenu(m *ui.Menu, item core.Item) {
 		}
 	}
 	m.Separator()
-	if m.Item(a.t("contextMenu.moveToTrash")).Chosen() {
-		a.trashSelected()
+	if m.Item(a.deleteActionLabel()).Chosen() {
+		a.deleteSelection()
 	}
 }
 

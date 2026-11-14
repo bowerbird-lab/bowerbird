@@ -432,6 +432,13 @@ func (s *Service) RemoveItemFromFolder(itemID string, folderID string) error {
 	return s.mgr.RemoveItemFromFolder(itemID, folderID)
 }
 
+func (s *Service) BatchRemoveItemsFromFolders(itemIDs []string, folderIDs []string) error {
+	if s.mgr == nil {
+		return ErrCoreNotInitialized
+	}
+	return s.mgr.BatchRemoveItemsFromFolders(itemIDs, folderIDs)
+}
+
 func (s *Service) SetItemFolders(itemID string, folderIDs []string) error {
 	if s.mgr == nil {
 		return ErrCoreNotInitialized

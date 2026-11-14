@@ -211,6 +211,12 @@ type App struct {
 	dialog      dialogKind
 	dialogValue string
 	dialogError string
+	// pendingDelete is the selection the delete dialog is confirming. It is
+	// nil for every other dialog.
+	pendingDelete *pendingDelete
+	// pendingFolderDelete is the last-folder warning shown before a folder
+	// delete would move items to the trash.
+	pendingFolderDelete *pendingFolderDelete
 	// newFolderParentID is the folder a new folder dialog creates under; empty
 	// means the library root. It is separate from folderID so opening the
 	// dialog from a folder's context menu does not change the current view.
@@ -339,6 +345,8 @@ const (
 	dialogPluginInstall
 	dialogPrompt
 	dialogTag
+	dialogDeleteItems
+	dialogDeleteLastFolder
 )
 
 type settingsGroup struct {

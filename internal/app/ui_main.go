@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"time"
 
 	"bowerbird/core"
@@ -192,6 +193,8 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 			a.closePreview()
 		} else if a.dialog != dialogNone {
 			a.dialog = dialogNone
+			a.pendingDelete = nil
+			a.pendingFolderDelete = nil
 		} else if len(a.selected) > 0 {
 			a.clearSelection()
 		}
@@ -378,6 +381,10 @@ func (a *App) viewDialog(c *ui.Context) {
 		show(a.t("sidebar.tags"), func() {
 			ui.TextInput(c, &a.dialogValue).Placeholder(a.t("tags.searchOrCreate")).AutoFocus()
 		}, a.t("common.save"), a.addTagToActive)
+	case dialogDeleteItems:
+		a.viewDeleteDialog(c, &open)
+	case dialogDeleteLastFolder:
+		a.viewLastFolderDeleteDialog(c, &open)
 	}
 	if !open {
 		if a.dialog == dialogNewFolder {
@@ -385,23 +392,97 @@ func (a *App) viewDialog(c *ui.Context) {
 		}
 		a.dialog = dialogNone
 		a.dialogError = ""
+		a.pendingDelete = nil
+		a.pendingFolderDelete = nil
 	}
 }
 
+// viewDeleteDialog shows the check for a smart-view delete: where the
+// selection lives, and the two ways out of those folders (detach or trash).
+func (a *App) viewDeleteDialog(c *ui.Context, open *bool) {
+	req := a.pendingDelete
+	if req == nil {
+		a.dialog = dialogNone
+		return
+	}
+	p := a.palette(c)
+	ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
+		backdrop.Background(p.overlay)
+		a.dialogPanelActions(c, panel, a.t("workspace.deleteTitle"), func() {
+			ui.Text(c, a.tf("workspace.deleteConfirmMessage", map[string]any{"count": len(req.ids)})).
+				FontSize(12).TextColor(p.muted).Wrap()
+			if len(req.folderNames) > 0 {
+				ui.Text(c, a.t("workspace.deleteConfirmFoldersHint")).
+					FontSize(11.5).TextColor(p.muted).Margin(10, 0, 0, 0)
+				ui.Text(c, strings.Join(req.folderNames, ", ")).
+					FontSize(12).TextColor(p.text).Wrap()
+			}
+		}, func() {
+			if ui.Button(c, a.t("common.cancel")).Clicked() {
+				a.dialog = dialogNone
+				a.pendingDelete = nil
+			}
+			if len(req.folderIDs) > 0 {
+				if ui.Button(c, a.t("workspace.removeFromAllFolders")).Clicked() {
+					a.removePendingDeleteFromFolders()
+				}
+			}
+			if ui.PrimaryButton(c, a.t("contextMenu.moveToTrash")).Clicked() {
+				a.confirmPendingDeleteToTrash()
+			}
+		})
+	})
+}
+
+// viewLastFolderDeleteDialog warns that the current folder is the last place
+// holding these items: confirming deletes the folder links and moves those
+// items to the trash.
+func (a *App) viewLastFolderDeleteDialog(c *ui.Context, open *bool) {
+	req := a.pendingFolderDelete
+	if req == nil {
+		a.dialog = dialogNone
+		return
+	}
+	p := a.palette(c)
+	ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
+		backdrop.Background(p.overlay)
+		a.dialogPanelActions(c, panel, a.t("workspace.deleteLastFolderTitle"), func() {
+			ui.Text(c, a.t("workspace.deleteLastFolderMessage")).
+				FontSize(12).TextColor(p.muted).Wrap()
+			if len(req.plan.unlinkIDs) > 0 {
+				ui.Text(c, a.t("workspace.deleteLastFolderOtherItems")).
+					FontSize(11.5).TextColor(p.muted).Margin(10, 0, 0, 0).Wrap()
+			}
+		}, func() {
+			if ui.Button(c, a.t("common.cancel")).Clicked() {
+				a.dialog = dialogNone
+				a.pendingFolderDelete = nil
+			}
+			if ui.PrimaryButton(c, a.t("common.delete")).Clicked() {
+				a.confirmPendingFolderDelete()
+			}
+		})
+	})
+}
+
 func (a *App) dialogPanel(c *ui.Context, panel ui.Element, title string, body func(), confirmLabel string, confirm func()) {
+	a.dialogPanelActions(c, panel, title, body, func() {
+		if ui.Button(c, a.t("common.cancel")).Clicked() {
+			a.dialog = dialogNone
+		}
+		if ui.PrimaryButton(c, confirmLabel).Clicked() {
+			confirm()
+		}
+	})
+}
+
+func (a *App) dialogPanelActions(c *ui.Context, panel ui.Element, title string, body func(), actions func()) {
 	p := a.palette(c)
 	panel.Width(420).Padding(22).Radius(14).Background(p.surface).Border(1, p.hairline).Shadow(0, 26, 64, -18, p.cardShade).Children(func() {
 		ui.Column(c).FillWidth().Gap(14).Children(func() {
 			ui.Text(c, title).FontSize(17).FontWeight(650).TextColor(p.text)
 			body()
-			ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Children(func() {
-				if ui.Button(c, a.t("common.cancel")).Clicked() {
-					a.dialog = dialogNone
-				}
-				if ui.PrimaryButton(c, confirmLabel).Clicked() {
-					confirm()
-				}
-			})
+			ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Children(actions)
 		})
 	})
 }

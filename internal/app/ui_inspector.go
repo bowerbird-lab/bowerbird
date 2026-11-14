@@ -393,8 +393,8 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 			if ui.Button(c, a.t("contextMenu.openWithDefaultApp")).Clicked() {
 				_ = a.svc.OpenWithDefaultApp(item.ID)
 			}
-			if ui.Button(c, a.t("contextMenu.moveToTrash")).Clicked() {
-				a.trashSelected()
+			if ui.Button(c, a.deleteActionLabel()).Clicked() {
+				a.deleteSelection()
 			}
 		})
 	})
@@ -622,8 +622,8 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 		}
 		a.inspectorDivider(c)
 		ui.Row(c).Gap(8).Children(func() {
-			if ui.Button(c, a.t("contextMenu.moveToTrash")).Clicked() {
-				a.trashSelected()
+			if ui.Button(c, a.deleteActionLabel()).Clicked() {
+				a.deleteSelection()
 			}
 			if ui.Button(c, a.t("common.deselect")).Clicked() {
 				a.clearSelection()

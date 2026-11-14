@@ -31,7 +31,7 @@ Bowerbird is a cross-platform desktop app built entirely with **mygo's GPU-nativ
 
 - **Automatic palette extraction.** On import — and in the background for existing libraries — Bowerbird extracts the dominant color, a 6-color perceptual palette, the color model, alpha-channel presence, aspect ratio, orientation (`landscape` / `portrait` / `square`), resolution in megapixels, and JPEG EXIF camera/capture metadata.
 - **Multi-dimensional filtering.** One filter bar with dropdowns for **File Type**, **Color**, **Tags**, **Virtual Folders** and **Orientation** — and color filtering is done with perceptual ΔE matching, so "roughly this blue" actually returns roughly that blue, against both preset swatches and colors already present in your library.
-- **Virtual folders and tags.** Organize the same asset several ways at once; deleting goes through a trash flow rather than straight off the disk.
+- **Virtual folders and tags.** Organize the same asset several ways at once; removing it from a folder only drops that link, and the asset reaches the trash when its last folder is removed after a warning. Deleting from All, Untagged or Uncategorized first lists the folders it lives in and offers to detach it or move it to the trash.
 
 ### Preview everything without leaving the library
 

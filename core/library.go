@@ -3298,6 +3298,70 @@ func (m *LibraryManager) RemoveItemFromFolder(itemID string, folderID string) er
 	return err
 }
 
+// BatchRemoveItemsFromFolders unlinks many items from many folders in one
+// transaction so deleting a large selection from a folder does not refresh the
+// library once per item. Folder ids that do not apply to an item are ignored.
+func (m *LibraryManager) BatchRemoveItemsFromFolders(itemIDs []string, folderIDs []string) error {
+	if len(itemIDs) == 0 || len(folderIDs) == 0 {
+		return nil
+	}
+
+	m.mu.RLock()
+	db := m.db
+	m.mu.RUnlock()
+	if db == nil {
+		return errors.New("no active library")
+	}
+
+	folderSet := make(map[string]bool, len(folderIDs))
+	for _, folderID := range folderIDs {
+		if folderID != "" {
+			folderSet[folderID] = true
+		}
+	}
+	if len(folderSet) == 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("DELETE FROM item_folders WHERE item_id = ? AND folder_id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, itemID := range itemIDs {
+		for folderID := range folderSet {
+			if _, err := stmt.Exec(itemID, folderID); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	for _, itemID := range itemIDs {
+		m.mutateCachedItem(itemID, func(it *Item) {
+			next := make([]string, 0, len(it.Folders))
+			for _, folderID := range it.Folders {
+				if !folderSet[folderID] {
+					next = append(next, folderID)
+				}
+			}
+			it.Folders = next
+		})
+	}
+	m.notifyItemsUpdated()
+	return nil
+}
+
 // SetItemFolders sets the complete list of folders for an item.
 func (m *LibraryManager) SetItemFolders(itemID string, folderIDs []string) error {
 	m.mu.RLock()
