@@ -5,7 +5,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -15,6 +14,25 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
+
+// The preview's zoom range. The header's drag bar maps it logarithmically so
+// fine adjustments around 100% stay easy.
+const (
+	previewMinZoom float32 = 0.2
+	previewMaxZoom float32 = 8
+)
+
+// previewZoomTrack places zoom on the drag bar's 0–100 range.
+func previewZoomTrack(zoom float32) float64 {
+	zoom = minF(maxF(zoom, previewMinZoom), previewMaxZoom)
+	return math.Log(float64(zoom/previewMinZoom)) / math.Log(float64(previewMaxZoom/previewMinZoom)) * 100
+}
+
+// previewZoomFromTrack turns a drag bar position back into a zoom scale.
+func previewZoomFromTrack(track float64) float32 {
+	track = math.Max(0, math.Min(100, track))
+	return float32(float64(previewMinZoom) * math.Pow(float64(previewMaxZoom/previewMinZoom), track/100))
+}
 
 // viewPreview is the full-content Quick Look layer. Images render as GPU
 // textures with pinch/scroll zoom and pointer panning; Markdown uses the native
@@ -33,7 +51,9 @@ func (a *App) viewPreview(c *ui.Context) {
 	a.activeItem = &item
 	ui.Column(c).Fill().Background(ui.RGBA(0, 0, 0, 0.0)).Children(func() {
 		a.viewPreviewToolbar(c)
-		ui.Box(c).FillWidth().Height(1).Background(p.hairline)
+		if a.previewMode != "full" {
+			ui.Box(c).FillWidth().Height(1).Background(p.hairline)
+		}
 		a.viewPreviewBody(c, item)
 	})
 }
@@ -45,32 +65,42 @@ func (a *App) viewPreviewToolbar(c *ui.Context) {
 	}
 	item := a.items[a.previewIndex]
 
-	bar := c.TitleBar()
-	leftPad := float32(14)
-	if !a.prefs.SidebarOpen || a.previewMode == "full" {
-		leftPad += bar.Left
-	}
-	rightPad := float32(14)
-	if !a.inspectorVisible() || a.previewMode == "full" {
-		r := bar.Right
-		if r == 0 && runtime.GOOS == "windows" {
-			r = 138
-		}
-		if r > 0 {
-			rightPad += r
-		}
+	full := a.previewMode == "full"
+	closeButton := func() {
+		a.iconButton(c, "preview-close", iconClose, false, a.t("common.close"), a.closePreview)
 	}
 
-	ui.Row(c).FillWidth().Height(headerHeight).Padding(0, rightPad, 0, leftPad).Gap(8).AlignItems(ui.Center).DragWindow().Children(func() {
-		a.iconButton(c, "preview-close", iconClose, false, a.t("common.close"), a.closePreview)
-		ui.Text(c, item.Name).FontSize(13).FontWeight(600).TextColor(p.text).Grow(1).Shrink(1).MinWidth(0).SingleLine()
-		ui.Textf(c, "%d / %d", a.previewIndex+1, len(a.items)).FontSize(11).TextColor(p.faint).FontFeatures("tnum")
+	// Both preview modes build the same header component. The inline preview
+	// keeps the workspace chrome; the full-window overlay hides the sidebar
+	// toggle, the title, the navigation and the zoom controls, leaving only the
+	// close button at the far right.
+	a.commonHeader(c, commonHeaderOptions{
+		spansWindow:       full,
+		pad:               gallerySidePadding,
+		height:            headerHeight,
+		hideSidebarToggle: full,
+	}, func() {
+		if full {
+			ui.Box(c).Grow(1)
+			closeButton()
+			return
+		}
+
+		// The step buttons stay at the left end of the row, as the history
+		// buttons do in the workspace header.
 		a.iconButton(c, "preview-prev", iconBack, false, a.t("preview.previous"), func() { a.movePreview(-1) })
 		a.iconButton(c, "preview-next", iconForward, false, a.t("preview.next"), func() { a.movePreview(1) })
+		ui.Text(c, item.Name).FontSize(13).FontWeight(600).TextColor(p.text).Grow(1).Shrink(1).MinWidth(0).SingleLine()
+		ui.Textf(c, "%d / %d", a.previewIndex+1, len(a.items)).FontSize(11).TextColor(p.faint).FontFeatures("tnum")
 		ui.Box(c).Width(1).Height(18).Background(p.hairline)
-		a.iconButton(c, "preview-zoom-out", iconZoomOut, false, a.t("header.zoomOut"), func() { a.previewZoom = maxF(a.previewZoom/1.2, 0.2) })
-		ui.Textf(c, "%d%%", int(a.previewZoom*100)).FontSize(10.5).TextColor(p.faint).FontFeatures("tnum").Width(40).TextAlign(ui.Center)
-		a.iconButton(c, "preview-zoom-in", iconZoomIn, false, a.t("header.zoomIn"), func() { a.previewZoom = minF(a.previewZoom*1.2, 8) })
+		// Zoom uses the same kind of drag bar as the gallery, mapped on a log
+		// scale so the usual 50–200% range gets most of the track.
+		zoomTrack := previewZoomTrack(a.previewZoom)
+		ui.Slider(c.Key("preview-zoom-slider"), &zoomTrack, 0, 100).Width(110)
+		if z := previewZoomFromTrack(zoomTrack); math.Abs(float64(z-a.previewZoom)) > 0.001 {
+			a.previewZoom = z
+		}
+		ui.Textf(c, "%d%%", int(math.Round(float64(a.previewZoom*100)))).FontSize(10.5).TextColor(p.faint).FontFeatures("tnum").Width(40).TextAlign(ui.Center)
 		a.iconButton(c, "preview-fit", iconGrid, false, a.t("preview.fit"), func() {
 			a.previewZoom = 1
 			a.previewPan = ui.Point{}
@@ -78,7 +108,11 @@ func (a *App) viewPreviewToolbar(c *ui.Context) {
 		a.iconButton(c, "preview-open", iconExternal, false, a.t("contextMenu.openWithDefaultApp"), func() {
 			_ = a.svc.OpenWithDefaultApp(item.ID)
 		})
-	})
+		ui.Box(c).Width(1).Height(18).Background(p.hairline)
+		// Closing is the last action on the row, so it never moves when the
+		// zoom and navigation controls change width.
+		closeButton()
+	}, nil)
 }
 
 func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
@@ -210,12 +244,12 @@ func (a *App) previewImage(c *ui.Context, item core.Item) {
 				return true
 			}
 		case ui.InputZoom:
-			a.previewZoom = minF(maxF(a.previewZoom*ev.Scale, 0.2), 8)
+			a.previewZoom = minF(maxF(a.previewZoom*ev.Scale, previewMinZoom), previewMaxZoom)
 			return true
 		case ui.InputScroll:
 			if ev.Mods&ui.Cmd != 0 || ev.Mods&ui.Ctrl != 0 {
 				factor := float32(1) - ev.DY*0.01
-				a.previewZoom = minF(maxF(a.previewZoom*factor, 0.2), 8)
+				a.previewZoom = minF(maxF(a.previewZoom*factor, previewMinZoom), previewMaxZoom)
 			} else {
 				a.previewPan.X -= ev.DX
 				a.previewPan.Y -= ev.DY
@@ -261,7 +295,6 @@ func (a *App) previewImage(c *ui.Context, item core.Item) {
 			ui.Image(c, bmp).Fill().Fit(ui.Contain).Scale(a.previewZoom, a.previewZoom).Translate(a.previewPan.X, a.previewPan.Y)
 		})
 	})
-	ui.Text(c, fmt.Sprintf("%d × %d · %s · %s", item.Width, item.Height, strings.ToUpper(item.Extension), formatBytes(item.Size))).FontSize(10.5).TextColor(p.faint).TextAlign(ui.Center).PaddingY(6)
 }
 
 func (a *App) previewAudio(c *ui.Context, item core.Item) {
@@ -349,7 +382,6 @@ func (a *App) previewVideo(c *ui.Context, item core.Item) {
 			} else {
 				ui.Text(c, a.t("preview.videoLoading")).FontSize(11.5).TextColor(p.muted)
 			}
-			ui.Textf(c, "%d × %d · %s", item.Width, item.Height, formatBytes(item.Size)).FontSize(11).TextColor(p.muted)
 			if ui.PrimaryButton(c.Key("video-open"), a.t("contextMenu.openWithDefaultApp")).Clicked() {
 				_ = a.svc.OpenWithDefaultApp(item.ID)
 			}
@@ -425,7 +457,6 @@ func (a *App) previewDocument(c *ui.Context, item core.Item) {
 			ui.Icon(c, categoryIcon(item)).Size(44, 44).TextColor(p.muted)
 		})
 		ui.Text(c, item.Name).FontSize(16).FontWeight(650).TextColor(p.text)
-		ui.Text(c, strings.ToUpper(item.Extension)+" · "+formatBytes(item.Size)).FontSize(11).TextColor(p.muted)
 		ui.Row(c).Gap(8).Children(func() {
 			if ui.PrimaryButton(c.Key("doc-open"), a.t("contextMenu.openWithDefaultApp")).Clicked() {
 				_ = a.svc.OpenWithDefaultApp(item.ID)

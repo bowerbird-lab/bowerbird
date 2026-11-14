@@ -25,12 +25,11 @@ func (a *App) viewSidebar(c *ui.Context) {
 	a.applySidebarSurface(c, sidebar)
 	sidebar.Children(func() {
 		// The sidebar header matches the main header's first row, so the
-		// toggle and the main toolbar controls share one vertical line. The
-		// toggle stays just right of the traffic lights, inside the safe area.
+		// library switcher starts on the same line as the workspace controls.
+		// The sidebar toggle lives in the workspace header for every view, so
+		// this strip only drags the window and clears the traffic lights.
 		bar := c.TitleBar()
-		ui.Row(c).Height(headerHeight).FillWidth().Padding(0, 8, 0, bar.Left+gallerySidePadding).AlignItems(ui.Center).DragWindow().Children(func() {
-			a.iconButton(c, "sidebar-toggle", iconSidebar, true, a.t("common.toggleSidebar"), a.toggleSidebar)
-		})
+		ui.Row(c).Height(headerHeight).FillWidth().Padding(0, 8, 0, bar.Left+gallerySidePadding).DragWindow()
 		a.sidebarLibrarySwitcher(c)
 		ui.Scroll(c).Grow(1).Shrink(1).Padding(4, 10, 12, 10).Children(func() {
 			a.navRow(c, NavAll, iconAll, a.t("sidebar.allItems"), a.stats.Total)

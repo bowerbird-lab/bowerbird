@@ -10,6 +10,81 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// commonHeaderOptions tunes the shared header panel. spansWindow is set by
+// the full-window preview, whose header covers the sidebar and the inspector
+// and therefore has to clear the window controls on both sides. pad is the
+// gutter the row keeps inside those insets. height is the panel's full height:
+// one row in the previews, the workspace toolbar's two rows in the gallery.
+// floating pins the panel over the content from the parent's top edge, and
+// contentUnder asks for the blur material once content scrolls beneath it.
+type commonHeaderOptions struct {
+	spansWindow  bool
+	pad          float32
+	height       float32
+	floating     bool
+	contentUnder bool
+	// hideSidebarToggle leaves the row to its body alone. The full-window
+	// preview uses it: that header only offers a close button.
+	hideSidebarToggle bool
+}
+
+// commonHeader is the header panel every workspace view shares. It owns the
+// surface — the workspace fill at rest, or the same blur material and tint as
+// the settings header once content scrolls under — the window-drag strip and
+// the sidebar toggle. The toggle stays visible in all views, so the panel can
+// be collapsed or restored without leaving the workspace, the inline preview
+// or the full-window preview. body fills the first row; extra, when set, adds
+// the rows below it before the material's divider.
+func (a *App) commonHeader(c *ui.Context, opts commonHeaderOptions, body, extra func()) {
+	height := opts.height
+	if height <= 0 {
+		height = headerHeight
+	}
+	header := ui.Column(c).FillWidth().Height(height)
+	if opts.floating {
+		header.Absolute().Top(0).Left(0).Right(0)
+	}
+	// The surface belongs to the panel, so it paints below the controls
+	// rather than over them.
+	blurActive := a.applyHeaderSurface(c, header, opts.contentUnder)
+	header.Children(func() {
+		leftPad, rightPad := a.headerInsets(c, opts.spansWindow, opts.pad)
+		ui.Row(c).FillWidth().Height(headerHeight).Padding(0, rightPad, 0, leftPad).Gap(8).AlignItems(ui.Center).DragWindow().Children(func() {
+			if !opts.hideSidebarToggle {
+				a.iconButton(c, "sidebar-toggle", iconSidebar, false, a.t("common.toggleSidebar"), a.toggleSidebar)
+			}
+			body()
+		})
+		if extra != nil {
+			extra()
+		}
+		if blurActive {
+			ui.Box(c).Absolute().Bottom(0).FillWidth().Height(1).Background(a.palette(c).hairline)
+		}
+	})
+}
+
+// headerInsets returns the row's horizontal padding. The header clears the
+// traffic lights or window buttons only where it reaches the window edge:
+// past the sidebar on the left, past the inspector on the right, or on both
+// sides in the full-window preview.
+func (a *App) headerInsets(c *ui.Context, spansWindow bool, pad float32) (left, right float32) {
+	bar := c.TitleBar()
+	left = pad
+	if spansWindow || !a.prefs.SidebarOpen {
+		left += bar.Left
+	}
+	right = pad
+	if spansWindow || !a.inspectorVisible() {
+		r := bar.Right
+		if r == 0 && runtime.GOOS == "windows" {
+			r = 138
+		}
+		right += r
+	}
+	return left, right
+}
+
 // viewHeader is the toolbar: history icons, search, sort, filters and the
 // thumbnail zoom. Layout and panel visibility live in the content's context
 // menu so the view-toggle icons stay out of the header.
@@ -19,50 +94,33 @@ func (a *App) viewHeader(c *ui.Context) {
 		a.searchAt = time.Time{}
 		a.refreshAll()
 	}
-	header := ui.Column(c).FillWidth().Height(mainHeaderHeight).Absolute().Top(0).Left(0).Right(0)
-	// The header floats over the gallery. Its surface belongs to the header
-	// itself, so it paints below the controls rather than over them.
-	headerBlurActive := a.applyHeaderSurface(c, header, a.headerHasContentUnder())
-	header.Children(func() {
-		bar := c.TitleBar()
-		leftPad := bar.Left + gallerySidePadding
-		if a.prefs.SidebarOpen {
-			leftPad = gallerySidePadding
-		}
-		rightPad := float32(12)
-		if !a.inspectorVisible() {
-			r := bar.Right
-			if r == 0 && runtime.GOOS == "windows" {
-				r = 138
-			}
-			if r > 0 {
-				rightPad = r + 12
-			}
-		}
-		ui.Row(c).FillWidth().Height(headerHeight).Padding(0, rightPad, 0, leftPad).Gap(8).AlignItems(ui.Center).DragWindow().Children(func() {
-			if !a.prefs.SidebarOpen {
-				a.iconButton(c, "sidebar-toggle", iconSidebar, false, a.t("common.toggleSidebar"), a.toggleSidebar)
-			}
-			a.iconButton(c, "back", iconBack, false, a.t("common.back"), func() { a.goHistory(-1) })
-			a.iconButton(c, "forward", iconForward, false, a.t("common.forward"), func() { a.goHistory(1) })
+	a.commonHeader(c, commonHeaderOptions{
+		pad:          gallerySidePadding,
+		height:       mainHeaderHeight,
+		floating:     true,
+		contentUnder: a.headerHasContentUnder(),
+	}, func() {
+		// History always sits at the left end of the row, right after the
+		// sidebar toggle; the preview keeps its step buttons there too.
+		a.iconButton(c, "back", iconBack, false, a.t("common.back"), func() { a.goHistory(-1) })
+		a.iconButton(c, "forward", iconForward, false, a.t("common.forward"), func() { a.goHistory(1) })
 
-			zoomVal := float64(a.rowHeight)
-			ui.Slider(c.Key("zoom-slider"), &zoomVal, 90, 420).Width(110)
-			if int(zoomVal) != a.rowHeight {
-				a.setRowHeight(int(zoomVal))
-			}
+		zoomVal := float64(a.rowHeight)
+		ui.Slider(c.Key("zoom-slider"), &zoomVal, 90, 420).Width(110)
+		if int(zoomVal) != a.rowHeight {
+			a.setRowHeight(int(zoomVal))
+		}
 
+		ui.Box(c).Grow(1)
+
+		if a.nav == NavFolder && a.folderID != "" {
+			name := a.folderDisplayName(a.folderID)
+			ui.Text(c, name).FontSize(13).FontWeight(600).TextColor(p.text).MaxWidth(240).SingleLine()
 			ui.Box(c).Grow(1)
+		}
 
-			if a.nav == NavFolder && a.folderID != "" {
-				name := a.folderDisplayName(a.folderID)
-				ui.Text(c, name).FontSize(13).FontWeight(600).TextColor(p.text).MaxWidth(240).SingleLine()
-				ui.Box(c).Grow(1)
-			}
-
-			a.viewSearchField(c)
-		})
-
+		a.viewSearchField(c)
+	}, func() {
 		ui.Row(c).FillWidth().Height(headerSecondRowHeight).Padding(0, 12).Gap(8).AlignItems(ui.Center).DragWindow().Children(func() {
 			// Sort order and the multi-facet filter live on their own row so
 			// neither label gets squeezed on narrow windows.
@@ -84,16 +142,14 @@ func (a *App) viewHeader(c *ui.Context) {
 			ui.Box(c).Width(1).Height(20).Background(p.hairline)
 			a.viewFilterBar(c)
 		})
-		if headerBlurActive {
-			ui.Box(c).Absolute().Bottom(0).FillWidth().Height(1).Background(p.hairline)
-		}
 	})
 }
 
-// applyHeaderSurface gives a floating header the workspace background while
+// applyHeaderSurface gives a header panel the workspace background while
 // nothing scrolls under it, so it reads as part of the same surface (white in
 // light mode, dark in dark mode). Once content reaches it, the shared blur
-// material and tint take over and the caller adds a divider. It returns
+// material and tint take over and the caller adds a divider. The workspace,
+// preview and settings headers all use it, so their chrome matches. It returns
 // whether that scrolled state is active.
 func (a *App) applyHeaderSurface(c *ui.Context, header ui.Element, contentUnder bool) bool {
 	p := a.palette(c)

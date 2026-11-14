@@ -339,6 +339,71 @@ func TestDoubleclickOpensInlinePreviewAndHeaderChanges(t *testing.T) {
 	}
 }
 
+func TestWorkspaceHeaderToggleAlwaysShows(t *testing.T) {
+	a := seededApp(t)
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.SetTitleBar(ui.TitleBar{Height: headerHeight, Left: 80})
+	tester.Frame()
+
+	// With the sidebar open, the shared header still offers its toggle at the
+	// start of the workspace column.
+	x := a.sidebarWidth + panelDividerWidth + gallerySidePadding + 15
+	tester.ClickAt(x, headerHeight/2)
+	tester.Frame()
+	if a.prefs.SidebarOpen {
+		t.Fatal("header toggle should collapse the open sidebar")
+	}
+
+	// Closed, the same button moves to the window edge past the traffic lights
+	// and reopens it.
+	tester.ClickAt(80+gallerySidePadding+15, headerHeight/2)
+	tester.Frame()
+	if !a.prefs.SidebarOpen {
+		t.Fatal("header toggle should restore the collapsed sidebar")
+	}
+}
+
+func TestInlinePreviewReusesWorkspaceHeader(t *testing.T) {
+	a := seededApp(t)
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.SetTitleBar(ui.TitleBar{Height: headerHeight, Left: 80})
+	tester.Frame()
+	a.openPreview("a", "inline")
+	tester.Frame()
+
+	// The inline preview row is the shared header, so its sidebar toggle still
+	// collapses the panel without leaving the preview.
+	x := a.sidebarWidth + panelDividerWidth + gallerySidePadding + 15
+	tester.ClickAt(x, headerHeight/2)
+	tester.Frame()
+	if a.prefs.SidebarOpen {
+		t.Fatal("inline preview header lost its sidebar toggle")
+	}
+	if !a.previewOpen {
+		t.Fatal("toggling the sidebar must keep the preview open")
+	}
+
+	// Close is the last control of the row, at the workspace's right edge.
+	right := float32(1280) - a.inspectorWidth - panelDividerWidth
+	tester.ClickAt(right-gallerySidePadding-15, headerHeight/2)
+	tester.Frame()
+	if a.previewOpen {
+		t.Fatal("close button at the end of the header did not close the preview")
+	}
+}
+
+func TestPreviewZoomSliderMapsLogarithmically(t *testing.T) {
+	for _, zoom := range []float32{previewMinZoom, 0.5, 1, 2, previewMaxZoom} {
+		if got := previewZoomFromTrack(previewZoomTrack(zoom)); math.Abs(float64(got-zoom)) > 0.001 {
+			t.Fatalf("zoom %v maps to %v on the track and back to %v", zoom, previewZoomTrack(zoom), got)
+		}
+	}
+	// 100% sits near the middle of the track instead of at its far left.
+	if track := previewZoomTrack(1); track < 25 || track > 75 {
+		t.Fatalf("100%% sits at %v on the track, want it near the middle", track)
+	}
+}
+
 func TestSpaceKeyOpensFullWindowPreview(t *testing.T) {
 	a := seededApp(t)
 	tester := ui.NewTester(a.viewMain, 1280, 800)

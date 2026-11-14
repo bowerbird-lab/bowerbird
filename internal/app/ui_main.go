@@ -91,10 +91,10 @@ func (a *App) viewMain(c *ui.Context) {
 				a.overlayShortcut(overlay, core.ShortcutMoveLeft, func() { a.movePreview(-1) })
 				a.overlayShortcut(overlay, core.ShortcutMoveRight, func() { a.movePreview(1) })
 				a.overlayShortcut(overlay, core.ShortcutZoomIn, func() {
-					a.previewZoom = minF(a.previewZoom*1.2, 8)
+					a.previewZoom = minF(a.previewZoom*1.2, previewMaxZoom)
 				})
 				a.overlayShortcut(overlay, core.ShortcutZoomOut, func() {
-					a.previewZoom = maxF(a.previewZoom/1.2, 0.2)
+					a.previewZoom = maxF(a.previewZoom/1.2, previewMinZoom)
 				})
 				a.overlayShortcut(overlay, core.ShortcutZoomReset, func() {
 					a.previewZoom = 1
@@ -232,10 +232,10 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 			a.movePreview(1)
 		}
 		if matched(core.ShortcutZoomIn) {
-			a.previewZoom = minF(a.previewZoom*1.2, 8)
+			a.previewZoom = minF(a.previewZoom*1.2, previewMaxZoom)
 		}
 		if matched(core.ShortcutZoomOut) {
-			a.previewZoom = maxF(a.previewZoom/1.2, 0.2)
+			a.previewZoom = maxF(a.previewZoom/1.2, previewMinZoom)
 		}
 		if matched(core.ShortcutZoomReset) {
 			a.previewZoom = 1
