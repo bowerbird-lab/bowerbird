@@ -227,6 +227,20 @@ func (a *App) restoreSelected() {
 	}()
 }
 
+// deleteSelection is the Delete key: it removes the selection the way the
+// context menu does, without a confirmation. Items leave to the trash, except
+// in the trash view, where the same command empties them for good.
+func (a *App) deleteSelection() {
+	if a.svc == nil || len(a.selected) == 0 {
+		return
+	}
+	if a.nav == NavTrash {
+		a.deleteSelectedPermanently()
+		return
+	}
+	a.trashSelected()
+}
+
 func (a *App) deleteSelectedPermanently() {
 	ids := a.selectedIDs()
 	if len(ids) == 0 {

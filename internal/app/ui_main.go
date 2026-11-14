@@ -76,6 +76,21 @@ func (a *App) viewMain(c *ui.Context) {
 				if dismissOK && overlay.OverlayShortcut(dismissMods, dismissKey) {
 					a.closePreview()
 				}
+				// The window's shortcuts wait behind the modal overlay, so the
+				// preview registers the keys it owns here: the arrows step
+				// through the film strip, and the zoom keys act on the image.
+				a.overlayShortcut(overlay, core.ShortcutMoveLeft, func() { a.movePreview(-1) })
+				a.overlayShortcut(overlay, core.ShortcutMoveRight, func() { a.movePreview(1) })
+				a.overlayShortcut(overlay, core.ShortcutZoomIn, func() {
+					a.previewZoom = minF(a.previewZoom*1.2, 8)
+				})
+				a.overlayShortcut(overlay, core.ShortcutZoomOut, func() {
+					a.previewZoom = maxF(a.previewZoom/1.2, 0.2)
+				})
+				a.overlayShortcut(overlay, core.ShortcutZoomReset, func() {
+					a.previewZoom = 1
+					a.previewPan = ui.Point{}
+				})
 				overlay.Children(func() {
 					a.viewPreview(c)
 				})
@@ -157,6 +172,11 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 		if len(a.items) > 0 {
 			a.activeItemID = a.items[0].ID
 		}
+		// Move the focus with the selection so the gallery keys, Delete
+		// above all, act on what the user just selected.
+		if !c.Focused(a.searchBox) {
+			a.galleryBox.Focus(c)
+		}
 	}
 	if matched(core.ShortcutDismiss) {
 		if a.previewOpen {
@@ -202,17 +222,25 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 		}
 		return
 	}
+	moved := false
 	if matched(core.ShortcutMoveLeft) {
 		a.moveGallerySelection(-1, 0)
+		moved = true
 	}
 	if matched(core.ShortcutMoveRight) {
 		a.moveGallerySelection(1, 0)
+		moved = true
 	}
 	if matched(core.ShortcutMoveUp) {
 		a.moveGallerySelection(0, -1)
+		moved = true
 	}
 	if matched(core.ShortcutMoveDown) {
 		a.moveGallerySelection(0, 1)
+		moved = true
+	}
+	if moved && !c.Focused(a.searchBox) {
+		a.galleryBox.Focus(c)
 	}
 	if matched(core.ShortcutZoomIn) {
 		a.setRowHeight(a.rowHeight + 24)

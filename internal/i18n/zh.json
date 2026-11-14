@@ -1019,6 +1019,8 @@
     "move-up": "向上移动",
     "move-down": "向下移动",
     "toggle-sidebar": "切换侧栏",
-    "toggle-inspector": "切换检查器"
+    "toggle-inspector": "切换检查器",
+    "delete": "删除选中项",
+    "delete-backspace": "删除选中项（退格键）"
   }
 }

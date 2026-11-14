@@ -56,6 +56,11 @@ const (
 	ShortcutMoveDown        = "move-down"
 	ShortcutToggleSidebar   = "toggle-sidebar"
 	ShortcutToggleInspector = "toggle-inspector"
+	// Delete and Backspace both remove the selection: on macOS the main
+	// delete key reports as Backspace, so listing only Delete would make the
+	// Settings list disagree with the keyboard users actually have.
+	ShortcutDelete          = "delete"
+	ShortcutDeleteBackspace = "delete-backspace"
 )
 
 // ShortcutDef is the catalog entry for one action. Scope tells whether the
@@ -98,6 +103,8 @@ func ShortcutCatalog() []ShortcutDef {
 		{ID: ShortcutMoveDown, Fixed: true},
 		{ID: ShortcutToggleSidebar, Fixed: true},
 		{ID: ShortcutToggleInspector, Fixed: true},
+		{ID: ShortcutDelete, Fixed: true},
+		{ID: ShortcutDeleteBackspace, Fixed: true},
 	}
 }
 
@@ -195,6 +202,8 @@ var defaultShortcutBindings = func() map[string]string {
 		ShortcutMoveDown:        "Down",
 		ShortcutToggleSidebar:   "CmdOrCtrl+Shift+B",
 		ShortcutToggleInspector: "CmdOrCtrl+Shift+I",
+		ShortcutDelete:          "Delete",
+		ShortcutDeleteBackspace: "Backspace",
 	}
 }()
 

@@ -175,6 +175,8 @@ type App struct {
 	marqueeAdditive bool
 	// Inputs and popover state.
 	searchBox   ui.Handle
+	galleryBox  ui.Handle
+	stripBox    ui.Handle
 	renameBox   ui.Handle
 	renameValue string
 	ratingDraft int

@@ -1019,6 +1019,8 @@
     "move-up": "Move up",
     "move-down": "Move down",
     "toggle-sidebar": "Toggle sidebar",
-    "toggle-inspector": "Toggle inspector"
+    "toggle-inspector": "Toggle inspector",
+    "delete": "Delete selection",
+    "delete-backspace": "Delete selection (Backspace)"
   }
 }

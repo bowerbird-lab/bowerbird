@@ -47,6 +47,27 @@ func (a *App) handleGalleryZoomInput(ev ui.InputEvent) bool {
 	return false
 }
 
+// galleryShortcuts binds the keys that act on the gallery selection. They live
+// on the gallery element rather than the window so a focused text field
+// elsewhere in the window (search, notes, tags) keeps Backspace and Delete for
+// editing; while the focus is in the gallery, the same keys remove the
+// selection.
+func (a *App) galleryShortcuts(container ui.Element) {
+	if a.previewOpen || a.dialog != dialogNone {
+		return
+	}
+	for _, id := range []string{core.ShortcutDelete, core.ShortcutDeleteBackspace} {
+		pair, ok := a.shortcutPairs[id]
+		if !ok || !pair.ok {
+			continue
+		}
+		if container.Shortcut(pair.mods, pair.key) {
+			a.deleteSelection()
+			return
+		}
+	}
+}
+
 func (a *App) galleryGap() float32 {
 	if a.prefs.LayoutMode == "list" {
 		return 4
@@ -60,9 +81,10 @@ func (a *App) galleryGap() float32 {
 func (a *App) viewGallery(c *ui.Context) {
 	a.rebuildRows()
 	if len(a.rows) == 0 {
-		container := ui.Box(c.Key("gallery-container")).Fill().Clip()
+		container := ui.Box(c.Key("gallery-container")).Fill().Clip().Bind(&a.galleryBox)
 		container.HandleInput(a.handleGalleryZoomInput)
 		container.ContextMenu(a.viewContextMenu)
+		a.galleryShortcuts(container)
 		container.Children(func() {
 			if a.loading {
 				ui.Column(c).Fill().Center().Children(func() {
@@ -78,7 +100,8 @@ func (a *App) viewGallery(c *ui.Context) {
 	bottom := float32(24)
 	p := paletteFor(c.Theme())
 
-	container := ui.Box(c.Key("gallery-container")).Fill().Clip()
+	container := ui.Box(c.Key("gallery-container")).Fill().Clip().Bind(&a.galleryBox)
+	a.galleryShortcuts(container)
 	container.HandleInput(func(ev ui.InputEvent) bool {
 		if a.handleGalleryZoomInput(ev) {
 			return true
@@ -92,6 +115,9 @@ func (a *App) viewGallery(c *ui.Context) {
 				if a.itemAtPoint(ev.X, ev.Y, top) != -1 {
 					return false
 				}
+				// 让 Delete 这类作用在选区上的键留着用：焦点在画廊里，
+				// 窗口里的输入框才不会被它抢走。
+				a.galleryBox.Focus(c)
 				a.marqueeActive = true
 				a.marqueeStartX, a.marqueeStartY = ev.X, ev.Y
 				a.marqueeCurX, a.marqueeCurY = ev.X, ev.Y

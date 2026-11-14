@@ -48,6 +48,20 @@ func (a *App) rebuildShortcutPairs() {
 	a.shortcutPairs = pairs
 }
 
+// overlayShortcut runs fn when the overlay owns id's key. A modal overlay
+// makes the window's shortcuts wait (ui.Context.Shortcut returns false behind
+// a dialog), so the keys the preview must keep working are registered on the
+// overlay itself instead of in handleMainShortcuts.
+func (a *App) overlayShortcut(overlay ui.Element, id string, fn func()) {
+	pair, ok := a.shortcutPairs[id]
+	if !ok || !pair.ok {
+		return
+	}
+	if overlay.OverlayShortcut(pair.mods, pair.key) {
+		fn()
+	}
+}
+
 // shortcutKeys resolves one catalog entry, fixed or not, to the modifiers and
 // key ui.Shortcut compares against. Every handler goes through it so the
 // binding Settings lists is the binding the window answers to.

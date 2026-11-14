@@ -852,3 +852,116 @@ func TestShiftAndCtrlMultiSelectionAcrossLayouts(t *testing.T) {
 		t.Fatalf("justified shift selection must at least include endpoints 0 and 4, got %v", a.selected)
 	}
 }
+
+// TestGalleryTakesFocusForSelectionKeys keeps the gallery keys working: Delete
+// and Backspace act only while the focus is inside the gallery, so keyboard
+// selection has to move the focus there (a text field keeps them otherwise).
+func TestGalleryTakesFocusForSelectionKeys(t *testing.T) {
+	a := seededApp(t)
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.Frame()
+
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	tester.Frame()
+
+	if active, _ := tester.TextInputActive(); active {
+		t.Fatal("arrow keys left the focus in a text field")
+	}
+	if !tester.Focused("Alpha") {
+		t.Fatal("arrow keys did not move the focus into the gallery")
+	}
+}
+
+// TestPreviewArrowKeysStepThroughItems keeps the film strip keyboard
+// navigable: a modal preview overlay makes the window's shortcuts wait, so the
+// full preview registers the arrow keys on the overlay itself. The inline
+// preview is no overlay and keeps using the window shortcuts.
+func TestPreviewArrowKeysStepThroughItems(t *testing.T) {
+	t.Run("full", func(t *testing.T) {
+		a := seededApp(t)
+		tester := ui.NewTester(a.viewMain, 1280, 800)
+		tester.Frame()
+
+		tester.Key(0, ui.KeySpace)
+		tester.Frame()
+		if !a.previewOpen || a.previewMode != "full" {
+			t.Fatalf("preview = (open=%v, mode=%s), want the full overlay", a.previewOpen, a.previewMode)
+		}
+
+		tester.Key(0, ui.KeyRight)
+		tester.Frame()
+		if a.previewIndex != 1 || a.activeItemID != "b" {
+			t.Fatalf("Right moved to (index=%d, active=%s), want b", a.previewIndex, a.activeItemID)
+		}
+
+		tester.Key(0, ui.KeyLeft)
+		tester.Frame()
+		if a.previewIndex != 0 || a.activeItemID != "a" {
+			t.Fatalf("Left moved to (index=%d, active=%s), want a", a.previewIndex, a.activeItemID)
+		}
+
+		// The strip wraps around at the ends.
+		tester.Key(0, ui.KeyLeft)
+		tester.Frame()
+		if a.previewIndex != len(a.items)-1 {
+			t.Fatalf("Left from the first item landed on %d, want %d", a.previewIndex, len(a.items)-1)
+		}
+	})
+
+	t.Run("inline", func(t *testing.T) {
+		a := seededApp(t)
+		tester := ui.NewTester(a.viewMain, 1280, 800)
+		tester.Frame()
+
+		a.openPreview("a", "inline")
+		tester.Frame()
+
+		tester.Key(0, ui.KeyRight)
+		tester.Frame()
+		if a.previewIndex != 1 || a.activeItemID != "b" {
+			t.Fatalf("inline Right moved to (index=%d, active=%s), want b", a.previewIndex, a.activeItemID)
+		}
+	})
+}
+
+func TestStripFitCountAdaptsToWidth(t *testing.T) {
+	cases := []struct {
+		width float32
+		want  int
+	}{
+		{0, 1},
+		{100, 1},
+		{300, 4},
+		{1280, 21},
+		{2400, 41},
+	}
+	for _, tc := range cases {
+		if got := stripFitCount(tc.width); got != tc.want {
+			t.Errorf("stripFitCount(%v) = %d, want %d", tc.width, got, tc.want)
+		}
+	}
+}
+
+func TestStripWindowCentresAndClamps(t *testing.T) {
+	cases := []struct {
+		index, total, fit int
+		start, end        int
+	}{
+		{0, 3, 15, 0, 3},    // fewer items than cells: all shown
+		{0, 100, 10, 0, 10}, // at the start: no empty cells
+		{50, 100, 10, 45, 55},
+		{99, 100, 10, 90, 100}, // at the end
+		{5, 10, 0, 5, 6},       // a degenerate width still shows the item
+	}
+	for _, tc := range cases {
+		start, end := stripWindow(tc.index, tc.total, tc.fit)
+		if start != tc.start || end != tc.end {
+			t.Errorf("stripWindow(%d, %d, %d) = (%d, %d), want (%d, %d)",
+				tc.index, tc.total, tc.fit, start, end, tc.start, tc.end)
+		}
+		if tc.index < start || tc.index >= end {
+			t.Errorf("stripWindow(%d, %d, %d) leaves the current item out", tc.index, tc.total, tc.fit)
+		}
+	}
+}

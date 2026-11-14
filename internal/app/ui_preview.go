@@ -109,22 +109,18 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 		default:
 			a.previewDocument(c, item)
 		}
-		// Film strip of the current page.
+		// Film strip of the current page. It takes the width the window has
+		// and shows as many cells as fit in it, so a wide window offers more
+		// neighbours and a narrow one fewer, the current item staying centred.
 		if len(a.items) > 1 {
 			ui.Box(c).FillWidth().Height(1).Background(p.hairline)
-			ui.Row(c).FillWidth().Height(64).PaddingX(12).Gap(6).AlignItems(ui.Center).Children(func() {
-				start := a.previewIndex - 7
-				if start < 0 {
-					start = 0
-				}
-				end := start + 15
-				if end > len(a.items) {
-					end = len(a.items)
-				}
+			strip := ui.Row(c).FillWidth().Height(64).PaddingX(stripPaddingX).Gap(stripGap).AlignItems(ui.Center).Justify(ui.Center).Bind(&a.stripBox)
+			strip.Children(func() {
+				start, end := a.stripRange(c)
 				for i := start; i < end; i++ {
 					i := i
 					it := a.items[i]
-					box := ui.ButtonBase(c.Key(fmt.Sprintf("strip-%s", it.ID))).Width(52).Height(48).Radius(6).Background(p.surface2).Clip().FocusRing(false).KeepFocus()
+					box := ui.ButtonBase(c.Key(fmt.Sprintf("strip-%s", it.ID))).Width(stripThumbWidth).Height(stripThumbHeight).Radius(6).Background(p.surface2).Clip().FocusRing(false).KeepFocus()
 					if i == a.previewIndex {
 						box.Border(2, p.accent)
 					}
@@ -152,6 +148,53 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 			})
 		}
 	})
+}
+
+// Film strip geometry: one cell's size, the gap between cells and the
+// padding on either end. The strip itself spans the whole width.
+const (
+	stripThumbWidth  = 52
+	stripThumbHeight = 48
+	stripGap         = 6
+	stripPaddingX    = 12
+)
+
+// stripFitCount returns how many strip cells fit in width.
+func stripFitCount(width float32) int {
+	n := int((width - 2*stripPaddingX + stripGap) / (stripThumbWidth + stripGap))
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+// stripWindow picks the slice of cells to show around index: fit cells,
+// centred on index where the ends allow it.
+func stripWindow(index, total, fit int) (start, end int) {
+	if fit < 1 {
+		fit = 1
+	}
+	if fit > total {
+		fit = total
+	}
+	start = index - fit/2
+	if start < 0 {
+		start = 0
+	}
+	if start+fit > total {
+		start = total - fit
+	}
+	return start, start + fit
+}
+
+// stripRange is the strip window for the laid-out width. The box comes from
+// the previous frame; the window size stands in until the first layout.
+func (a *App) stripRange(c *ui.Context) (start, end int) {
+	width := a.stripBox.Bounds(c).W
+	if width <= 0 {
+		width, _ = c.Size()
+	}
+	return stripWindow(a.previewIndex, len(a.items), stripFitCount(width))
 }
 
 func (a *App) previewImage(c *ui.Context, item core.Item) {

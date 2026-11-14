@@ -51,3 +51,19 @@ func TestEveryCatalogShortcutHasUIKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteShortcutsMapToDeleteKeys(t *testing.T) {
+	settings := core.DefaultShortcutSettings()
+	for _, tc := range []struct {
+		id   string
+		want ui.Key
+	}{
+		{core.ShortcutDelete, ui.KeyDelete},
+		{core.ShortcutDeleteBackspace, ui.KeyBackspace},
+	} {
+		mods, key, ok := uiShortcutKeys(settings.Accelerator(tc.id))
+		if !ok || mods != 0 || key != tc.want {
+			t.Errorf("%q = (%v, %v, %v), want (0, %v, true)", tc.id, mods, key, ok, tc.want)
+		}
+	}
+}

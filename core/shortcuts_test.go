@@ -188,3 +188,19 @@ func TestEditableShortcutsCannotShadowFixedOnes(t *testing.T) {
 		t.Fatal("expected a conflict with the fixed search binding")
 	}
 }
+
+func TestDeleteShortcutsAreFixed(t *testing.T) {
+	for _, id := range []string{ShortcutDelete, ShortcutDeleteBackspace} {
+		if !IsFixedShortcut(id) {
+			t.Errorf("%q must be a fixed shortcut", id)
+		}
+	}
+	defaults := DefaultShortcutSettings()
+	if got := defaults.Accelerator(ShortcutDelete); got != "Delete" {
+		t.Errorf("delete accelerator = %q, want Delete", got)
+	}
+	// macOS reports its main delete key as Backspace, so both must be bound.
+	if got := defaults.Accelerator(ShortcutDeleteBackspace); got != "Backspace" {
+		t.Errorf("backspace accelerator = %q, want Backspace", got)
+	}
+}
