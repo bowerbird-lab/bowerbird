@@ -231,6 +231,9 @@ type App struct {
 	shortcutEditError string
 	mobile            *core.MobileServerStatus
 	mobileDevices     []core.MobileDeviceInfo
+	mobilePort        string
+	mobilePairingURL  string
+	mobileQR          *ui.Bitmap
 	settingsDirty     bool
 
 	// Settings.
