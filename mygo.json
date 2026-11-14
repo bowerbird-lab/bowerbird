@@ -8,5 +8,8 @@
   "icon": "assets/branding/app-icon-rounded.png",
   "macos": {
     "icon": "assets/branding/app-icon.icns"
+  },
+  "linux": {
+    "webview": false
   }
 }

@@ -28,6 +28,7 @@
     "build:docs": "pnpm --filter bowerbird-docs build",
     "build:packages": "pnpm --filter \"./packages/*\" run build",
     "build:sdk": "pnpm --filter @bowerbird/plugin-sdk build",
+    "build:plugins": "python3 scripts/package-plugins.py",
     "preview:marketplace": "pnpm --filter bowerbird-marketplace preview",
     "preview:docs": "pnpm --filter bowerbird-docs preview",
     "typecheck": "pnpm -r --no-bail run typecheck --if-present",

@@ -22,6 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      commit: ${{ steps.commit.outputs.sha }}
     steps:
       - name: Resolve version from tag
         id: resolve
@@ -34,13 +37,32 @@ jobs:
             echo "::error::No release tag: push a v* tag or pass tag_name to workflow_dispatch."
             exit 1
           fi
+          if [[ "$tag" != v* ]]; then
+            echo "::error::Release tags must start with v."
+            exit 1
+          fi
           version="${tag#v}"
-          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
             echo "::error::Tag '$tag' does not yield a semver version (got '$version')."
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "${version%%+*}" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
           echo "Building Bowerbird $version from $tag"
+
+      - name: Checkout Release Tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.resolve.outputs.tag }}
+
+      - name: Resolve Release Commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build-macos:
     needs: prepare
@@ -53,6 +75,8 @@ jobs:
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -65,29 +89,15 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
       - name: Stamp version from tag
         env:
           MYGO_BUILD_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           node -e "const fs=require('node:fs');const v=process.env.MYGO_BUILD_VERSION;if(!v)throw new Error('MYGO_BUILD_VERSION is not set');const p='mygo.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.version=v;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');const w=JSON.parse(fs.readFileSync(p,'utf8'));if(w.version!==v)throw new Error('version stamp failed: '+w.version);console.log('mygo.json version -> '+w.version);"
 
-      - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Plugins
-        run: pnpm run build:plugins
-
       - name: Build and Package macOS (arm64 + x64)
         run: |
-          CGO_ENABLED=1 pnpm run build:app:macos
+          go tool mygo build -platform "darwin/arm64,darwin/amd64"
 
       - name: Collect macOS Artifacts
         run: |
@@ -130,6 +140,8 @@ jobs:
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -141,14 +153,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
 
       - name: Install NSIS
         shell: pwsh
@@ -171,16 +175,10 @@ jobs:
         run: |
           node -e "const fs=require('node:fs');const v=process.env.MYGO_BUILD_VERSION;if(!v)throw new Error('MYGO_BUILD_VERSION is not set');const p='mygo.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.version=v;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');const w=JSON.parse(fs.readFileSync(p,'utf8'));if(w.version!==v)throw new Error('version stamp failed: '+w.version);console.log('mygo.json version -> '+w.version);"
 
-      - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Plugins
-        run: pnpm run build:plugins
-
       - name: Build and Package Windows
         shell: pwsh
         run: |
-          pnpm run build:app:windows
+          go tool mygo build -platform windows/amd64
 
       - name: Collect Windows Artifacts
         shell: pwsh
@@ -191,7 +189,7 @@ jobs:
           }
           $portable = Get-ChildItem -LiteralPath $dir -Filter "Bowerbird.exe" -File |
             Select-Object -First 1
-          $installer = Get-ChildItem -LiteralPath $dir -Filter "* Setup *.exe" -File |
+          $installer = Get-ChildItem -LiteralPath $dir -Filter "bowerbird-setup-*-amd64.exe" -File |
             Select-Object -First 1
           if (-not $portable) {
             throw "Missing portable executable in $dir"
@@ -221,6 +219,8 @@ jobs:
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -233,22 +233,13 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
       - name: Install Linux Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
             pkg-config \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev
+            libgtk-3-dev
 
       - name: Stamp version from tag
         env:
@@ -256,15 +247,9 @@ jobs:
         run: |
           node -e "const fs=require('node:fs');const v=process.env.MYGO_BUILD_VERSION;if(!v)throw new Error('MYGO_BUILD_VERSION is not set');const p='mygo.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.version=v;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');const w=JSON.parse(fs.readFileSync(p,'utf8'));if(w.version!==v)throw new Error('version stamp failed: '+w.version);console.log('mygo.json version -> '+w.version);"
 
-      - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Plugins
-        run: pnpm run build:plugins
-
       - name: Build and Package Linux
         run: |
-          pnpm run build:app:linux
+          go tool mygo build -platform linux/amd64
 
       - name: Collect Linux Artifacts
         run: |
@@ -299,11 +284,13 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    needs: [build-macos, build-windows, build-linux]
+    needs: [prepare, build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -321,9 +308,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag_name }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
           files: release-files/*
           fail_on_unmatched_files: true
           draft: false
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') || contains(inputs.tag_name, 'alpha') || contains(inputs.tag_name, 'beta') || contains(inputs.tag_name, 'rc') }}
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
           generate_release_notes: true

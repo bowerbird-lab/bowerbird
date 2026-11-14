@@ -101,3 +101,16 @@ register the same manifests as compiled-in built-ins (`internal/plugin/official.
 so a local folder can override the bundled copy with richer marketplace
 metadata. Disabling a built-in preview plugin in Settings removes that native
 preview surface at runtime.
+
+## Distribution
+
+Run `python3 scripts/package-plugins.py` (Python 3.9+) or `pnpm build:plugins`
+to create `dist/plugins/`. Packaging copies each plugin's source and resources
+without bundling JavaScript or building the SDK. Each ZIP contains `plugin.json`
+at its root, plus `manifest.json` as a compatibility copy for existing
+marketplace endpoints. Native renderers need no `index.js`.
+
+`index.min.json` and `registry.json` retain the manifest metadata and list each
+release asset as `<plugin-id>-v<version>.zip`. The plugin publishing workflow
+uploads these ZIPs to the distribution repository and copies the complete
+packages to `repo/<plugin-id>/` on its `main` branch.
