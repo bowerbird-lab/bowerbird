@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -47,8 +48,53 @@ func (a *App) rebuildThemePalettes() {
 	dark := a.themeByID(a.prefs.DarkTheme, theme.Dark)
 	a.paletteLight = paletteFor(light)
 	a.paletteDark = paletteFor(dark)
+	if a.prefs.SystemAccent && a.systemAccent.A > 0 {
+		applyAccent(&a.paletteLight, a.systemAccent)
+		applyAccent(&a.paletteDark, a.systemAccent)
+	}
 	a.uiLight = uiThemeFor(a.paletteLight)
 	a.uiDark = uiThemeFor(a.paletteDark)
+}
+
+// syncSystemAccent mirrors the desktop accent into the resolved palettes. It
+// runs from the frame wrapper because Context.Preferences is only available
+// once the app is running.
+func (a *App) syncSystemAccent(c *ui.Context) {
+	accent := ui.Transparent
+	if a.prefs.SystemAccent {
+		accent = c.Preferences().Accent
+		if accent.A > 0 {
+			accent.A = 255
+		}
+	}
+	if accent == a.systemAccent {
+		return
+	}
+	a.systemAccent = accent
+	a.rebuildThemePalettes()
+}
+
+// applyAccent colours a palette with the desktop accent and picks contrasting
+// text for it.
+func applyAccent(p *palette, accent ui.Color) {
+	p.accent = accent
+	p.onAccent = accentText(accent)
+}
+
+// accentText returns black or white, whichever reads best on accent.
+func accentText(accent ui.Color) ui.Color {
+	channel := func(v uint8) float64 {
+		x := float64(v) / 255
+		if x <= 0.03928 {
+			return x / 12.92
+		}
+		return math.Pow((x+0.055)/1.055, 2.4)
+	}
+	lum := 0.2126*channel(accent.R) + 0.7152*channel(accent.G) + 0.0722*channel(accent.B)
+	if lum > 0.5 {
+		return ui.RGB(0, 0, 0)
+	}
+	return ui.RGB(255, 255, 255)
 }
 
 // themeMode returns the stored colour mode; an empty value follows the system.

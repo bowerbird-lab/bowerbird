@@ -65,6 +65,7 @@ type Prefs struct {
 	VibrancyHeader  bool     `json:"vibrancyHeader"`
 	LightTheme      string   `json:"lightTheme"`
 	DarkTheme       string   `json:"darkTheme"`
+	SystemAccent    bool     `json:"systemAccent"`
 	InspectorOpen   bool     `json:"inspectorOpen"`
 	SidebarOpen     bool     `json:"sidebarOpen"`
 	ShowNames       bool     `json:"showNames"`
@@ -84,6 +85,7 @@ func defaultPrefs() Prefs {
 		VibrancyHeader:  true,
 		LightTheme:      "default-light",
 		DarkTheme:       "default-dark",
+		SystemAccent:    true,
 		InspectorOpen:   true,
 		SidebarOpen:     true,
 		ShowNames:       true,
@@ -266,6 +268,9 @@ type App struct {
 	themeEditID  string
 	themeDraft   *theme.Theme
 	themeDirty   bool
+	// systemAccent is the desktop accent currently overriding theme accents,
+	// or zero when the desktop has none or the user turned the override off.
+	systemAccent ui.Color
 
 	// Thumbnails.
 	thumbs    *thumbCache

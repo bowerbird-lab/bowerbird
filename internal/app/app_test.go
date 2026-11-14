@@ -763,6 +763,38 @@ func TestPaletteFollowsSystemAppearance(t *testing.T) {
 	}
 }
 
+func TestAccentTextPicksContrast(t *testing.T) {
+	if got := accentText(ui.RGB(255, 255, 0)); got != ui.RGB(0, 0, 0) {
+		t.Fatalf("text on a light accent = %s, want black", theme.FormatColor(got))
+	}
+	if got := accentText(ui.RGB(20, 20, 60)); got != ui.RGB(255, 255, 255) {
+		t.Fatalf("text on a dark accent = %s, want white", theme.FormatColor(got))
+	}
+}
+
+func TestSystemAccentOverridesThemeAccent(t *testing.T) {
+	a := seededApp(t)
+	var got palette
+	tester := ui.NewTester(func(c *ui.Context) {
+		a.syncSystemAccent(c)
+		got = a.palette(c)
+	}, 100, 100)
+	tester.SetPreferences(ui.Preferences{Accent: ui.RGB(255, 0, 0)})
+	tester.Frame()
+	if got.accent != ui.RGB(255, 0, 0) {
+		t.Fatalf("accent = %s, want the system red", theme.FormatColor(got.accent))
+	}
+	if got.onAccent != ui.RGB(255, 255, 255) {
+		t.Fatalf("text on the system accent = %s, want white", theme.FormatColor(got.onAccent))
+	}
+
+	a.prefs.SystemAccent = false
+	tester.Frame()
+	if got.accent == ui.RGB(255, 0, 0) {
+		t.Fatal("accent still uses the system colour after the switch was turned off")
+	}
+}
+
 func TestUserThemeSelectionAppliesPalette(t *testing.T) {
 	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
 	a := seededApp(t)

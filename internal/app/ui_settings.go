@@ -435,6 +435,15 @@ func (a *App) settingsThemeSelection(c *ui.Context) {
 				a.applyThemeSelection()
 			}
 		})
+		a.settingsRowInfo(c, a.t("settings.themes.systemAccent"), a.t("settings.themes.systemAccentDescription"), func() {
+			on := a.prefs.SystemAccent
+			if ui.Switch(c.Key("system-accent"), &on).Changed() {
+				a.prefs.SystemAccent = on
+				a.savePrefs()
+				a.syncSystemAccent(c)
+				a.pushTheme()
+			}
+		})
 	})
 }
 
@@ -488,7 +497,7 @@ func (a *App) settingsThemes(c *ui.Context) {
 		draft := a.themeEditorCopy(selected)
 		for _, tok := range themeColorTokens {
 			tok := tok
-			a.settingsRow(c, a.t("settings.themes.colors."+tok.Label), "", func() {
+			control := func() {
 				value := tok.Field(&draft.Colors)
 				col, err := theme.ParseColor(*value)
 				if err != nil {
@@ -499,7 +508,13 @@ func (a *App) settingsThemes(c *ui.Context) {
 					*value = theme.FormatColor(col)
 					a.themeDirty = true
 				}
-			})
+			}
+			label := a.t("settings.themes.colors." + tok.Label)
+			if tok.Key == "accent" && a.prefs.SystemAccent {
+				a.settingsRowInfo(c, label, a.t("settings.themes.accentOverridden"), control)
+			} else {
+				a.settingsRow(c, label, "", control)
+			}
 		}
 		a.settingsRow(c, a.t("settings.themes.material.sidebarOpacity"), "", func() {
 			val := float64(draft.Material.SidebarOpacity)

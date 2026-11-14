@@ -676,7 +676,7 @@
       "selection": "Theme selection",
       "light": "Light theme",
       "dark": "Dark theme",
-      "followHint": "When the appearance mode follows the system, the light and dark themes switch with the system appearance; they can come from different theme sets.",
+      "followHint": "When the appearance mode follows the system, the light and dark themes switch with the system appearance; they can come from different theme sets. With \"Use the system accent\" on, the desktop accent overrides the theme accent.",
       "files": "Theme files",
       "filesHint": "The file name is the theme ID and must end with -light or -dark; the file contains JSON. The built-in default-light / default-dark themes are protected and cannot be replaced or deleted.",
       "openFolder": "Open theme folder",
@@ -721,7 +721,10 @@
         "sidebarOpacity": "Sidebar material opacity",
         "headerTint": "Title bar material tint",
         "headerBlur": "Title bar blur radius"
-      }
+      },
+      "systemAccent": "Use the system accent",
+      "systemAccentDescription": "When on, the accent follows the desktop accent colour; when off, the theme JSON accent is used. On by default and applies to every theme.",
+      "accentOverridden": "\"Use the system accent\" is on, so the accent comes from the desktop; the theme accent applies only when it is off."
     }
   },
   "setup": {

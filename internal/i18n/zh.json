@@ -676,7 +676,7 @@
       "selection": "主题选择",
       "light": "浅色主题",
       "dark": "深色主题",
-      "followHint": "外观模式选择「跟随系统」时，浅色和深色主题会跟随系统外观自动切换；两者可以来自不同主题混搭。",
+      "followHint": "外观模式选择「跟随系统」时，浅色和深色主题会跟随系统外观自动切换；两者可以来自不同主题混搭。「使用系统主色」开启时，强调色会覆盖主题里的 accent。",
       "files": "主题文件",
       "filesHint": "文件名就是主题 ID，必须以 -light 或 -dark 结尾，文件内容为 JSON。内置的 default-light / default-dark 受保护，不会被覆盖或删除。",
       "openFolder": "打开主题文件夹",
@@ -721,7 +721,10 @@
         "sidebarOpacity": "侧边栏材质透明度",
         "headerTint": "标题栏材质色",
         "headerBlur": "标题栏模糊半径"
-      }
+      },
+      "systemAccent": "使用系统主色",
+      "systemAccentDescription": "开启后，强调色会使用系统当前的主色；关闭后使用主题 JSON 里的 accent。默认开启，适用于所有主题。",
+      "accentOverridden": "「使用系统主色」已开启，当前强调色来自系统；主题里的 accent 仅在关闭该开关时生效。"
     }
   },
   "setup": {
