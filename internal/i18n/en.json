@@ -317,6 +317,8 @@
     "totalSize": "Total Size"
   },
   "preview": {
+    "imageLoadFailed": "Unable to load image",
+    "retry": "Retry",
     "backTooltip": "Back (Esc / Double-click)",
     "closePreviewTooltip": "Close Preview (Esc)",
     "exitFullscreenTooltip": "Exit Full Screen Preview (Space / Esc)",

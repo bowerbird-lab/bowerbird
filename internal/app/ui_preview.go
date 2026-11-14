@@ -150,6 +150,8 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 			strip := ui.Row(c).FillWidth().Height(64).PaddingX(stripPaddingX).Gap(stripGap).AlignItems(ui.Center).Justify(ui.Center).Bind(&a.stripBox)
 			strip.Children(func() {
 				start, end := a.stripRange(c)
+				a.beginFilmstripLoad(start, end)
+				ready, waiting, failed, missing := 0, 0, 0, 0
 				for i := start; i < end; i++ {
 					i := i
 					it := a.workspaceItem(i)
@@ -158,10 +160,23 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 						box.Border(2, p.accent)
 					}
 					path := ""
-					if it.HasThumbnail {
+					if it.HasThumbnail && it.ItemPath != "" {
 						path = filepath.Join(it.ItemPath, "thumbnail.jpg")
 					}
-					bmp := a.thumbs.get(path, 120)
+					var bmp *ui.Bitmap
+					var err error
+					if path == "" {
+						missing++
+					} else {
+						bmp, err = a.filmstripBitmap(it, i, path)
+						if err != nil {
+							failed++
+						} else if bmp != nil {
+							ready++
+						} else {
+							waiting++
+						}
+					}
 					box.Children(func() {
 						if bmp != nil {
 							ui.Image(c, bmp).Fill().Fit(ui.Cover)
@@ -178,6 +193,7 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 						a.loadPreviewContent()
 					}
 				}
+				a.recordFilmstripLoad(c, ready, waiting, failed, missing)
 			})
 		}
 	})
@@ -227,7 +243,7 @@ func (a *App) stripRange(c *ui.Context) (start, end int) {
 	if width <= 0 {
 		width, _ = c.Size()
 	}
-	return stripWindow(a.previewIndex, len(a.items), stripFitCount(width))
+	return stripWindow(a.previewIndex, len(a.items), min(a.filmstripImages.limit, stripFitCount(width)))
 }
 
 func (a *App) previewImage(c *ui.Context, item core.Item) {
@@ -235,6 +251,9 @@ func (a *App) previewImage(c *ui.Context, item core.Item) {
 	previewMods, previewKey, previewOK := a.shortcutKeys(core.ShortcutTogglePreview)
 	dismissMods, dismissKey, dismissOK := a.shortcutKeys(core.ShortcutDismiss)
 	ui.Box(c).Fill().Grow(1).Shrink(1).Clip().HandleInput(func(ev ui.InputEvent) bool {
+		if a.previewError != "" && ev.Kind != ui.InputKeyDown {
+			return false
+		}
 		switch ev.Kind {
 		case ui.InputKeyDown:
 			if (previewOK && ev.Mods == previewMods && ev.Key == previewKey) ||
@@ -271,14 +290,47 @@ func (a *App) previewImage(c *ui.Context, item core.Item) {
 		}
 		return false
 	}).Children(func() {
-		path := item.FilePath
-		if path == "" && item.HasThumbnail {
-			path = filepath.Join(item.ItemPath, "thumbnail.jpg")
+		var bmp *ui.Bitmap
+		if a.previewError == "" {
+			path := item.FilePath
+			if path == "" && item.HasThumbnail && item.ItemPath != "" {
+				path = filepath.Join(item.ItemPath, "thumbnail.jpg")
+			}
+			var err error
+			bmp, err = a.previewImages.getResult(path, 4096, a.previewTrace)
+			if err != nil {
+				a.previewError = err.Error()
+				if a.previewTrace != nil {
+					a.previewTrace.record("error", "display_failed", a.previewTrace.started, fmt.Sprintf("error=%q", err))
+				}
+			}
 		}
-		bmp := a.thumbs.get(path, 4096)
+		if a.previewError != "" {
+			a.previewImageFailure(c)
+			return
+		}
 		if bmp == nil {
+			if trace := a.previewTrace; trace != nil && !a.previewSlowLogged {
+				elapsed := time.Since(trace.started)
+				if elapsed >= 2*time.Second {
+					a.previewSlowLogged = true
+					a.previewImages.mu.Lock()
+					active, queued := a.previewImages.active, len(a.previewImages.queue)
+					a.previewImages.mu.Unlock()
+					trace.record("warn", "waiting", trace.started, fmt.Sprintf("active=%d queued=%d", active, queued))
+				} else {
+					c.After(2*time.Second - elapsed)
+				}
+			}
 			ui.Column(c).Fill().Center().Children(func() { ui.Spinner(c) })
 			return
+		}
+		if !a.previewImageShown {
+			a.previewImageShown = true
+			if trace := a.previewTrace; trace != nil {
+				width, height := bmp.Size()
+				trace.record("info", "display_ready", trace.started, fmt.Sprintf("width=%d height=%d", width, height))
+			}
 		}
 		ui.Box(c).Fill().Draw(func(pt *ui.Painter, r ui.Rect) {
 			// Soft checkerboard behind transparent images.
@@ -293,6 +345,18 @@ func (a *App) previewImage(c *ui.Context, item core.Item) {
 		}).Children(func() {
 			ui.Image(c, bmp).Fill().Fit(ui.Contain).Scale(a.previewZoom, a.previewZoom).Translate(a.previewPan.X, a.previewPan.Y)
 		})
+	})
+}
+
+func (a *App) previewImageFailure(c *ui.Context) {
+	p := a.palette(c)
+	ui.Column(c).Fill().Center().Gap(10).Children(func() {
+		ui.Icon(c, iconImage).Size(34, 34).TextColor(p.faint)
+		ui.Text(c, a.t("preview.imageLoadFailed")).FontSize(14).TextColor(p.text)
+		ui.Text(c, a.previewError).FontSize(12).TextColor(p.muted).MaxWidth(480)
+		if ui.Button(c.Key("preview-image-retry"), a.t("preview.retry")).Clicked() {
+			a.loadPreviewContent()
+		}
 	})
 }
 
@@ -470,7 +534,16 @@ func (a *App) previewDocument(c *ui.Context, item core.Item) {
 func (a *App) loadPreviewContent() {
 	a.closeVideo()
 	a.previewSeq++
-	a.thumbs.invalidate(a.previewImagePath)
+	if trace := a.previewTrace; trace != nil {
+		trace.record("info", "superseded", trace.started, "")
+	}
+	a.previewImages.restore()
+	a.filmstripImages.restore()
+	a.filmstripTrace = nil
+	a.previewImages.clear()
+	a.previewTrace = nil
+	a.previewImageShown = false
+	a.previewSlowLogged = false
 	a.previewImagePath = ""
 	a.previewBitmap = nil
 	a.psdInfo = nil
@@ -480,13 +553,28 @@ func (a *App) loadPreviewContent() {
 		return
 	}
 	item := a.items[a.previewIndex]
-	if a.itemPages != nil {
-		loaded := a.fullWorkspaceItems([]core.Item{item})
-		if len(loaded) == 0 {
+	trace := &previewLoadTrace{
+		sequence: a.previewSeq, itemID: item.ID, path: item.FilePath,
+		index: a.previewIndex, mode: a.previewMode, started: time.Now(),
+	}
+	a.previewTrace = trace
+	trace.record("info", "requested", trace.started, fmt.Sprintf("name=%q", item.Name))
+	a.activeItem = &item
+	a.activeItemID = item.ID
+	if a.itemPages != nil && a.svc != nil {
+		loaded, err := a.svc.GetItem(item.ID)
+		if err != nil || loaded == nil {
+			if err == nil {
+				err = fmt.Errorf("preview item was not found")
+			}
+			a.previewError = err.Error()
+			trace.record("error", "metadata_failed", trace.started, fmt.Sprintf("error=%q", err))
 			return
 		}
-		item = loaded[0]
+		item = *loaded
 	}
+	trace.path = item.FilePath
+	trace.record("perf", "metadata_ready", trace.started, "")
 	a.activeItem = &item
 	a.activeItemID = item.ID
 	if categoryOf(item) == "image" {

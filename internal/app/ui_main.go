@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -623,9 +624,19 @@ func (a *App) dialogPanelActions(c *ui.Context, panel ui.Element, title string, 
 }
 
 func (a *App) closePreview() {
-	if a.thumbs != nil {
-		a.thumbs.invalidate(a.previewImagePath)
+	if trace := a.previewTrace; trace != nil {
+		trace.record("info", "closed", trace.started, fmt.Sprintf("display_ready=%t", a.previewImageShown))
 	}
+	if a.previewImages != nil {
+		a.previewImages.clear()
+	}
+	if a.filmstripImages != nil {
+		a.filmstripImages.clear()
+	}
+	a.filmstripTrace = nil
+	a.previewTrace = nil
+	a.previewImageShown = false
+	a.previewSlowLogged = false
 	a.previewImagePath = ""
 	a.previewSeq++
 	a.previewBitmap = nil

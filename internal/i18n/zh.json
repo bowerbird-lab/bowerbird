@@ -317,6 +317,8 @@
     "totalSize": "总大小"
   },
   "preview": {
+    "imageLoadFailed": "图片加载失败",
+    "retry": "重试",
     "backTooltip": "返回 (Esc / 双击)",
     "closePreviewTooltip": "关闭预览 (Esc)",
     "exitFullscreenTooltip": "退出全屏预览 (空格 / Esc)",

@@ -249,26 +249,32 @@ type App struct {
 	menuOpen          bool
 
 	// Preview and playback.
-	previewOpen      bool
-	previewMode      string // "inline" (double click) or "full" (space key)
-	previewIndex     int
-	previewZoom      float32
-	previewPan       ui.Point
-	previewDragged   bool
-	previewPanning   bool
-	previewLastX     float32
-	previewLastY     float32
-	previewText      string
-	previewBitmap    *ui.Bitmap
-	previewImagePath string
-	psdInfo          *core.PSDInfo
-	previewError     string
-	player           *player.Player
-	video            *player.VideoPlayer
-	videoErr         string
-	videoScrub       float64
-	videoSeq         uint64
-	previewSeq       uint64
+	previewOpen       bool
+	previewMode       string // "inline" (double click) or "full" (space key)
+	previewIndex      int
+	previewZoom       float32
+	previewPan        ui.Point
+	previewDragged    bool
+	previewPanning    bool
+	previewLastX      float32
+	previewLastY      float32
+	previewText       string
+	previewBitmap     *ui.Bitmap
+	previewImagePath  string
+	previewImages     *thumbCache
+	filmstripImages   *thumbCache
+	filmstripTrace    *filmstripLoadState
+	previewTrace      *previewLoadTrace
+	previewImageShown bool
+	previewSlowLogged bool
+	psdInfo           *core.PSDInfo
+	previewError      string
+	player            *player.Player
+	video             *player.VideoPlayer
+	videoErr          string
+	videoScrub        float64
+	videoSeq          uint64
+	previewSeq        uint64
 
 	// Settings values.
 	themeValue    string
@@ -402,26 +408,28 @@ type installedPluginRow struct {
 // point is still constructing the library manager.
 func New(svc *core.Service) *App {
 	a := &App{
-		svc:            svc,
-		trans:          i18n.New("system"),
-		prefs:          defaultPrefs(),
-		nav:            NavAll,
-		expanded:       map[string]bool{},
-		selected:       map[string]bool{},
-		selectedAt:     -1,
-		selectedAnchor: -1,
-		sortOrder:      "desc",
-		rowHeight:      190,
-		sidebarWidth:   defaultSidebarWidth,
-		inspectorWidth: defaultInspectorWidth,
-		sidebarLimit:   maxSidebarWidth,
-		inspectorLimit: maxInspectorWidth,
-		thumbs:         newThumbCache(),
-		thumbJobs:      newThumbJobQueue(),
-		libIcons:       map[string]*ui.Bitmap{},
-		logsAutoScroll: true,
-		logsLevel:      "all",
-		start:          time.Now(),
+		svc:             svc,
+		trans:           i18n.New("system"),
+		prefs:           defaultPrefs(),
+		nav:             NavAll,
+		expanded:        map[string]bool{},
+		selected:        map[string]bool{},
+		selectedAt:      -1,
+		selectedAnchor:  -1,
+		sortOrder:       "desc",
+		rowHeight:       190,
+		sidebarWidth:    defaultSidebarWidth,
+		inspectorWidth:  defaultInspectorWidth,
+		sidebarLimit:    maxSidebarWidth,
+		inspectorLimit:  maxInspectorWidth,
+		thumbs:          newThumbCache(),
+		previewImages:   newPreviewImageCache(),
+		filmstripImages: newFilmstripImageCache(),
+		thumbJobs:       newThumbJobQueue(),
+		libIcons:        map[string]*ui.Bitmap{},
+		logsAutoScroll:  true,
+		logsLevel:       "all",
+		start:           time.Now(),
 	}
 	a.loadPrefs()
 	a.loadThemes()
@@ -461,12 +469,17 @@ func (a *App) tf(key string, args map[string]any) string { return a.trans.Tf(key
 // window is built by this package.
 func (a *App) SetMainWindow(w *mygo.Window) {
 	a.win = w
+	var notify func()
 	if w != nil {
+		notify = w.Invalidate
 		w.OnResize(func() {
 			a.rebuildRows()
 			w.Invalidate()
 		})
 	}
+	a.thumbs.setNotify(notify)
+	a.previewImages.setNotify(notify)
+	a.filmstripImages.setNotify(notify)
 	a.refreshAll()
 }
 func (a *App) SetSettingsWindow(w *mygo.Window) {
@@ -550,10 +563,13 @@ func (a *App) postLogs(fn func()) {
 func (a *App) Notify(show bool) {
 	if show {
 		a.thumbs.restore()
+		a.previewImages.restore()
+		a.filmstripImages.restore()
 		a.refreshAll()
 		return
 	}
 	a.thumbs.trim(0)
+	a.filmstripImages.trim(0)
 	a.thumbJobs = newThumbJobQueue()
 	a.closePreview()
 	runtime.GC()
