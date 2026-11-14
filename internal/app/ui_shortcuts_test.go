@@ -67,3 +67,45 @@ func TestDeleteShortcutsMapToDeleteKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestAcceleratorFromUIRoundTrips(t *testing.T) {
+	cases := []struct {
+		mods ui.Modifiers
+		key  ui.Key
+		want string
+	}{
+		{ui.Cmd, ui.KeyK, "CmdOrCtrl+K"},
+		{ui.Cmd | ui.Shift, ui.KeyF11, "CmdOrCtrl+Shift+F11"},
+		{0, ui.KeyDelete, "Delete"},
+		{ui.Alt, ui.KeyEqual, "Alt+="},
+		{ui.Cmd | ui.Alt | ui.Shift, ui.KeySpace, "CmdOrCtrl+Alt+Shift+Space"},
+		{0, ui.KeyComma, ","},
+	}
+	for _, tc := range cases {
+		got, ok := acceleratorFromUI(tc.mods, tc.key)
+		if !ok || got != tc.want {
+			t.Errorf("acceleratorFromUI(%v, %v) = (%q, %v), want %q", tc.mods, tc.key, got, ok, tc.want)
+			continue
+		}
+		// The recorder's output must be what the handlers parse back.
+		mods, key, ok := uiShortcutKeys(got)
+		if !ok || mods != tc.mods || key != tc.key {
+			t.Errorf("uiShortcutKeys(%q) = (%v, %v, %v), want (%v, %v)", got, mods, key, ok, tc.mods, tc.key)
+		}
+	}
+	if _, ok := acceleratorFromUI(ui.Cmd, ui.KeyUnknown); ok {
+		t.Error("a modifier alone must not record a shortcut")
+	}
+}
+
+func TestShortcutPreviewShowsHeldModifiers(t *testing.T) {
+	if got := shortcutPreviewAccel(0, ""); got != "" {
+		t.Errorf("preview with nothing held = %q, want empty", got)
+	}
+	if got, want := shortcutPreviewAccel(ui.Cmd|ui.Shift, ""), "CmdOrCtrl+Shift+…"; got != want {
+		t.Errorf("held modifiers preview = %q, want %q", got, want)
+	}
+	if got, want := shortcutPreviewAccel(ui.Alt, "CmdOrCtrl+K"), "CmdOrCtrl+K"; got != want {
+		t.Errorf("recorded preview = %q, want %q", got, want)
+	}
+}

@@ -373,7 +373,7 @@
     },
     "shortcuts": {
       "title": "键盘快捷键",
-      "description": "全局热键在应用处于后台时也生效；应用内快捷键仅在窗口聚焦时生效。在输入框中键入组合键（例如 Alt+Shift+A）后按回车保存，冲突会提示。基础快捷键为固定按键，仅供查看。",
+      "description": "全局热键在应用处于后台时也生效；应用内快捷键仅在窗口聚焦时生效。点击快捷键即可录制新的组合键。基础快捷键为固定按键，仅供查看。",
       "areaTitle": "区域截图",
       "areaDesc": "自由框选屏幕区域并导入资源库",
       "windowTitle": "窗口截图",
@@ -384,6 +384,10 @@
       "toggleMainDesc": "即使应用在后台也可切换主窗口显示",
       "globalBadge": "全局",
       "globalGroup": "全局热键",
+      "editTitle": "设置快捷键",
+      "editHint": "按下要使用的组合键。Esc 取消；“不设置”会让该操作没有快捷键。",
+      "unsetAction": "不设置",
+      "conflict": "已被「{{action}}」使用，请换一个组合。",
       "appGroup": "应用内快捷键",
       "fixedGroup": "基础快捷键",
       "settingsTitle": "打开设置",
@@ -667,7 +671,7 @@
     "lightweightHelp": "窗口隐藏一分钟后释放窗口资源",
     "rowHeight": "缩略图行高",
     "search": "搜索设置",
-    "shortcutsHelp": "在输入框中按回车保存；冲突会提示。基础快捷键不可修改。",
+    "shortcutsHelp": "点击键位即可录制，Esc 取消。基础快捷键不可修改。",
     "shortcutsReset": "恢复默认",
     "solidColor": "背景颜色",
     "storage": {

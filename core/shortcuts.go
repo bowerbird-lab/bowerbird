@@ -233,6 +233,26 @@ func NormalizeShortcutSettings(in ShortcutSettings) ShortcutSettings {
 	return out
 }
 
+// ShortcutConflict returns the id of the other action that already uses accel,
+// or "". It is the live check the recorder runs as keys come in, so a conflict
+// shows before the user saves.
+func ShortcutConflict(settings ShortcutSettings, id, accel string) string {
+	norm := NormalizeAccelerator(accel)
+	if id == "" || norm == "" {
+		return ""
+	}
+	bindings := NormalizeShortcutSettings(settings).Bindings
+	for other, value := range bindings {
+		if other == id || value == "" {
+			continue
+		}
+		if strings.EqualFold(value, norm) {
+			return other
+		}
+	}
+	return ""
+}
+
 func ValidateShortcutSettings(in ShortcutSettings) error {
 	norm := NormalizeShortcutSettings(in)
 	seen := map[string]string{}
@@ -328,53 +348,61 @@ func NormalizeAccelerator(accel string) string {
 	return strings.Join(out, "+")
 }
 
-// AcceleratorDisplay returns a human-readable shortcut for the current OS.
-func AcceleratorDisplay(accel string) string {
+// AcceleratorKeys splits an accelerator into the labels of its key caps, one
+// per key: the modifiers first, then the key. The UI draws each as its own
+// square, joined by plus signs.
+func AcceleratorKeys(accel string) []string {
 	accel = NormalizeAccelerator(accel)
 	if accel == "" {
-		return ""
+		return nil
 	}
 	darwin := runtime.GOOS == "darwin"
 	parts := strings.Split(accel, "+")
-	var mods []string
-	var key string
+	keys := make([]string, 0, len(parts))
 	for _, p := range parts {
 		switch strings.ToLower(p) {
 		case "cmdorctrl":
 			if darwin {
-				mods = append(mods, "⌘")
+				keys = append(keys, "⌘")
 			} else {
-				mods = append(mods, "Ctrl")
+				keys = append(keys, "Ctrl")
 			}
 		case "ctrl":
 			if darwin {
-				mods = append(mods, "⌃")
+				keys = append(keys, "⌃")
 			} else {
-				mods = append(mods, "Ctrl")
+				keys = append(keys, "Ctrl")
 			}
 		case "alt":
 			if darwin {
-				mods = append(mods, "⌥")
+				keys = append(keys, "⌥")
 			} else {
-				mods = append(mods, "Alt")
+				keys = append(keys, "Alt")
 			}
 		case "shift":
 			if darwin {
-				mods = append(mods, "⇧")
+				keys = append(keys, "⇧")
 			} else {
-				mods = append(mods, "Shift")
+				keys = append(keys, "Shift")
 			}
 		default:
-			key = shortcutKeyDisplay(p)
+			keys = append(keys, shortcutKeyDisplay(p))
 		}
 	}
-	if darwin {
-		return strings.Join(append(mods, key), "")
+	return keys
+}
+
+// AcceleratorDisplay returns a human-readable shortcut for the current OS:
+// macOS joins its glyphs without separators, as its menus do.
+func AcceleratorDisplay(accel string) string {
+	keys := AcceleratorKeys(accel)
+	if len(keys) == 0 {
+		return ""
 	}
-	if len(mods) == 0 {
-		return key
+	if runtime.GOOS == "darwin" {
+		return strings.Join(keys, "")
 	}
-	return strings.Join(append(mods, key), "+")
+	return strings.Join(keys, "+")
 }
 
 // AcceleratorForMyGo maps stored accelerators onto mygo's syntax.

@@ -104,6 +104,9 @@ func (a *App) viewSettings(c *ui.Context) {
 			})
 			a.viewSettingsHeader(c)
 		})
+		if a.shortcutEditID != "" {
+			a.viewShortcutDialog(c)
+		}
 	})
 }
 
@@ -388,32 +391,195 @@ func (a *App) settingsShortcuts(c *ui.Context) {
 	})
 }
 
-// shortcutRow draws one catalog entry: an editable accelerator field, or the
-// read-only badge of a fixed binding.
+// shortcutRow draws one catalog entry: a button that records a new
+// combination, or the read-only badge of a fixed binding.
 func (a *App) shortcutRow(c *ui.Context, def core.ShortcutDef) {
 	label := a.shortcutLabel(def.ID)
+	p := paletteFor(c.Theme())
 	if def.Fixed {
-		a.settingsRow(c, label, "", func() { a.shortcutBadge(c, def.ID) })
+		a.settingsRow(c, label, "", func() { a.shortcutValue(c, def.ID, 11) })
 		return
 	}
 	a.settingsRow(c, label, "", func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			a.shortcutBadge(c, def.ID)
-			val := a.shortcuts.Bindings[def.ID]
-			field := ui.TextInput(c.Key("shortcut-"+def.ID), &val).Width(150).FontSize(12).FontFeatures("tnum")
-			if field.Submitted() {
-				next := core.NormalizeShortcutSettings(a.shortcuts)
-				next.Bindings[def.ID] = val
-				if err := a.svc.SetShortcutSettings(next); err != nil {
-					a.showToast(err.Error())
-				} else {
-					a.shortcuts = next
-					a.rebuildShortcutPairs()
-					a.showToast(a.t("common.saved"))
-				}
+		record := ui.ButtonBase(c.Key("shortcut-" + def.ID)).Height(30).MinWidth(80).PaddingX(4).Radius(7).Background(ui.Transparent).FocusRing(false).AlignItems(ui.Center).Justify(ui.Center)
+		if record.Hovered() {
+			record.Background(p.hover)
+		}
+		record.Children(func() { a.shortcutValue(c, def.ID, 11) })
+		if record.Clicked() {
+			a.openShortcutDialog(def.ID)
+		}
+	})
+}
+
+// shortcutValue draws one binding as separate key caps, or the "Not set" chip
+// when the action has no shortcut.
+func (a *App) shortcutValue(c *ui.Context, id string, fontSize float32) {
+	accel := a.shortcuts.Accelerator(id)
+	if core.AcceleratorDisplay(accel) == "" {
+		a.shortcutNotSetChip(c, fontSize)
+		return
+	}
+	a.shortcutCaps(c, accel, fontSize)
+}
+
+// shortcutCaps draws an accelerator as one small square per key, joined by
+// plus signs. An empty accelerator draws nothing.
+func (a *App) shortcutCaps(c *ui.Context, accel string, fontSize float32) {
+	keys := core.AcceleratorKeys(accel)
+	if len(keys) == 0 {
+		return
+	}
+	p := paletteFor(c.Theme())
+	height := fontSize + 13
+	ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+		for i, key := range keys {
+			if i > 0 {
+				ui.Text(c, "+").FontSize(fontSize).TextColor(p.faint)
 			}
+			cap := ui.Box(c).MinWidth(height).Height(height).PaddingX(5).Radius(5).Background(p.surface2).Border(1, p.hairline).AlignItems(ui.Center).Justify(ui.Center)
+			cap.Children(func() {
+				ui.Text(c, key).FontSize(fontSize).TextColor(p.muted).FontFeatures("tnum")
+			})
+		}
+	})
+}
+
+// shortcutNotSetChip is the placeholder for an action without a shortcut.
+func (a *App) shortcutNotSetChip(c *ui.Context, fontSize float32) {
+	p := paletteFor(c.Theme())
+	height := fontSize + 13
+	ui.Box(c).Height(height).PaddingX(8).Radius(5).Background(ui.Transparent).Border(1, p.hairline).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+		ui.Text(c, a.t("settings.shortcuts.unset")).FontSize(fontSize).TextColor(p.faint)
+	})
+}
+
+func (a *App) openShortcutDialog(id string) {
+	a.shortcutEditID = id
+	a.shortcutDraft = a.shortcuts.Accelerator(id)
+	a.checkShortcutDraft()
+}
+
+// checkShortcutDraft reports the other action already using the recorded
+// combination, as soon as the keys come in rather than at save time.
+func (a *App) checkShortcutDraft() {
+	a.shortcutEditError = ""
+	if a.shortcutEditID == "" || a.shortcutDraft == "" {
+		return
+	}
+	other := core.ShortcutConflict(a.shortcuts, a.shortcutEditID, a.shortcutDraft)
+	if other == "" {
+		return
+	}
+	a.shortcutEditError = a.tf("settings.shortcuts.conflict", map[string]any{
+		"action": a.shortcutLabel(other),
+	})
+}
+
+func (a *App) cancelShortcutDialog() {
+	a.shortcutEditID = ""
+	a.shortcutDraft = ""
+	a.shortcutEditError = ""
+}
+
+// applyShortcutDraft saves the recorded accelerator, or clears the binding
+// when accel is empty. A conflict keeps the recorder open with the reason.
+func (a *App) applyShortcutDraft(accel string) {
+	id := a.shortcutEditID
+	if id == "" {
+		return
+	}
+	// The recorder already warned while the keys came in; saving a conflict
+	// would only fail in the service, so stop here.
+	a.shortcutDraft = core.NormalizeAccelerator(accel)
+	a.checkShortcutDraft()
+	if a.shortcutEditError != "" {
+		return
+	}
+	next := core.NormalizeShortcutSettings(a.shortcuts)
+	next.Bindings[id] = a.shortcutDraft
+	if a.svc != nil {
+		if err := a.svc.SetShortcutSettings(next); err != nil {
+			a.shortcutEditError = err.Error()
+			return
+		}
+	}
+	a.shortcuts = next
+	a.rebuildShortcutPairs()
+	a.cancelShortcutDialog()
+	a.showToast(a.t("common.saved"))
+}
+
+// viewShortcutDialog is the recorder: the pressed keys show as they come in,
+// Esc cancels, No shortcut clears the binding and Save keeps what was pressed.
+func (a *App) viewShortcutDialog(c *ui.Context) {
+	p := paletteFor(c.Theme())
+	open := true
+	ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
+		backdrop.Background(ui.RGBA(0, 0, 0, 0.35))
+		panel.Width(400).Padding(22).Radius(14).Background(p.surface).Border(1, p.hairline).Shadow(0, 26, 64, -18, p.cardShade).Children(func() {
+			ui.Column(c).FillWidth().Gap(14).Children(func() {
+				ui.Text(c, a.t("settings.shortcuts.editTitle")).FontSize(17).FontWeight(650).TextColor(p.text)
+				ui.Text(c, a.shortcutLabel(a.shortcutEditID)).FontSize(12).TextColor(p.muted)
+				border := p.accent
+				if a.shortcutEditError != "" {
+					border = p.danger
+				}
+				capture := ui.Box(c.Key("shortcut-capture-"+a.shortcutEditID)).FillWidth().Height(64).Radius(10).Background(p.surface2).Border(1, border).AlignItems(ui.Center).Justify(ui.Center).Focusable().Focus()
+				capture.HandleInput(func(ev ui.InputEvent) bool {
+					switch ev.Kind {
+					case ui.InputKeyDown:
+						if ev.Key == ui.KeyEscape {
+							a.cancelShortcutDialog()
+							open = false
+							return true
+						}
+						if accel, ok := acceleratorFromUI(ev.Mods, ev.Key); ok {
+							a.shortcutDraft = accel
+							a.checkShortcutDraft()
+						}
+						return true
+					case ui.InputKeyUp:
+						// Check again once the keys settle too: the warning
+						// follows the last combination pressed.
+						a.checkShortcutDraft()
+						return true
+					case ui.InputText, ui.InputCompose, ui.InputCommand:
+						// Recording takes every key, so nothing behind the
+						// recorder acts on what is pressed.
+						return true
+					}
+					return false
+				})
+				capture.Children(func() {
+					accel := shortcutPreviewAccel(c.Modifiers(), a.shortcutDraft)
+					if accel == "" {
+						ui.Text(c, a.t("settings.shortcuts.recording")).FontSize(13).TextColor(p.faint)
+						return
+					}
+					a.shortcutCaps(c, accel, 13)
+				})
+				ui.Text(c, a.t("settings.shortcuts.editHint")).FontSize(10.5).TextColor(p.faint).Wrap()
+				if a.shortcutEditError != "" {
+					ui.Text(c, a.shortcutEditError).FontSize(11).TextColor(p.danger).Wrap()
+				}
+				ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Children(func() {
+					if ui.Button(c, a.t("settings.shortcuts.unsetAction")).Clicked() {
+						a.applyShortcutDraft("")
+					}
+					if ui.Button(c, a.t("common.cancel")).Clicked() {
+						a.cancelShortcutDialog()
+					}
+					if ui.PrimaryButton(c, a.t("common.save")).Disabled(a.shortcutDraft == "" || a.shortcutEditError != "").Clicked() {
+						a.applyShortcutDraft(a.shortcutDraft)
+					}
+				})
+			})
 		})
 	})
+	if !open {
+		a.cancelShortcutDialog()
+	}
 }
 
 func (a *App) shortcutLabel(id string) string {
@@ -422,21 +588,6 @@ func (a *App) shortcutLabel(id string) string {
 		return label
 	}
 	return id
-}
-
-// shortcutBadge renders the current accelerator of a catalog entry.
-func (a *App) shortcutBadge(c *ui.Context, id string) {
-	p := paletteFor(c.Theme())
-	text := core.AcceleratorDisplay(a.shortcuts.Accelerator(id))
-	if text == "" {
-		text = a.t("settings.shortcuts.unset")
-		if text == "settings.shortcuts.unset" {
-			text = "—"
-		}
-	}
-	ui.Row(c).MinWidth(56).Height(24).PaddingX(8).Radius(6).Background(p.surface2).Border(1, p.hairline).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-		ui.Text(c, text).FontSize(11.5).TextColor(p.muted).FontFeatures("tnum")
-	})
 }
 
 func (a *App) settingsPlugins(c *ui.Context) {

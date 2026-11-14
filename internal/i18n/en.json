@@ -373,7 +373,7 @@
     },
     "shortcuts": {
       "title": "Keyboard shortcuts",
-      "description": "Global hotkeys work even while the app is in the background; in-app shortcuts need a focused window. Type an accelerator (for example Alt+Shift+A) and press Enter to save it; conflicts are reported. Basic shortcuts are fixed and listed for reference.",
+      "description": "Global hotkeys work even while the app is in the background; in-app shortcuts need a focused window. Click a shortcut to record a new combination. Basic shortcuts are fixed and listed for reference.",
       "areaTitle": "Area Capture",
       "areaDesc": "Drag to select any screen area and save to library",
       "windowTitle": "Window Capture",
@@ -384,6 +384,10 @@
       "toggleMainDesc": "Toggle the main window even when Bowerbird is in the background",
       "globalBadge": "Global",
       "globalGroup": "Global hotkeys",
+      "editTitle": "Set shortcut",
+      "editHint": "Press the keys you want to use. Esc cancels. No shortcut leaves the action without a key.",
+      "unsetAction": "No shortcut",
+      "conflict": "Already used by {{action}}. Press another combination.",
       "appGroup": "In-app shortcuts",
       "fixedGroup": "Basic shortcuts",
       "settingsTitle": "Open Settings",
@@ -667,7 +671,7 @@
     "lightweightHelp": "Tear down windows when hidden for a minute",
     "rowHeight": "Thumbnail row height",
     "search": "Search settings",
-    "shortcutsHelp": "Press Enter in a field to save; conflicts are reported. Basic shortcuts cannot be changed.",
+    "shortcutsHelp": "Click a shortcut to record it; Esc cancels. Basic shortcuts cannot be changed.",
     "shortcutsReset": "Reset to defaults",
     "solidColor": "Background color",
     "storage": {

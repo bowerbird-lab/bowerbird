@@ -1,6 +1,7 @@
 package core
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -202,5 +203,61 @@ func TestDeleteShortcutsAreFixed(t *testing.T) {
 	// macOS reports its main delete key as Backspace, so both must be bound.
 	if got := defaults.Accelerator(ShortcutDeleteBackspace); got != "Backspace" {
 		t.Errorf("backspace accelerator = %q, want Backspace", got)
+	}
+}
+
+func TestAcceleratorKeys(t *testing.T) {
+	mods := []string{"⌘", "⇧"}
+	if runtime.GOOS != "darwin" {
+		mods = []string{"Ctrl", "Shift"}
+	}
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"CmdOrCtrl+Shift+K", append(append([]string{}, mods...), "K")},
+		{"Escape", []string{"Esc"}},
+		{"Left", []string{"←"}},
+		{"F11", []string{"F11"}},
+		{"", nil},
+	}
+	for _, tc := range cases {
+		got := AcceleratorKeys(tc.in)
+		if len(got) != len(tc.want) {
+			t.Errorf("AcceleratorKeys(%q) = %v, want %v", tc.in, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("AcceleratorKeys(%q) = %v, want %v", tc.in, got, tc.want)
+				break
+			}
+		}
+	}
+	if got := AcceleratorDisplay("CmdOrCtrl+Shift+K"); runtime.GOOS == "darwin" {
+		if got != "⌘⇧K" {
+			t.Errorf("AcceleratorDisplay on macOS = %q, want the glyphs together", got)
+		}
+	} else if got != "Ctrl+Shift+K" {
+		t.Errorf("AcceleratorDisplay = %q, want Ctrl+Shift+K", got)
+	}
+}
+
+func TestShortcutConflictLookup(t *testing.T) {
+	settings := DefaultShortcutSettings()
+	if got := ShortcutConflict(settings, ShortcutOpenSettings, "CmdOrCtrl+L"); got != ShortcutLogs {
+		t.Errorf("conflict with logs = %q, want %q", got, ShortcutLogs)
+	}
+	if got := ShortcutConflict(settings, ShortcutOpenSettings, "CmdOrCtrl+F"); got != ShortcutSearch {
+		t.Errorf("conflict with the fixed search key = %q, want %q", got, ShortcutSearch)
+	}
+	if got := ShortcutConflict(settings, ShortcutOpenSettings, "CmdOrCtrl+K"); got != "" {
+		t.Errorf("a free combination must not conflict, got %q", got)
+	}
+	if got := ShortcutConflict(settings, ShortcutOpenSettings, settings.Accelerator(ShortcutOpenSettings)); got != "" {
+		t.Errorf("a binding must not conflict with itself, got %q", got)
+	}
+	if got := ShortcutConflict(settings, ShortcutOpenSettings, ""); got != "" {
+		t.Errorf("an unset combination must not conflict, got %q", got)
 	}
 }

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"bowerbird/core"
@@ -70,6 +71,118 @@ func (a *App) shortcutKeys(id string) (ui.Modifiers, ui.Key, bool) {
 		return pair.mods, pair.key, pair.ok
 	}
 	return uiShortcutKeys(a.shortcutSettings().Accelerator(id))
+}
+
+// acceleratorFromUI turns a recorded key press into the catalog's accelerator
+// syntax, the inverse of uiShortcutKeys. A modifier pressed on its own has no
+// key name yet and records nothing.
+func acceleratorFromUI(mods ui.Modifiers, key ui.Key) (string, bool) {
+	name, ok := uiKeyName(key)
+	if !ok {
+		return "", false
+	}
+	return strings.Join(append(acceleratorModifiers(mods), name), "+"), true
+}
+
+// acceleratorModifiers renders the modifiers of a combination in catalog
+// order.
+func acceleratorModifiers(mods ui.Modifiers) []string {
+	parts := make([]string, 0, 3)
+	// ui.Cmd is Command on macOS and Control elsewhere; ui.Ctrl is the same
+	// bit as ui.Cmd on Windows and Linux, so it only adds a part on macOS.
+	if mods&ui.Cmd != 0 {
+		parts = append(parts, "CmdOrCtrl")
+	} else if mods&ui.Ctrl != 0 {
+		parts = append(parts, "Ctrl")
+	}
+	if mods&ui.Alt != 0 {
+		parts = append(parts, "Alt")
+	}
+	if mods&ui.Shift != 0 {
+		parts = append(parts, "Shift")
+	}
+	return parts
+}
+
+// shortcutPreviewAccel is what the recorder shows: the combination recorded
+// last, or the modifiers held right now while no key has completed one, with
+// an ellipsis standing for the key still missing.
+func shortcutPreviewAccel(held ui.Modifiers, draft string) string {
+	if draft != "" {
+		return draft
+	}
+	parts := acceleratorModifiers(held)
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(append(parts, "…"), "+")
+}
+
+// uiKeyName is the catalog's name for key, the inverse of uiKeyForName.
+func uiKeyName(key ui.Key) (string, bool) {
+	switch {
+	case key >= ui.KeyA && key <= ui.KeyZ:
+		return string(rune('A' + rune(key-ui.KeyA))), true
+	case key >= ui.Key0 && key <= ui.Key9:
+		return string(rune('0' + rune(key-ui.Key0))), true
+	case key >= ui.KeyF1 && key <= ui.KeyF12:
+		return fmt.Sprintf("F%d", int(key-ui.KeyF1)+1), true
+	}
+	switch key {
+	case ui.KeyComma:
+		return ",", true
+	case ui.KeyEqual:
+		return "=", true
+	case ui.KeyMinus:
+		return "-", true
+	case ui.KeyPeriod:
+		return ".", true
+	case ui.KeySlash:
+		return "/", true
+	case ui.KeySemicolon:
+		return ";", true
+	case ui.KeyQuote:
+		return "'", true
+	case ui.KeyBracketLeft:
+		return "[", true
+	case ui.KeyBracketRight:
+		return "]", true
+	case ui.KeyBackslash:
+		return `\`, true
+	case ui.KeyBackquote:
+		return "`", true
+	case ui.KeySpace:
+		return "Space", true
+	case ui.KeyEscape:
+		return "Escape", true
+	case ui.KeyEnter:
+		return "Enter", true
+	case ui.KeyTab:
+		return "Tab", true
+	case ui.KeyBackspace:
+		return "Backspace", true
+	case ui.KeyDelete:
+		return "Delete", true
+	case ui.KeyInsert:
+		return "Insert", true
+	case ui.KeyHome:
+		return "Home", true
+	case ui.KeyEnd:
+		return "End", true
+	case ui.KeyPageUp:
+		return "PageUp", true
+	case ui.KeyPageDown:
+		return "PageDown", true
+	case ui.KeyUp:
+		return "Up", true
+	case ui.KeyDown:
+		return "Down", true
+	case ui.KeyLeft:
+		return "Left", true
+	case ui.KeyRight:
+		return "Right", true
+	}
+	return "", false
 }
 
 // uiShortcutKeys converts a stored accelerator such as "CmdOrCtrl+Shift+L"

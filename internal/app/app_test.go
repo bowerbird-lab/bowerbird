@@ -965,3 +965,115 @@ func TestStripWindowCentresAndClamps(t *testing.T) {
 		}
 	}
 }
+
+// TestShortcutRecorder covers the settings recorder: keys show as they are
+// pressed, Save applies the combination, Esc cancels, and No shortcut clears
+// the binding. Conflicts keep the recorder open with the reason.
+func TestShortcutRecorder(t *testing.T) {
+	newSettings := func(t *testing.T) (*App, *ui.Tester) {
+		t.Helper()
+		a := seededApp(t)
+		a.settingsSection = 2
+		a.shortcuts = core.DefaultShortcutSettings()
+		a.rebuildShortcutPairs()
+		return a, ui.NewTester(a.viewSettings, 1000, 700)
+	}
+	click := func(t *testing.T, tester *ui.Tester, label string) {
+		t.Helper()
+		r, ok := tester.Find(label)
+		if !ok {
+			t.Fatalf("no %q button", label)
+		}
+		tester.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+		tester.Frame()
+	}
+
+	t.Run("save", func(t *testing.T) {
+		a, tester := newSettings(t)
+		a.openShortcutDialog(core.ShortcutOpenSettings)
+		tester.Frame()
+
+		tester.Key(ui.Cmd, ui.KeyK)
+		tester.Frame()
+		if a.shortcutDraft != "CmdOrCtrl+K" {
+			t.Fatalf("draft = %q, want CmdOrCtrl+K", a.shortcutDraft)
+		}
+
+		click(t, tester, a.t("common.save"))
+		if a.shortcutEditID != "" {
+			t.Fatal("recorder stayed open after saving")
+		}
+		if got := a.shortcuts.Accelerator(core.ShortcutOpenSettings); got != "CmdOrCtrl+K" {
+			t.Fatalf("saved accelerator = %q, want CmdOrCtrl+K", got)
+		}
+	})
+
+	t.Run("escape cancels", func(t *testing.T) {
+		a, tester := newSettings(t)
+		a.openShortcutDialog(core.ShortcutOpenSettings)
+		tester.Frame()
+
+		tester.Key(ui.Cmd, ui.KeyK)
+		tester.Frame()
+		tester.Key(0, ui.KeyEscape)
+		tester.Frame()
+
+		if a.shortcutEditID != "" {
+			t.Fatal("Esc left the recorder open")
+		}
+		if got := a.shortcuts.Accelerator(core.ShortcutOpenSettings); got == "CmdOrCtrl+K" {
+			t.Fatal("Esc saved the recorded combination")
+		}
+	})
+
+	t.Run("no shortcut", func(t *testing.T) {
+		a, tester := newSettings(t)
+		a.openShortcutDialog(core.ShortcutLogs)
+		tester.Frame()
+
+		click(t, tester, a.t("settings.shortcuts.unsetAction"))
+		if a.shortcutEditID != "" {
+			t.Fatal("recorder stayed open after clearing")
+		}
+		if got := a.shortcuts.Accelerator(core.ShortcutLogs); got != "" {
+			t.Fatalf("accelerator = %q, want it unset", got)
+		}
+		// Saving the same map again keeps it unset.
+		if err := core.ValidateShortcutSettings(a.shortcuts); err != nil {
+			t.Fatalf("unset shortcuts must not conflict: %v", err)
+		}
+	})
+
+	t.Run("conflict warns while recording", func(t *testing.T) {
+		a, tester := newSettings(t)
+		a.openShortcutDialog(core.ShortcutOpenSettings)
+		tester.Frame()
+
+		// CmdOrCtrl+L already opens the logs: the warning shows on the key
+		// press, before Save is anywhere near.
+		tester.Key(ui.Cmd, ui.KeyL)
+		tester.Frame()
+		if a.shortcutEditError == "" {
+			t.Fatal("a conflict was not reported as the keys came in")
+		}
+		if a.shortcutDraft != "CmdOrCtrl+L" {
+			t.Fatalf("draft = %q, want the pressed combination", a.shortcutDraft)
+		}
+
+		// Saving keeps the recorder open with the warning and changes nothing.
+		click(t, tester, a.t("common.save"))
+		if a.shortcutEditID == "" {
+			t.Fatal("a conflicting combination closed the recorder")
+		}
+		if got := a.shortcuts.Accelerator(core.ShortcutOpenSettings); got == "CmdOrCtrl+L" {
+			t.Fatal("a conflicting combination was saved")
+		}
+
+		// A free combination clears the warning right away.
+		tester.Key(ui.Cmd, ui.KeyK)
+		tester.Frame()
+		if a.shortcutEditError != "" {
+			t.Fatalf("warning stayed after a free combination: %q", a.shortcutEditError)
+		}
+	})
+}

@@ -224,9 +224,14 @@ type App struct {
 	network       core.NetworkSettings
 	shortcuts     core.ShortcutSettings
 	shortcutPairs map[string]uiShortcut
-	mobile        *core.MobileServerStatus
-	mobileDevices []core.MobileDeviceInfo
-	settingsDirty bool
+	// Shortcut recorder: the catalog id being recorded and the accelerator
+	// captured so far ("" while nothing is pressed yet).
+	shortcutEditID    string
+	shortcutDraft     string
+	shortcutEditError string
+	mobile            *core.MobileServerStatus
+	mobileDevices     []core.MobileDeviceInfo
+	settingsDirty     bool
 
 	// Settings.
 	settingsSection int
@@ -380,9 +385,15 @@ func (a *App) SetMainWindow(w *mygo.Window) {
 	}
 	a.refreshAll()
 }
-func (a *App) SetSettingsWindow(w *mygo.Window) { a.settingsWin = w; a.refreshSettings() }
-func (a *App) SetLogsWindow(w *mygo.Window)     { a.logsWin = w; a.refreshLogs() }
-func (a *App) SetSetupWindow(w *mygo.Window)    { a.setupWin = w }
+func (a *App) SetSettingsWindow(w *mygo.Window) {
+	a.settingsWin = w
+	// A new settings window starts without a recorder left open from a
+	// previous one.
+	a.cancelShortcutDialog()
+	a.refreshSettings()
+}
+func (a *App) SetLogsWindow(w *mygo.Window)  { a.logsWin = w; a.refreshLogs() }
+func (a *App) SetSetupWindow(w *mygo.Window) { a.setupWin = w }
 
 // content wraps a view so a panic is logged and the window keeps painting
 // rather than falling back to an unexplained black frame.
