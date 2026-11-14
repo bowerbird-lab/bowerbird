@@ -201,14 +201,37 @@ func (a *App) handleSettingsShortcuts(c *ui.Context) {
 }
 
 func (a *App) settingsCard(c *ui.Context, title string, fn func()) {
+	a.settingsCardHelp(c, title, "", fn)
+}
+
+// settingsCardHelp is settingsCard with an info button beside the title; its
+// tooltip carries the explanatory copy that would otherwise be a paragraph.
+func (a *App) settingsCardHelp(c *ui.Context, title, help string, fn func()) {
 	p := a.palette(c)
 	ui.Column(c).FillWidth().Padding(14).Radius(10).Background(p.surface).Border(1, p.hairline).Gap(10).Children(func() {
 		if title != "" {
-			ui.Text(c, title).FontSize(11).FontWeight(650).LetterSpacing(0.4).TextColor(p.muted)
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(6).Children(func() {
+				ui.Text(c, title).FontSize(11).FontWeight(650).LetterSpacing(0.4).TextColor(p.muted)
+				a.infoIcon(c, help)
+			})
 		}
 		fn()
 	})
 	ui.Box(c).Height(10)
+}
+
+// infoIcon is the small help affordance used by settings rows and cards.
+func (a *App) infoIcon(c *ui.Context, help string) {
+	if help == "" {
+		return
+	}
+	p := a.palette(c)
+	icon := ui.Icon(c, iconInfo).Size(13, 13).Shrink(0).Tooltip(help)
+	if icon.Hovered() {
+		icon.TextColor(p.muted)
+	} else {
+		icon.TextColor(p.faint)
+	}
 }
 
 func (a *App) settingsRow(c *ui.Context, label, help string, control func()) {
@@ -231,14 +254,7 @@ func (a *App) settingsRowInfo(c *ui.Context, label, help string, control func())
 	ui.Row(c).FillWidth().MinHeight(36).AlignItems(ui.Center).Gap(14).Children(func() {
 		ui.Row(c).Grow(1).Shrink(1).MinWidth(0).AlignItems(ui.Center).Gap(6).Children(func() {
 			ui.Text(c, label).FontSize(12.5).TextColor(p.text).Shrink(1).SingleLine()
-			if help != "" {
-				icon := ui.Icon(c, iconInfo).Size(13, 13).Shrink(0).Tooltip(help)
-				if icon.Hovered() {
-					icon.TextColor(p.muted)
-				} else {
-					icon.TextColor(p.faint)
-				}
-			}
+			a.infoIcon(c, help)
 		})
 		control()
 	})
@@ -406,8 +422,7 @@ func (a *App) settingsAppearance(c *ui.Context) {
 // settingsThemeSelection draws the two variant pickers shared by the
 // Appearance and Themes pages.
 func (a *App) settingsThemeSelection(c *ui.Context) {
-	p := a.palette(c)
-	a.settingsCard(c, a.t("settings.themes.selection"), func() {
+	a.settingsCardHelp(c, a.t("settings.themes.selection"), a.t("settings.themes.followHint"), func() {
 		a.settingsRowInfo(c, a.t("settings.themes.light"), "", func() {
 			if id, changed := a.dropdown(c, "theme-light", a.prefs.LightTheme, a.themeOptions(theme.Light)); changed {
 				a.prefs.LightTheme = id
@@ -420,7 +435,6 @@ func (a *App) settingsThemeSelection(c *ui.Context) {
 				a.applyThemeSelection()
 			}
 		})
-		ui.Text(c, a.t("settings.themes.followHint")).FontSize(10.5).TextColor(p.faint).Wrap()
 	})
 }
 
@@ -428,10 +442,8 @@ func (a *App) settingsThemeSelection(c *ui.Context) {
 // JSON folder, and a colour editor for user themes. Built-in defaults are
 // read-only so the shipped palette cannot be deleted or replaced.
 func (a *App) settingsThemes(c *ui.Context) {
-	p := a.palette(c)
 	a.settingsThemeSelection(c)
-	a.settingsCard(c, a.t("settings.themes.files"), func() {
-		ui.Text(c, a.t("settings.themes.filesHint")).FontSize(11).TextColor(p.faint).Wrap()
+	a.settingsCardHelp(c, a.t("settings.themes.files"), a.t("settings.themes.filesHint"), func() {
 		ui.Row(c).Gap(8).Children(func() {
 			if ui.Button(c.Key("themes-open"), a.t("settings.themes.openFolder")).Clicked() {
 				if a.svc != nil {
@@ -444,11 +456,15 @@ func (a *App) settingsThemes(c *ui.Context) {
 			}
 		})
 	})
-	a.settingsCard(c, a.t("settings.themes.edit"), func() {
-		ui.Text(c, a.t("settings.themes.editHint")).FontSize(11).TextColor(p.faint).Wrap()
-		if a.themeEditID == "" {
-			a.themeEditID = a.activeTheme(c).ID
-		}
+	if a.themeEditID == "" {
+		a.themeEditID = a.activeTheme(c).ID
+	}
+	selected := a.themeIndex[a.themeEditID]
+	editHelp := a.t("settings.themes.editHint")
+	if selected != nil && selected.Builtin {
+		editHelp = a.t("settings.themes.builtin")
+	}
+	a.settingsCardHelp(c, a.t("settings.themes.edit"), editHelp, func() {
 		a.settingsRowInfo(c, a.t("settings.themes.editTheme"), "", func() {
 			options := make([]SelectOption, 0, len(a.themes))
 			for _, t := range a.themes {
@@ -460,12 +476,10 @@ func (a *App) settingsThemes(c *ui.Context) {
 				a.themeDirty = false
 			}
 		})
-		selected := a.themeIndex[a.themeEditID]
 		if selected == nil {
 			return
 		}
 		if selected.Builtin {
-			ui.Text(c, a.t("settings.themes.builtin")).FontSize(11).TextColor(p.faint).Wrap()
 			if ui.Button(c.Key("theme-duplicate"), a.t("settings.themes.duplicate")).Clicked() {
 				a.duplicateTheme(selected)
 			}
@@ -514,7 +528,7 @@ func (a *App) settingsThemes(c *ui.Context) {
 				a.themeDirty = true
 			}
 		})
-		ui.Row(c).Gap(8).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			if ui.Button(c.Key("theme-reset"), a.t("settings.themes.reset")).Clicked() {
 				a.resetThemeDraft()
 			}
@@ -525,10 +539,10 @@ func (a *App) settingsThemes(c *ui.Context) {
 			if ui.PrimaryButton(c.Key("theme-save"), a.t("settings.themes.save")).Clicked() {
 				a.saveThemeDraft()
 			}
+			if a.themeDirty {
+				a.infoIcon(c, a.t("settings.themes.unsaved"))
+			}
 		})
-		if a.themeDirty {
-			ui.Text(c, a.t("settings.themes.unsaved")).FontSize(10.5).TextColor(p.faint).Wrap()
-		}
 	})
 }
 
