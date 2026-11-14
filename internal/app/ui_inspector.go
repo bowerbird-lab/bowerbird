@@ -215,21 +215,11 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 		})
 		ui.Text(c, fmt.Sprintf("%s · %dx%d · %s", strings.ToUpper(item.Extension), item.Width, item.Height, formatBytes(item.Size))).FontSize(10.5).TextColor(p.faint).FontFeatures("tnum")
 
-		// The link and the note come first: they are what the item is for, and
-		// the facts below them only describe it.
-		a.inspectorDivider(c)
-		a.sectionLabel(c, a.t("inspector.sourceUrl"))
-		ui.TextInput(c.Key("url"), &a.urlDraft).FontSize(11.5).OnSubmit(func() { a.saveDetails(item.ID) })
-		if item.URL != "" {
-			if ui.Link(c, a.t("inspector.openSource"), item.URL).FontSize(11).Clicked() {
-				_ = a.svc.OpenExternalURL(item.URL)
-			}
-		}
-		a.sectionLabel(c, a.t("inspector.note"))
-		ui.TextArea(c.Key("note"), &a.noteDraft).FontSize(12).Height(64).OnSubmit(func() { a.saveDetails(item.ID) })
-
-		// Dominant palette: click a swatch to copy its hex.
+		// The palette opens the details: the colors are what the item reads as
+		// first, and a swatch copies its hex.
 		if len(item.Palette) > 0 {
+			a.inspectorDivider(c)
+			a.sectionLabel(c, a.t("inspector.colorPalette"))
 			ui.Row(c).FillWidth().Height(24).Gap(4).Margin(2, 0, 0, 0).Children(func() {
 				for i, hex := range item.Palette {
 					if i >= 8 {
@@ -249,6 +239,19 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 				}
 			})
 		}
+
+		// The link and the note come next: they are what the item is for, and
+		// the facts below them only describe it.
+		a.inspectorDivider(c)
+		a.sectionLabel(c, a.t("inspector.sourceUrl"))
+		ui.TextInput(c.Key("url"), &a.urlDraft).FontSize(11.5).OnSubmit(func() { a.saveDetails(item.ID) })
+		if item.URL != "" {
+			if ui.Link(c, a.t("inspector.openSource"), item.URL).FontSize(11).Clicked() {
+				_ = a.svc.OpenExternalURL(item.URL)
+			}
+		}
+		a.sectionLabel(c, a.t("inspector.note"))
+		ui.TextArea(c.Key("note"), &a.noteDraft).FontSize(12).Height(64).OnSubmit(func() { a.saveDetails(item.ID) })
 
 		a.inspectorDivider(c)
 		a.sectionLabel(c, a.t("inspector.tags"))

@@ -1991,11 +1991,13 @@ func TestSelectionInspectorReusesTheRatingStars(t *testing.T) {
 	}
 }
 
-// TestItemInspectorOrder opens with the link and the note, and keeps the rating
-// below the metadata: what the item is for first, what it is second.
+// TestItemInspectorOrder opens with the palette, then the link and the note, and
+// keeps the rating below the metadata: what the item looks like, what it is
+// for, and what it is.
 func TestItemInspectorOrder(t *testing.T) {
 	a := seededApp(t)
 	a.activeItem.URL = "https://example.com/source"
+	a.activeItem.Palette = []string{"#EF4444", "#3B82F6"}
 	tester := ui.NewTester(a.viewInspector, int(defaultInspectorWidth), 2000)
 	label := func(key string) ui.Rect {
 		t.Helper()
@@ -2005,6 +2007,7 @@ func TestItemInspectorOrder(t *testing.T) {
 		}
 		return r
 	}
+	palette := label("inspector.colorPalette")
 	link := label("inspector.sourceUrl")
 	note := label("inspector.note")
 	metadata := label("inspector.metadata")
@@ -2013,6 +2016,9 @@ func TestItemInspectorOrder(t *testing.T) {
 	rating, ok := tester.Find(a.t("inspector.rating"))
 	if !ok {
 		t.Fatalf("the metadata block has no rating row: %q", tester.Texts())
+	}
+	if palette.Y > link.Y {
+		t.Errorf("palette (y=%.1f) does not come before the link (y=%.1f)", palette.Y, link.Y)
 	}
 	if link.Y > note.Y {
 		t.Errorf("link (y=%.1f) does not come before the note (y=%.1f)", link.Y, note.Y)
