@@ -11,10 +11,9 @@ import (
 // a chosen parent directory or opens an existing one, then closes itself when
 // core opens the main window.
 func (a *App) viewSetup(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	a.applyVibrancyRoot(c)
-	root := ui.Box(c).Fill()
-	a.applyBackdrop(root, c.Theme())
+	root := ui.Box(c).Fill().Background(p.bg)
 	root.Children(func() {
 		ui.Column(c).Fill().Children(func() {
 			ui.Row(c).Height(32).DragWindow()

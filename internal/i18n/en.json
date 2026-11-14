@@ -352,10 +352,14 @@
       "autoDescription": "Follow the system"
     },
     "vibrancy": {
-      "title": "Native blur material",
-      "description": "Use the system's blurred material behind the header and other transparent surfaces. It is on by default; turning it off makes every surface opaque.",
-      "enable": "Enable native blur",
-      "enableDescription": "Controls all blur: when off, the header and every other surface use an opaque fill."
+      "title": "Material settings",
+      "description": "The blur material is used only by the sidebar and the title bar (header); the main workspace keeps a fixed colour so scrolling and resizing avoid extra compositing.",
+      "enable": "Enable material",
+      "enableDescription": "Controls all blur: when off, the sidebar and title bar use an opaque fill and the workspace colours stay the same.",
+      "sidebar": "Use the material in the sidebar",
+      "sidebarDescription": "Show the system blur material behind the sidebar; when off, the sidebar uses an opaque fill.",
+      "titlebar": "Use the material in the title bar",
+      "titlebarDescription": "Use the system blur material once content scrolls under the title bar; at rest it keeps the same background as the workspace."
     },
     "lightweight": {
       "title": "Lightweight mode",
@@ -449,7 +453,8 @@
       "network": "Network",
       "data": "Data & Storage",
       "extension": "Browser Extension",
-      "mobile": "Mobile Connection"
+      "mobile": "Mobile Connection",
+      "themes": "Themes"
     },
     "data": {
       "title": "Data & Storage Management",
@@ -637,39 +642,6 @@
     },
     "subtitle": "Application preferences",
     "title": "Settings",
-    "backdrop": {
-      "title": "Background",
-      "description": "What sits beneath the content: the theme's own colour by default, or a solid colour, a gradient, transparent. Content and sidebars keep their own fills, so text stays readable.",
-      "modes": {
-        "default": "Default",
-        "transparent": "Transparent",
-        "solid": "Solid",
-        "gradient": "Gradient",
-        "image": "Image"
-      },
-      "presets": {
-        "aurora": "Aurora",
-        "sunset": "Sunset",
-        "ocean": "Ocean",
-        "mono": "Mono"
-      },
-      "solidLabel": "Background colour",
-      "invalidColor": "Enter a valid colour, e.g. #f3f1ec",
-      "customLabel": "Custom gradient",
-      "customHint": "Accepts linear-gradient / radial-gradient / conic-gradient, e.g. linear-gradient(160deg, #a18cd1, #fbc2eb).",
-      "applyCustom": "Apply",
-      "clearCustom": "Clear",
-      "customActive": "Using the custom gradient",
-      "modesHint": "The sidebar always shows the background layer. Transparent paints the theme background at 50%, so the window material shows through while text stays readable.",
-      "opacityLabel": "Background opacity",
-      "opacityHint": "Opacity of the colour, gradient or image, 20% by default. Lower it to let the window and the material show through; Default and Transparent ignore this.",
-      "imageLabel": "Background image",
-      "imageHint": "Accepts a local file:// path or an https:// URL. The picture covers the window.",
-      "applyImage": "Apply",
-      "clearImage": "Clear",
-      "imageActive": "Using the custom image",
-      "invalidImage": "Enter a valid file:// or https:// image address"
-    },
     "about": "About",
     "aboutText": "Local-first asset and design library manager.",
     "behavior": "Behavior",
@@ -681,7 +653,6 @@
     "search": "Search settings",
     "shortcutsHelp": "Click a shortcut to record it; Esc cancels. Basic shortcuts cannot be changed.",
     "shortcutsReset": "Reset to defaults",
-    "solidColor": "Background color",
     "storage": {
       "items": "Items",
       "library": "Active library",
@@ -696,10 +667,61 @@
     "themeDark": "Dark",
     "themeLight": "Light",
     "themeSystem": "System",
-    "vibrancyHelp": "Use the system material behind the header; this switch controls every blur",
+    "vibrancyHelp": "Use the system material behind the sidebar and title bar; this switch controls every blur",
     "recordURL": {
       "title": "Record source URL",
       "description": "After downloading a media URL, save the resolved page/source URL into the item metadata. This is an application setting and is not controlled by plugins."
+    },
+    "themes": {
+      "selection": "Theme selection",
+      "light": "Light theme",
+      "dark": "Dark theme",
+      "followHint": "When the appearance mode follows the system, the light and dark themes switch with the system appearance; they can come from different theme sets.",
+      "files": "Theme files",
+      "filesHint": "The file name is the theme ID and must end with -light or -dark; the file contains JSON. The built-in default-light / default-dark themes are protected and cannot be replaced or deleted.",
+      "openFolder": "Open theme folder",
+      "reload": "Reload",
+      "reloaded": "Themes reloaded",
+      "edit": "Edit colours",
+      "editHint": "Choose a theme to edit. Built-in themes are read-only; duplicate one to change and save it.",
+      "editTheme": "Edit theme",
+      "builtin": "Built-in themes are protected and cannot be deleted or replaced. Duplicate one to edit it.",
+      "duplicate": "Create editable copy",
+      "reset": "Reset to default",
+      "revert": "Discard changes",
+      "save": "Save",
+      "saved": "Theme saved",
+      "unsaved": "There are unsaved changes.",
+      "colors": {
+        "window": "Window background",
+        "background": "Background",
+        "sidebar": "Sidebar",
+        "surface": "Surface",
+        "surfaceAlt": "Surface alt",
+        "text": "Text",
+        "textMuted": "Muted text",
+        "textFaint": "Faint text",
+        "border": "Border",
+        "hover": "Hover",
+        "pressed": "Pressed",
+        "accent": "Accent",
+        "onAccent": "Text on accent",
+        "danger": "Danger",
+        "warning": "Warning",
+        "info": "Info",
+        "star": "Rating",
+        "starStrong": "Rating strong",
+        "shadow": "Shadow",
+        "overlay": "Overlay",
+        "preview": "Preview background",
+        "badge": "Badge fill",
+        "onBadge": "Badge text"
+      },
+      "material": {
+        "sidebarOpacity": "Sidebar material opacity",
+        "headerTint": "Title bar material tint",
+        "headerBlur": "Title bar blur radius"
+      }
     }
   },
   "setup": {

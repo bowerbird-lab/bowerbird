@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"bowerbird/core"
+	"bowerbird/internal/theme"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -21,63 +22,104 @@ const (
 	gallerySidePadding    = 10
 )
 
-// palette is the app's semantic colour set. It is derived from the window theme
-// so Light/Dark/System switches stay native; the extra tones are tuned for the
-// gallery rather than for generic controls.
+// palette is the app's semantic colour set, resolved from a theme JSON. It is
+// rebuilt only when the theme or appearance changes, never per frame.
 type palette struct {
-	dark      bool
-	bg        ui.Color
-	sidebar   ui.Color
-	surface   ui.Color
-	surface2  ui.Color
-	text      ui.Color
-	muted     ui.Color
-	faint     ui.Color
-	hairline  ui.Color
-	hover     ui.Color
-	press     ui.Color
-	accent    ui.Color
-	onAccent  ui.Color
-	cardShade ui.Color
-	danger    ui.Color
+	dark           bool
+	bg             ui.Color
+	sidebar        ui.Color
+	surface        ui.Color
+	surface2       ui.Color
+	text           ui.Color
+	muted          ui.Color
+	faint          ui.Color
+	hairline       ui.Color
+	hover          ui.Color
+	press          ui.Color
+	accent         ui.Color
+	onAccent       ui.Color
+	cardShade      ui.Color
+	danger         ui.Color
+	warning        ui.Color
+	info           ui.Color
+	star           ui.Color
+	starStrong     ui.Color
+	overlay        ui.Color
+	preview        ui.Color
+	badge          ui.Color
+	onBadge        ui.Color
+	headerTint     ui.Color
+	headerBlur     float32
+	sidebarOpacity float32
 }
 
-func paletteFor(t *ui.Theme) palette {
-	if t.Dark {
-		return palette{
-			dark:      true,
-			bg:        ui.Hex("#141416"),
-			sidebar:   ui.Hex("#1b1b1e"),
-			surface:   ui.Hex("#232327"),
-			surface2:  ui.Hex("#2c2c31"),
-			text:      ui.Hex("#f4f4f5"),
-			muted:     ui.Hex("#a1a1aa"),
-			faint:     ui.Hex("#71717a"),
-			hairline:  ui.RGBA(255, 255, 255, 0.08),
-			hover:     ui.RGBA(255, 255, 255, 0.06),
-			press:     ui.RGBA(255, 255, 255, 0.11),
-			accent:    ui.Hex("#6ea8ff"),
-			onAccent:  ui.Hex("#0b1220"),
-			cardShade: ui.RGBA(0, 0, 0, 0.55),
-			danger:    ui.Hex("#ff6b6b"),
-		}
-	}
+func paletteFor(t *theme.Theme) palette {
+	c := t.Colors
 	return palette{
-		bg:        ui.Hex("#ffffff"),
-		sidebar:   ui.Hex("#f5f5f7"),
-		surface:   ui.Hex("#ffffff"),
-		surface2:  ui.Hex("#f0f0f3"),
-		text:      ui.Hex("#18181b"),
-		muted:     ui.Hex("#6b6b74"),
-		faint:     ui.Hex("#9a9aa3"),
-		hairline:  ui.RGBA(0, 0, 0, 0.08),
-		hover:     ui.RGBA(0, 0, 0, 0.045),
-		press:     ui.RGBA(0, 0, 0, 0.08),
-		accent:    ui.Hex("#2563eb"),
-		onAccent:  ui.Hex("#ffffff"),
-		cardShade: ui.RGBA(15, 23, 42, 0.18),
-		danger:    ui.Hex("#dc2626"),
+		dark:           t.Appearance == theme.Dark,
+		bg:             themeColor(c.Background),
+		sidebar:        themeColor(c.Sidebar),
+		surface:        themeColor(c.Surface),
+		surface2:       themeColor(c.SurfaceAlt),
+		text:           themeColor(c.Text),
+		muted:          themeColor(c.TextMuted),
+		faint:          themeColor(c.TextFaint),
+		hairline:       themeColor(c.Border),
+		hover:          themeColor(c.Hover),
+		press:          themeColor(c.Pressed),
+		accent:         themeColor(c.Accent),
+		onAccent:       themeColor(c.OnAccent),
+		cardShade:      themeColor(c.Shadow),
+		danger:         themeColor(c.Danger),
+		warning:        themeColor(c.Warning),
+		info:           themeColor(c.Info),
+		star:           themeColor(c.Star),
+		starStrong:     themeColor(c.StarStrong),
+		overlay:        themeColor(c.Overlay),
+		preview:        themeColor(c.Preview),
+		badge:          themeColor(c.Badge),
+		onBadge:        themeColor(c.OnBadge),
+		headerTint:     themeColor(t.Material.HeaderTint),
+		headerBlur:     t.Material.HeaderBlur,
+		sidebarOpacity: t.Material.SidebarOpacity,
 	}
+}
+
+// themeColor parses a token; a broken user theme must not take a window down,
+// so a bad value falls back to transparent.
+func themeColor(s string) ui.Color {
+	col, err := theme.ParseColor(s)
+	if err != nil {
+		return ui.Transparent
+	}
+	return col
+}
+
+// uiThemeFor maps the app palette onto mygo's control theme, so built-in
+// widgets (switches, inputs, pickers, sliders) follow the same colours.
+func uiThemeFor(p palette) *ui.Theme {
+	var t *ui.Theme
+	if p.dark {
+		t = ui.DarkTheme()
+	} else {
+		t = ui.LightTheme()
+	}
+	t.Background = p.bg
+	t.Surface = p.surface
+	t.SurfaceHover = p.surface2
+	t.SurfacePressed = p.press
+	t.Border = p.hairline
+	t.Text = p.text
+	t.TextMuted = p.muted
+	t.Accent = p.accent
+	t.AccentHover = p.accent
+	t.AccentPressed = p.accent
+	t.AccentText = p.onAccent
+	t.Danger = p.danger
+	t.Warning = p.warning
+	t.Focus = p.accent.Alpha(0.55)
+	t.Scrollbar = p.faint
+	return t
 }
 
 // iconButton is the standard square toolbar button. The icon inherits hover and
@@ -86,7 +128,7 @@ func (a *App) iconButton(c *ui.Context, key any, icon *ui.SVG, selected bool, la
 	if icon == nil {
 		return
 	}
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	b := ui.ButtonBase(c.Key(key)).Size(30, 30).Radius(7).FocusRing(false).AlignItems(ui.Center).Justify(ui.Center)
 	bg := ui.Transparent
 	switch {
@@ -108,7 +150,7 @@ func (a *App) iconButtonMenu(c *ui.Context, key any, icon *ui.SVG, label string,
 	if icon == nil {
 		return
 	}
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	b := ui.ButtonBase(c.Key(key)).Size(30, 30).Radius(7).FocusRing(false).AlignItems(ui.Center).Justify(ui.Center)
 	bg := ui.Transparent
 	if b.Hovered() {
@@ -123,7 +165,7 @@ func (a *App) iconButtonMenu(c *ui.Context, key any, icon *ui.SVG, label string,
 }
 
 func (a *App) pillButton(c *ui.Context, key any, label string, active bool, onClick func()) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	b := ui.ButtonBase(c.Key(key)).Height(28).PaddingX(10).Radius(999).FocusRing(false).AlignItems(ui.Center)
 	bg := p.surface2
 	fg := p.text
@@ -141,17 +183,17 @@ func (a *App) pillButton(c *ui.Context, key any, label string, active bool, onCl
 }
 
 func (a *App) sectionLabel(c *ui.Context, text string) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Text(c, strings.ToUpper(text)).FontSize(10).FontWeight(650).LetterSpacing(0.6).TextColor(p.faint).Padding(0, 4).MarginY(6)
 }
 
 func (a *App) hairline(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Box(c).FillWidth().Height(1).Background(p.hairline)
 }
 
 func (a *App) emptyState(c *ui.Context, icon *ui.SVG, title, subtitle string) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Column(c).Fill().Center().Gap(10).Children(func() {
 		box := ui.Box(c).Size(56, 56).Radius(16).Background(p.surface2).AlignItems(ui.Center).Justify(ui.Center)
 		box.Children(func() { ui.Icon(c, icon).Size(26, 26).TextColor(p.faint) })

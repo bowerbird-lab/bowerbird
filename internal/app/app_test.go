@@ -11,6 +11,7 @@ import (
 
 	"bowerbird/core"
 	"bowerbird/internal/plugin"
+	"bowerbird/internal/theme"
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
@@ -620,13 +621,46 @@ func TestSettingsSectionLabelsAreTranslated(t *testing.T) {
 	for _, title := range []string{
 		a.t("settings.vibrancy.title"),
 		a.t("settings.vibrancy.enable"),
-		a.t("settings.backdrop.title"),
 		a.t("settings.shortcuts.title"),
 		a.t("settings.language.title"),
 	} {
 		if strings.HasPrefix(title, "settings.") {
 			t.Fatalf("settings shows a raw translation key: %q", title)
 		}
+	}
+}
+
+func TestVibrancyDetailsFollowMasterSwitch(t *testing.T) {
+	a := seededApp(t)
+	a.settingsSection = 1 // Appearance
+	tester := ui.NewTester(a.viewSettings, 1000, 700)
+	tester.SetVibrancy(true)
+	a.vibrancyValue = false
+	tester.Frame()
+	if tester.HasText(a.t("settings.vibrancy.sidebar")) || tester.HasText(a.t("settings.vibrancy.titlebar")) {
+		t.Fatal("detailed blur options are shown while the material is off")
+	}
+	a.vibrancyValue = true
+	tester.Frame()
+	if !tester.HasText(a.t("settings.vibrancy.sidebar")) || !tester.HasText(a.t("settings.vibrancy.titlebar")) {
+		t.Fatal("detailed blur options are missing while the material is on")
+	}
+}
+
+func TestVibrancyMaterialRequiresMasterSwitch(t *testing.T) {
+	a := seededApp(t)
+	shows := false
+	tester := ui.NewTester(func(c *ui.Context) { shows = a.vibrancyShows(c) }, 100, 100)
+	tester.SetVibrancy(true)
+	a.vibrancyValue = true
+	tester.Frame()
+	if !shows {
+		t.Fatal("material does not show while the master switch is on")
+	}
+	a.vibrancyValue = false
+	tester.Frame()
+	if shows {
+		t.Fatal("material still shows after the master switch was turned off")
 	}
 }
 
@@ -659,6 +693,119 @@ func TestSettingsHeaderBlurStartsWhenContentReachesHeader(t *testing.T) {
 	a.settingsScroll.Y = settingsContentTopPadding + 1
 	if !a.settingsHeaderHasContentUnder() {
 		t.Fatal("settings header did not blur once content scrolled under it")
+	}
+}
+
+func TestThemesSettingsPageRenders(t *testing.T) {
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
+	a := seededApp(t)
+	a.settingsSection = 2
+	tester := ui.NewTester(a.viewSettings, 1000, 800)
+	tester.Frame()
+	for _, want := range []string{
+		a.t("settings.themes.selection"),
+		a.t("settings.themes.light"),
+		a.t("settings.themes.dark"),
+		a.t("settings.themes.edit"),
+	} {
+		if !tester.HasText(want) {
+			t.Fatalf("theme page is missing %q", want)
+		}
+	}
+	if tester.FramePending() {
+		t.Fatal("theme page keeps asking for frames")
+	}
+}
+
+func TestShippedThemesKeepTheCurrentPalette(t *testing.T) {
+	builtins, err := theme.Builtins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]*theme.Theme{}
+	for _, th := range builtins {
+		byID[th.ID] = th
+	}
+	light := paletteFor(byID["default-light"])
+	dark := paletteFor(byID["default-dark"])
+	checks := []struct {
+		name string
+		got  ui.Color
+		want ui.Color
+	}{
+		{"light bg", light.bg, ui.Hex("#ffffff")},
+		{"light sidebar", light.sidebar, ui.Hex("#f5f5f7")},
+		{"light text", light.text, ui.Hex("#18181b")},
+		{"dark bg", dark.bg, ui.Hex("#141416")},
+		{"dark sidebar", dark.sidebar, ui.Hex("#1b1b1e")},
+		{"dark text", dark.text, ui.Hex("#f4f4f5")},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Fatalf("%s = %s, want %s", c.name, theme.FormatColor(c.got), theme.FormatColor(c.want))
+		}
+	}
+}
+
+func TestPaletteFollowsSystemAppearance(t *testing.T) {
+	a := seededApp(t)
+	var got palette
+	tester := ui.NewTester(func(c *ui.Context) { got = a.palette(c) }, 100, 100)
+	tester.SetDark(true)
+	tester.Frame()
+	if got.bg != ui.Hex("#141416") {
+		t.Fatalf("system dark bg = %s", theme.FormatColor(got.bg))
+	}
+	tester.SetDark(false)
+	tester.Frame()
+	if got.bg != ui.Hex("#ffffff") {
+		t.Fatalf("system light bg = %s", theme.FormatColor(got.bg))
+	}
+}
+
+func TestUserThemeSelectionAppliesPalette(t *testing.T) {
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
+	a := seededApp(t)
+	base := *a.themeIndex["default-light"]
+	src := &theme.Theme{ID: "mine-light", Appearance: theme.Light, Colors: base.Colors, Material: base.Material}
+	src.Colors.Accent = "#ff0000"
+	src.Builtin = false
+	if err := a.writeThemeFile(src); err != nil {
+		t.Fatal(err)
+	}
+	a.loadThemes()
+	if a.themeIndex["mine-light"] == nil {
+		t.Fatal("user theme was not loaded")
+	}
+	a.prefs.LightTheme = "mine-light"
+	a.applyThemeSelection()
+	var got palette
+	tester := ui.NewTester(func(c *ui.Context) { got = a.palette(c) }, 100, 100)
+	tester.Frame()
+	if got.accent != ui.Hex("#ff0000") {
+		t.Fatalf("accent = %s, want #ff0000", theme.FormatColor(got.accent))
+	}
+	if got.bg != ui.Hex("#ffffff") {
+		t.Fatalf("missing tokens did not fall back: bg = %s", theme.FormatColor(got.bg))
+	}
+}
+
+func TestDuplicateBuiltinThemeCreatesEditableCopy(t *testing.T) {
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
+	a := seededApp(t)
+	builtin := a.themeIndex["default-dark"]
+	if builtin == nil {
+		t.Fatal("default-dark is missing")
+	}
+	a.duplicateTheme(builtin)
+	if a.prefs.DarkTheme == "default-dark" {
+		t.Fatal("duplicate did not select the new dark theme")
+	}
+	if _, err := os.Stat(filepath.Join(a.themesDir(), a.prefs.DarkTheme+".json")); err != nil {
+		t.Fatalf("duplicate file: %v", err)
+	}
+	if a.themeIndex["default-dark"] == nil {
+		t.Fatal("built-in default-dark disappeared")
 	}
 }
 

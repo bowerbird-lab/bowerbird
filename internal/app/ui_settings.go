@@ -9,6 +9,7 @@ import (
 
 	"bowerbird/core"
 	"bowerbird/internal/i18n"
+	"bowerbird/internal/theme"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -61,7 +62,7 @@ func (a *App) refreshSettings() {
 
 // viewSettings builds the independent native settings window.
 func (a *App) viewSettings(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	a.applyVibrancyRoot(c)
 	a.handleSettingsShortcuts(c)
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
@@ -69,7 +70,9 @@ func (a *App) viewSettings(c *ui.Context) {
 		// Section rail. Its header matches the main window's sidebar header:
 		// the title sits right of the traffic lights, on the same line and
 		// with the same inset as the sidebar toggle there.
-		ui.Column(c).Width(sidebarWidth).FillHeight().Background(p.sidebar).Children(func() {
+		rail := ui.Column(c).Width(sidebarWidth).FillHeight()
+		a.applySidebarSurface(c, rail)
+		rail.Children(func() {
 			ui.Row(c).Height(headerHeight).FillWidth().Padding(0, 8, 0, bar.Left+gallerySidePadding).AlignItems(ui.Center).DragWindow().Children(func() {
 				ui.Text(c, a.t("settings.title")).FontSize(14).FontWeight(650).TextColor(p.text)
 			})
@@ -98,7 +101,11 @@ func (a *App) viewSettings(c *ui.Context) {
 			})
 		})
 		ui.Box(c).Width(1).FillHeight().Background(p.hairline)
-		ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0).Background(p.bg).Children(func() {
+		content := ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0)
+		// As in the main window, the header paints its own strip at rest and
+		// blurs the content once it scrolls underneath.
+		a.paintBelowHeader(c, content, headerHeight)
+		content.Children(func() {
 			// The content scrolls under one floating header, as the gallery
 			// does under the main toolbar. Its top inset keeps the first card
 			// clear of the header until the user scrolls.
@@ -109,14 +116,16 @@ func (a *App) viewSettings(c *ui.Context) {
 				case 1:
 					a.settingsAppearance(c)
 				case 2:
-					a.settingsShortcuts(c)
+					a.settingsThemes(c)
 				case 3:
-					a.settingsPlugins(c)
+					a.settingsShortcuts(c)
 				case 4:
-					a.settingsMobile(c)
+					a.settingsPlugins(c)
 				case 5:
-					a.settingsNetwork(c)
+					a.settingsMobile(c)
 				case 6:
+					a.settingsNetwork(c)
+				case 7:
 					a.settingsStorage(c)
 				default:
 					a.settingsAbout(c)
@@ -142,7 +151,7 @@ func (a *App) settingsHeaderHasContentUnder() bool {
 // content, with the same material, drag area and divider behaviour as the main
 // toolbar.
 func (a *App) viewSettingsHeader(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	header := ui.Column(c).FillWidth().Height(headerHeight).Absolute().Top(0).Left(0).Right(0)
 	headerBlurActive := a.applyHeaderSurface(c, header, a.settingsHeaderHasContentUnder())
 	header.Children(func() {
@@ -164,6 +173,7 @@ func (a *App) settingsSectionLabels() []string {
 	return []string{
 		a.t("settings.nav.general"),
 		a.t("settings.nav.appearance"),
+		a.t("settings.nav.themes"),
 		a.t("settings.nav.shortcuts"),
 		a.t("settings.nav.plugins"),
 		a.t("settings.nav.mobile"),
@@ -191,7 +201,7 @@ func (a *App) handleSettingsShortcuts(c *ui.Context) {
 }
 
 func (a *App) settingsCard(c *ui.Context, title string, fn func()) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Column(c).FillWidth().Padding(14).Radius(10).Background(p.surface).Border(1, p.hairline).Gap(10).Children(func() {
 		if title != "" {
 			ui.Text(c, title).FontSize(11).FontWeight(650).LetterSpacing(0.4).TextColor(p.muted)
@@ -202,7 +212,7 @@ func (a *App) settingsCard(c *ui.Context, title string, fn func()) {
 }
 
 func (a *App) settingsRow(c *ui.Context, label, help string, control func()) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Row(c).FillWidth().MinHeight(36).AlignItems(ui.Center).Gap(14).Children(func() {
 		ui.Column(c).Grow(1).Shrink(1).Gap(1).Children(func() {
 			ui.Text(c, label).FontSize(12.5).TextColor(p.text)
@@ -217,7 +227,7 @@ func (a *App) settingsRow(c *ui.Context, label, help string, control func()) {
 // settingsRowInfo is settingsRow with the help copy behind a small info icon
 // instead of under the label, so dense settings keep one line per control.
 func (a *App) settingsRowInfo(c *ui.Context, label, help string, control func()) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Row(c).FillWidth().MinHeight(36).AlignItems(ui.Center).Gap(14).Children(func() {
 		ui.Row(c).Grow(1).Shrink(1).MinWidth(0).AlignItems(ui.Center).Gap(6).Children(func() {
 			ui.Text(c, label).FontSize(12.5).TextColor(p.text).Shrink(1).SingleLine()
@@ -242,7 +252,7 @@ func (a *App) settingsGeneral(c *ui.Context) {
 				{Value: "en", Label: a.t("settings.language.en")},
 				{Value: "zh", Label: a.t("settings.language.zh")},
 			}
-			if lang, changed := Dropdown(c, "settings-language", a.languageValue, options); changed {
+			if lang, changed := a.dropdown(c, "settings-language", a.languageValue, options); changed {
 				a.setLanguage(lang)
 			}
 		})
@@ -317,8 +327,9 @@ func (a *App) settingsThemeCard(c *ui.Context) {
 }
 
 func (a *App) settingsAppearance(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	a.settingsThemeCard(c)
+	a.settingsThemeSelection(c)
 	a.settingsCard(c, a.t("settings.vibrancy.title"), func() {
 		a.settingsRowInfo(c, a.t("settings.vibrancy.enable"), a.t("settings.vibrancy.enableDescription"), func() {
 			on := a.vibrancyValue
@@ -335,37 +346,25 @@ func (a *App) settingsAppearance(c *ui.Context) {
 				}()
 			}
 		})
-	})
-	a.settingsCard(c, a.t("settings.backdrop.title"), func() {
-		ui.Text(c, a.t("settings.backdrop.description")).FontSize(11).TextColor(p.faint).Wrap()
-		modes := []string{"default", "transparent", "solid", "gradient"}
-		if !a.vibrancyValue {
-			modes = []string{"default", "solid", "gradient"}
-			if a.prefs.BackdropMode == "transparent" {
-				a.prefs.BackdropMode = "default"
-				a.savePrefs()
-			}
-		}
-		ui.Row(c).Gap(6).Children(func() {
-			for _, mode := range modes {
-				mode := mode
-				label := a.t("settings.backdrop.modes." + mode)
-				a.pillButton(c, "backdrop-"+mode, label, a.prefs.BackdropMode == mode, func() {
-					a.prefs.BackdropMode = mode
+		// The detailed choices only exist while the material itself is on;
+		// with the switch off every surface is opaque, so they would be moot.
+		if a.vibrancyValue {
+			ui.Box(c).FillWidth().Height(1).Background(p.hairline)
+			a.settingsRowInfo(c, a.t("settings.vibrancy.sidebar"), a.t("settings.vibrancy.sidebarDescription"), func() {
+				on := a.prefs.VibrancySidebar
+				if ui.Switch(c.Key("vibrancy-sidebar"), &on).Changed() {
+					a.prefs.VibrancySidebar = on
 					a.savePrefs()
-					if a.win != nil {
-						a.win.Invalidate()
-					}
-					if a.settingsWin != nil {
-						a.settingsWin.Invalidate()
-					}
-				})
-			}
-		})
-		if a.prefs.BackdropMode == "solid" {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, a.t("settings.solidColor")).FontSize(11.5).TextColor(p.muted)
-				ui.TextInput(c, &a.prefs.BackdropSolid).Width(120).FontSize(12).OnSubmit(func() { a.savePrefs() })
+					a.invalidateWindows()
+				}
+			})
+			a.settingsRowInfo(c, a.t("settings.vibrancy.titlebar"), a.t("settings.vibrancy.titlebarDescription"), func() {
+				on := a.prefs.VibrancyHeader
+				if ui.Switch(c.Key("vibrancy-titlebar"), &on).Changed() {
+					a.prefs.VibrancyHeader = on
+					a.savePrefs()
+					a.invalidateWindows()
+				}
 			})
 		}
 	})
@@ -408,11 +407,140 @@ func (a *App) settingsAppearance(c *ui.Context) {
 	})
 }
 
+// settingsThemeSelection draws the two variant pickers shared by the
+// Appearance and Themes pages.
+func (a *App) settingsThemeSelection(c *ui.Context) {
+	p := a.palette(c)
+	a.settingsCard(c, a.t("settings.themes.selection"), func() {
+		a.settingsRowInfo(c, a.t("settings.themes.light"), "", func() {
+			if id, changed := a.dropdown(c, "theme-light", a.prefs.LightTheme, a.themeOptions(theme.Light)); changed {
+				a.prefs.LightTheme = id
+				a.applyThemeSelection()
+			}
+		})
+		a.settingsRowInfo(c, a.t("settings.themes.dark"), "", func() {
+			if id, changed := a.dropdown(c, "theme-dark", a.prefs.DarkTheme, a.themeOptions(theme.Dark)); changed {
+				a.prefs.DarkTheme = id
+				a.applyThemeSelection()
+			}
+		})
+		ui.Text(c, a.t("settings.themes.followHint")).FontSize(10.5).TextColor(p.faint).Wrap()
+	})
+}
+
+// settingsThemes is the theme page: choice of light and dark variants, the
+// JSON folder, and a colour editor for user themes. Built-in defaults are
+// read-only so the shipped palette cannot be deleted or replaced.
+func (a *App) settingsThemes(c *ui.Context) {
+	p := a.palette(c)
+	a.settingsThemeSelection(c)
+	a.settingsCard(c, a.t("settings.themes.files"), func() {
+		ui.Text(c, a.t("settings.themes.filesHint")).FontSize(11).TextColor(p.faint).Wrap()
+		ui.Row(c).Gap(8).Children(func() {
+			if ui.Button(c.Key("themes-open"), a.t("settings.themes.openFolder")).Clicked() {
+				if a.svc != nil {
+					_ = a.svc.OpenFolder(a.ensureThemesDir())
+				}
+			}
+			if ui.Button(c.Key("themes-reload"), a.t("settings.themes.reload")).Clicked() {
+				a.reloadThemes()
+				a.showToast(a.t("settings.themes.reloaded"))
+			}
+		})
+	})
+	a.settingsCard(c, a.t("settings.themes.edit"), func() {
+		ui.Text(c, a.t("settings.themes.editHint")).FontSize(11).TextColor(p.faint).Wrap()
+		if a.themeEditID == "" {
+			a.themeEditID = a.activeTheme(c).ID
+		}
+		a.settingsRowInfo(c, a.t("settings.themes.editTheme"), "", func() {
+			options := make([]SelectOption, 0, len(a.themes))
+			for _, t := range a.themes {
+				options = append(options, SelectOption{Value: t.ID, Label: t.ID})
+			}
+			if id, changed := a.dropdown(c, "theme-pick", a.themeEditID, options); changed {
+				a.themeEditID = id
+				a.themeDraft = nil
+				a.themeDirty = false
+			}
+		})
+		selected := a.themeIndex[a.themeEditID]
+		if selected == nil {
+			return
+		}
+		if selected.Builtin {
+			ui.Text(c, a.t("settings.themes.builtin")).FontSize(11).TextColor(p.faint).Wrap()
+			if ui.Button(c.Key("theme-duplicate"), a.t("settings.themes.duplicate")).Clicked() {
+				a.duplicateTheme(selected)
+			}
+			return
+		}
+		draft := a.themeEditorCopy(selected)
+		for _, tok := range themeColorTokens {
+			tok := tok
+			a.settingsRow(c, a.t("settings.themes.colors."+tok.Label), "", func() {
+				value := tok.Field(&draft.Colors)
+				col, err := theme.ParseColor(*value)
+				if err != nil {
+					col = ui.Transparent
+				}
+				well := ui.ColorWell(c, &col)
+				if well.Changed() {
+					*value = theme.FormatColor(col)
+					a.themeDirty = true
+				}
+			})
+		}
+		a.settingsRow(c, a.t("settings.themes.material.sidebarOpacity"), "", func() {
+			val := float64(draft.Material.SidebarOpacity)
+			ui.Slider(c.Key("theme-sidebar-opacity"), &val, 0, 1).Width(180)
+			if float32(val) != draft.Material.SidebarOpacity {
+				draft.Material.SidebarOpacity = float32(val)
+				a.themeDirty = true
+			}
+		})
+		a.settingsRow(c, a.t("settings.themes.material.headerTint"), "", func() {
+			col, err := theme.ParseColor(draft.Material.HeaderTint)
+			if err != nil {
+				col = ui.Transparent
+			}
+			well := ui.ColorWell(c, &col)
+			if well.Changed() {
+				draft.Material.HeaderTint = theme.FormatColor(col)
+				a.themeDirty = true
+			}
+		})
+		a.settingsRow(c, a.t("settings.themes.material.headerBlur"), "", func() {
+			val := float64(draft.Material.HeaderBlur)
+			ui.Slider(c.Key("theme-header-blur"), &val, 0, 40).Width(180)
+			if float32(val) != draft.Material.HeaderBlur {
+				draft.Material.HeaderBlur = float32(val)
+				a.themeDirty = true
+			}
+		})
+		ui.Row(c).Gap(8).Children(func() {
+			if ui.Button(c.Key("theme-reset"), a.t("settings.themes.reset")).Clicked() {
+				a.resetThemeDraft()
+			}
+			if ui.Button(c.Key("theme-revert"), a.t("settings.themes.revert")).Clicked() {
+				a.themeDraft = nil
+				a.themeDirty = false
+			}
+			if ui.PrimaryButton(c.Key("theme-save"), a.t("settings.themes.save")).Clicked() {
+				a.saveThemeDraft()
+			}
+		})
+		if a.themeDirty {
+			ui.Text(c, a.t("settings.themes.unsaved")).FontSize(10.5).TextColor(p.faint).Wrap()
+		}
+	})
+}
+
 // settingsShortcuts renders the whole keyboard map: global hotkeys, the
 // rebindable in-app actions, and the fixed basic bindings. Fixed rows show
 // their keys but offer no field, so the list doubles as documentation.
 func (a *App) settingsShortcuts(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	a.settingsCard(c, a.t("settings.shortcuts.title"), func() {
 		ui.Text(c, a.t("settings.shortcuts.description")).FontSize(11).TextColor(p.faint).Wrap()
 	})
@@ -446,7 +574,7 @@ func (a *App) settingsShortcuts(c *ui.Context) {
 // combination, or the read-only badge of a fixed binding.
 func (a *App) shortcutRow(c *ui.Context, def core.ShortcutDef) {
 	label := a.shortcutLabel(def.ID)
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	if def.Fixed {
 		a.settingsRow(c, label, "", func() { a.shortcutValue(c, def.ID, 11) })
 		return
@@ -481,7 +609,7 @@ func (a *App) shortcutCaps(c *ui.Context, accel string, fontSize float32) {
 	if len(keys) == 0 {
 		return
 	}
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	height := fontSize + 13
 	ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
 		for i, key := range keys {
@@ -498,7 +626,7 @@ func (a *App) shortcutCaps(c *ui.Context, accel string, fontSize float32) {
 
 // shortcutNotSetChip is the placeholder for an action without a shortcut.
 func (a *App) shortcutNotSetChip(c *ui.Context, fontSize float32) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	height := fontSize + 13
 	ui.Box(c).Height(height).PaddingX(8).Radius(5).Background(ui.Transparent).Border(1, p.hairline).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 		ui.Text(c, a.t("settings.shortcuts.unset")).FontSize(fontSize).TextColor(p.faint)
@@ -564,10 +692,10 @@ func (a *App) applyShortcutDraft(accel string) {
 // viewShortcutDialog is the recorder: the pressed keys show as they come in,
 // Esc cancels, No shortcut clears the binding and Save keeps what was pressed.
 func (a *App) viewShortcutDialog(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	open := true
 	ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
-		backdrop.Background(ui.RGBA(0, 0, 0, 0.35))
+		backdrop.Background(p.overlay)
 		panel.Width(400).Padding(22).Radius(14).Background(p.surface).Border(1, p.hairline).Shadow(0, 26, 64, -18, p.cardShade).Children(func() {
 			ui.Column(c).FillWidth().Gap(14).Children(func() {
 				ui.Text(c, a.t("settings.shortcuts.editTitle")).FontSize(17).FontWeight(650).TextColor(p.text)
@@ -642,7 +770,7 @@ func (a *App) shortcutLabel(id string) string {
 }
 
 func (a *App) settingsPlugins(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Row(c).Gap(8).Children(func() {
 		if ui.PrimaryButton(c.Key("plugin-install"), a.t("settings.plugins.install")).Clicked() {
 			a.dialog = dialogPluginInstall
@@ -765,7 +893,7 @@ func (a *App) uninstallPlugin(id string) {
 }
 
 func (a *App) settingsMobile(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	status := a.mobile
 	a.settingsCard(c, a.t("settings.mobile.server"), func() {
 		a.settingsRow(c, a.t("settings.mobile.enabled"), a.t("settings.mobile.enabledHelp"), func() {
@@ -892,7 +1020,7 @@ func (a *App) applyMobilePort() {
 }
 
 func (a *App) settingsNetwork(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	a.settingsCard(c, a.t("settings.network.title"), func() {
 		ui.Row(c).Gap(6).Children(func() {
 			for _, mode := range []string{core.ProxyModeSystem, core.ProxyModeDirect, core.ProxyModeCustom} {
@@ -979,7 +1107,7 @@ func (a *App) libraryPath() string {
 }
 
 func (a *App) settingsAbout(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Column(c).FillWidth().Center().Gap(10).PaddingY(30).Children(func() {
 		ui.Box(c).Size(72, 72).Radius(18).Background(p.surface2).Center().Children(func() {
 			ui.Icon(c, iconLibrary).Size(34, 34).TextColor(p.accent)

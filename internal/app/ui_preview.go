@@ -21,7 +21,7 @@ import (
 // rich text view; audio uses the Go playback kernel; unsupported formats show
 // their metadata and open in the default app.
 func (a *App) viewPreview(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	if len(a.items) == 0 {
 		a.previewOpen = false
 		return
@@ -39,7 +39,7 @@ func (a *App) viewPreview(c *ui.Context) {
 }
 
 func (a *App) viewPreviewToolbar(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	if a.previewIndex < 0 || a.previewIndex >= len(a.items) {
 		return
 	}
@@ -82,7 +82,7 @@ func (a *App) viewPreviewToolbar(c *ui.Context) {
 }
 
 func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Column(c).Grow(1).Shrink(1).FillWidth().Children(func() {
 		ext := strings.ToLower(item.Extension)
 		switch {
@@ -198,7 +198,7 @@ func (a *App) stripRange(c *ui.Context) (start, end int) {
 }
 
 func (a *App) previewImage(c *ui.Context, item core.Item) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	previewMods, previewKey, previewOK := a.shortcutKeys(core.ShortcutTogglePreview)
 	dismissMods, dismissKey, dismissOK := a.shortcutKeys(core.ShortcutDismiss)
 	ui.Box(c).Fill().Grow(1).Shrink(1).Clip().HandleInput(func(ev ui.InputEvent) bool {
@@ -265,7 +265,7 @@ func (a *App) previewImage(c *ui.Context, item core.Item) {
 }
 
 func (a *App) previewAudio(c *ui.Context, item core.Item) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	if a.player == nil && item.FilePath != "" {
 		// Do not autoplay; opening is explicit on the play button.
 	}
@@ -333,7 +333,7 @@ func (a *App) previewAudio(c *ui.Context, item core.Item) {
 }
 
 func (a *App) previewVideo(c *ui.Context, item core.Item) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	if a.video == nil {
 		ui.Column(c).Fill().Grow(1).Center().Gap(14).Children(func() {
 			ui.Box(c).Size(120, 120).Radius(22).Background(p.surface2).Center().Children(func() {
@@ -358,7 +358,7 @@ func (a *App) previewVideo(c *ui.Context, item core.Item) {
 	}
 
 	ui.Column(c).Fill().Grow(1).Children(func() {
-		ui.Box(c).FillWidth().Grow(1).Shrink(1).Background(ui.RGBA(0, 0, 0, 0.86)).Clip().Children(func() {
+		ui.Box(c).FillWidth().Grow(1).Shrink(1).Background(p.preview).Clip().Children(func() {
 			ui.Video(c, a.video.Native()).Fill().Fit(ui.Contain)
 		})
 		ui.Box(c).FillWidth().Height(1).Background(p.hairline)
@@ -401,7 +401,7 @@ func (a *App) previewVideo(c *ui.Context, item core.Item) {
 }
 
 func (a *App) previewDocument(c *ui.Context, item core.Item) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ext := strings.ToLower(item.Extension)
 	isText := ext == "md" || ext == "markdown" || ext == "txt" || ext == "json" || ext == "js" || ext == "ts" || ext == "go" || ext == "py" || ext == "prompt"
 	if isText && a.previewText != "" {
@@ -526,7 +526,7 @@ func (a *App) closeVideo() {
 }
 
 func (a *App) previewPSD(c *ui.Context, item core.Item) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Row(c).Fill().Grow(1).Shrink(1).Children(func() {
 		ui.Box(c).Grow(1).Shrink(1).FillHeight().Padding(16).Clip().Children(func() {
 			if a.previewBitmap != nil {

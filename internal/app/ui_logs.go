@@ -38,7 +38,7 @@ func (a *App) filteredLogs() []core.LogEntry {
 
 // viewLogs is the standalone virtualized log viewer.
 func (a *App) viewLogs(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	if a.shortcutMatched(c, core.ShortcutCloseWindow) && a.logsWin != nil {
 		a.logsWin.Close()
 	}
@@ -48,7 +48,7 @@ func (a *App) viewLogs(c *ui.Context) {
 	a.applyVibrancyRoot(c)
 	entries := a.filteredLogs()
 	a.logsList.FollowEnd = a.logsAutoScroll
-	ui.Column(c).Fill().Children(func() {
+	ui.Column(c).Fill().Background(p.bg).Children(func() {
 		ui.Row(c).Height(40).DragWindow()
 		ui.Row(c).Height(50).PaddingX(16).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, a.t("logs.title")).FontSize(16).FontWeight(700).TextColor(p.text)
@@ -102,15 +102,15 @@ func (a *App) viewLogs(c *ui.Context) {
 }
 
 func (a *App) logRow(c *ui.Context, e core.LogEntry) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	levelColor := p.muted
 	switch e.Level {
 	case "error":
 		levelColor = p.danger
 	case "warn":
-		levelColor = ui.Hex("#e0a020")
+		levelColor = p.warning
 	case "perf":
-		levelColor = ui.Hex("#38a3d1")
+		levelColor = p.info
 	}
 	ui.Row(c).FillWidth().Height(34).Padding(3, 16, 3, 16).Gap(10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, e.Timestamp).FontSize(10.5).FontFeatures("tnum").TextColor(p.faint).Width(150).Shrink(0)

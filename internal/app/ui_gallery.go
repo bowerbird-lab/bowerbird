@@ -98,7 +98,7 @@ func (a *App) viewGallery(c *ui.Context) {
 	}
 	top := float32(mainHeaderHeight + galleryTopPadding)
 	bottom := float32(24)
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 
 	container := ui.Box(c.Key("gallery-container")).Fill().Clip().Bind(&a.galleryBox)
 	a.galleryShortcuts(container)
@@ -412,7 +412,7 @@ func (a *App) folderSectionRows(width int) [][]galleryCell {
 }
 
 func (a *App) folderSectionHeader(c *ui.Context, width int) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	children := childFolders(a.folders, a.folderID)
 	b := ui.ButtonBase(c.Key("subfolders-toggle")).Width(float32(width)).Height(30).PaddingX(4).Radius(6).FocusRing(false).AlignItems(ui.Center).Gap(6)
 	bg := ui.Transparent
@@ -438,7 +438,7 @@ func (a *App) folderCard(c *ui.Context, folderID string, w, h float32) {
 	if !ok {
 		return
 	}
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	card := ui.ButtonBase(c.Key("folder-card-"+f.ID)).Width(w).Height(h).Padding(6).Radius(10).Border(1, p.hairline).FocusRing(false).Column().Gap(6)
 	bg := p.surface
 	if card.Hovered() {
@@ -503,7 +503,7 @@ func (a *App) folderPreviewImage(c *ui.Context, item core.Item, targetPx int) {
 		return
 	}
 	ui.Column(c).Fill().Center().Children(func() {
-		ui.Icon(c, categoryIcon(item)).Size(16, 16).TextColor(paletteFor(c.Theme()).faint)
+		ui.Icon(c, categoryIcon(item)).Size(16, 16).TextColor(a.palette(c).faint)
 	})
 }
 
@@ -521,7 +521,7 @@ func (a *App) itemThumbBitmap(item core.Item, targetPx int) *ui.Bitmap {
 }
 
 func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	selected := a.selected[item.ID]
 	isList := a.prefs.LayoutMode == "list"
 
@@ -587,8 +587,8 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 			// Rating
 			if item.Rating > 0 {
 				ui.Row(c).AlignItems(ui.Center).Gap(2).Children(func() {
-					ui.Icon(c, iconStarFill).Size(11, 11).TextColor(ui.Hex("#ffd166"))
-					ui.Textf(c, "%d", item.Rating).FontSize(11).FontWeight(650).TextColor(ui.Hex("#ffd166"))
+					ui.Icon(c, iconStarFill).Size(11, 11).TextColor(p.star)
+					ui.Textf(c, "%d", item.Rating).FontSize(11).FontWeight(650).TextColor(p.star)
 				})
 			}
 
@@ -651,14 +651,14 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 				// Format / duration badge.
 				if a.prefs.ShowExt && item.Extension != "" {
 					badge := strings.ToUpper(item.Extension)
-					ui.Box(c).Absolute().Bottom(6).Right(6).Padding(2, 6).Radius(4).Background(ui.RGBA(0, 0, 0, 0.62)).Children(func() {
-						ui.Text(c, badge).FontSize(9).FontWeight(650).TextColor(ui.Hex("#ffffff"))
+					ui.Box(c).Absolute().Bottom(6).Right(6).Padding(2, 6).Radius(4).Background(p.badge).Children(func() {
+						ui.Text(c, badge).FontSize(9).FontWeight(650).TextColor(p.onBadge)
 					})
 				}
 				if item.Rating > 0 {
-					ui.Row(c).Absolute().Top(6).Right(6).Padding(2, 6).Radius(4).Background(ui.RGBA(0, 0, 0, 0.55)).Gap(2).Children(func() {
-						ui.Icon(c, iconStarFill).Size(9, 9).TextColor(ui.Hex("#ffd166"))
-						ui.Textf(c, "%d", item.Rating).FontSize(9).FontWeight(650).TextColor(ui.Hex("#ffffff"))
+					ui.Row(c).Absolute().Top(6).Right(6).Padding(2, 6).Radius(4).Background(p.badge).Gap(2).Children(func() {
+						ui.Icon(c, iconStarFill).Size(9, 9).TextColor(p.star)
+						ui.Textf(c, "%d", item.Rating).FontSize(9).FontWeight(650).TextColor(p.onBadge)
 					})
 				}
 			})

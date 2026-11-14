@@ -18,7 +18,7 @@ type SelectOption struct {
 // choice, and a popup listing the options. The widget keeps no selection of
 // its own: the caller owns the value and gets the newly chosen one back.
 //
-//	lang, changed := Dropdown(c, "settings-language", a.languageValue, []SelectOption{
+//	lang, changed := a.dropdown(c, "settings-language", a.languageValue, []SelectOption{
 //		{Value: "system", Label: a.t("settings.language.auto")},
 //		{Value: "en", Label: a.t("settings.language.en")},
 //		{Value: "zh", Label: a.t("settings.language.zh")},
@@ -29,11 +29,11 @@ type SelectOption struct {
 //
 // The key keeps the popup's open/highlight state stable between frames; it must
 // be unique among the widgets of the window that are visible at the same time.
-func Dropdown(c *ui.Context, key any, selected string, options []SelectOption) (string, bool) {
+func (a *App) dropdown(c *ui.Context, key any, selected string, options []SelectOption) (string, bool) {
 	if len(options) == 0 {
 		return selected, false
 	}
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	value := selected
 	label := selected
 	for _, opt := range options {

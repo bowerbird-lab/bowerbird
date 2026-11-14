@@ -197,7 +197,7 @@ func (a *App) filterCriterionLabel(id string) string {
 }
 
 func (a *App) filterCriterionButton(c *ui.Context, id string) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	active := a.filterCriterionActive(id)
 	btn := ui.PopoverMenuButton(c.Key("filter-pill-"+id), a.filterCriterionLabel(id), func(m *ui.Menu) {
 		a.filterCriterionMenu(m, id)
@@ -209,7 +209,7 @@ func (a *App) filterCriterionButton(c *ui.Context, id string) {
 }
 
 func (a *App) filterManageButton(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	btn := ui.PopoverMenuButton(c.Key("filter-manage"), "+", func(m *ui.Menu) {
 		pinned := make(map[string]bool, len(a.prefs.PinnedFilters))
 		for _, id := range a.prefs.PinnedFilters {

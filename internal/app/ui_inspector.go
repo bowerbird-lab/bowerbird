@@ -9,6 +9,7 @@ import (
 	"bowerbird/core"
 	"bowerbird/internal/player"
 	"bowerbird/internal/plugin"
+	"bowerbird/internal/theme"
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
@@ -67,7 +68,7 @@ func (a *App) loadInspector(id string) {
 }
 
 func (a *App) viewInspector(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Column(c).Width(inspectorWidth).FillHeight().Background(p.sidebar).Children(func() {
 		ui.Row(c).Height(headerHeight).PaddingX(14).AlignItems(ui.Center).DragWindow()
 		ui.Scroll(c).Grow(1).Shrink(1).Padding(0, 14, 20, 14).Children(func() {
@@ -88,7 +89,7 @@ func (a *App) viewInspector(c *ui.Context) {
 // identity and workspace totals, so the panel stays useful when nothing is
 // selected.
 func (a *App) viewLibraryInspector(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	if a.library == nil {
 		a.emptyState(c, iconLibrary, a.t("sidebar.noLibrary"), a.t("inspector.noSelectionHint"))
 		return
@@ -118,7 +119,7 @@ func (a *App) viewLibraryInspector(c *ui.Context) {
 }
 
 func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Column(c).FillWidth().Gap(10).Children(func() {
 		// Hero thumbnail.
 		w := float32(inspectorWidth - 28)
@@ -188,7 +189,7 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 					if i >= 8 {
 						break
 					}
-					col, err := parseColor(hex)
+					col, err := theme.ParseColor(hex)
 					if err != nil {
 						continue
 					}
@@ -212,7 +213,7 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 				b := ui.ButtonBase(c.Key(fmt.Sprintf("rate-%d", i))).Size(24, 24).Radius(5).FocusRing(false).AlignItems(ui.Center).Justify(ui.Center)
 				b.Children(func() {
 					if filled {
-						ui.Icon(c, iconStarFill).Size(16, 16).TextColor(ui.Hex("#f5b301"))
+						ui.Icon(c, iconStarFill).Size(16, 16).TextColor(p.starStrong)
 					} else {
 						ui.Icon(c, iconStar).Size(16, 16).TextColor(p.faint)
 					}
@@ -408,7 +409,7 @@ func (a *App) addTagToActive() {
 }
 
 func (a *App) inspectorDivider(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Box(c).FillWidth().Height(1).Background(p.hairline).MarginY(4)
 }
 
@@ -417,7 +418,7 @@ func (a *App) metaRow(c *ui.Context, label, value string) {
 }
 
 func (a *App) metaRowCopy(c *ui.Context, label, value string, copyable bool) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	if value == "" {
 		return
 	}
@@ -436,7 +437,7 @@ func (a *App) metaRowCopy(c *ui.Context, label, value string, copyable bool) {
 }
 
 func (a *App) viewMultiInspector(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	items := a.selectedItems()
 	totalSize := int64(0)
 	for _, it := range items {
@@ -522,7 +523,7 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 					Radius(6).
 					Background(p.surface2).
 					Border(1, p.hairline).
-					Shadow(0, 4, 10, 0, ui.RGBA(0, 0, 0, 0.28)).
+					Shadow(0, 4, 10, 0, p.cardShade).
 					Clip().
 					Rotate(preset.rotate)
 				path := ""
@@ -600,7 +601,7 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 }
 
 func (a *App) inspectorAudio(c *ui.Context, item core.Item) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	a.inspectorDivider(c)
 	a.sectionLabel(c, a.t("inspector.audio"))
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {

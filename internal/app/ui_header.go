@@ -14,7 +14,7 @@ import (
 // thumbnail zoom. Layout and panel visibility live in the content's context
 // menu so the view-toggle icons stay out of the header.
 func (a *App) viewHeader(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	if !a.searchAt.IsZero() && time.Now().After(a.searchAt) {
 		a.searchAt = time.Time{}
 		a.refreshAll()
@@ -90,25 +90,29 @@ func (a *App) viewHeader(c *ui.Context) {
 	})
 }
 
-// applyHeaderSurface gives a floating header the same surface as the main
-// toolbar: the window background while it is clear, and the shared blur
-// material plus a divider once content scrolls underneath it. It reports
-// whether the blurred state is active so the caller can add the divider.
+// applyHeaderSurface gives a floating header the workspace background while
+// nothing scrolls under it, so it reads as part of the same surface (white in
+// light mode, dark in dark mode). Once content reaches it, the shared blur
+// material and tint take over and the caller adds a divider. It returns
+// whether that scrolled state is active.
 func (a *App) applyHeaderSurface(c *ui.Context, header ui.Element, contentUnder bool) bool {
-	p := paletteFor(c.Theme())
-	if contentUnder {
-		header.Material(glass.Blur{Radius: 10})
-		tint := ui.RGBA(255, 255, 255, 0.8)
-		if p.dark {
-			tint = ui.RGBA(0, 0, 0, 0.8)
-		}
-		header.Draw(func(pt *ui.Painter, r ui.Rect) {
-			pt.Fill(r, tint, 0)
-		})
-	} else {
+	p := a.palette(c)
+	if !contentUnder {
 		header.Background(p.bg)
+		return false
 	}
-	return contentUnder
+	// Both the system material switch and this header's own option must be on;
+	// otherwise the scrolled header stays opaque.
+	if !a.vibrancyShows(c) || !a.prefs.VibrancyHeader {
+		header.Background(p.bg)
+		return false
+	}
+	header.Material(glass.Blur{Radius: p.headerBlur})
+	tint := p.headerTint
+	header.Draw(func(pt *ui.Painter, r ui.Rect) {
+		pt.Fill(r, tint, 0)
+	})
+	return true
 }
 
 // headerHasContentUnder reports whether the gallery has scrolled far enough
@@ -122,7 +126,7 @@ func (a *App) headerHasContentUnder() bool {
 // The outer pill owns the border; the input itself is unstyled so it does
 // not draw a second border inside it.
 func (a *App) viewSearchField(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	row := ui.Row(c).Height(32).Grow(1).Shrink(1).MinWidth(160).MaxWidth(380).Padding(0, 10).Radius(10).Background(p.surface2).Border(1, p.hairline).AlignItems(ui.Center).Gap(7)
 	row.Children(func() {
 		ui.Icon(c, iconSearch).Size(14, 14).TextColor(p.faint)

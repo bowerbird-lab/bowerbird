@@ -14,9 +14,10 @@ func TestDropdownSelectsOption(t *testing.T) {
 	}
 	selected := "system"
 	changes := 0
+	a := New(nil)
 	view := func(c *ui.Context) {
 		ui.Column(c).Fill().Padding(20).Children(func() {
-			if value, changed := Dropdown(c, "test-language", selected, options); changed {
+			if value, changed := a.dropdown(c, "test-language", selected, options); changed {
 				selected = value
 				changes++
 			}

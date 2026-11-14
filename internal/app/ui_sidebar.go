@@ -11,9 +11,11 @@ import (
 // viewSidebar draws the library switcher, smart views and the recursive folder
 // tree. It is also the drop target for dragging assets onto a folder.
 func (a *App) viewSidebar(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	a.dropFolderID = ""
-	ui.Column(c).Width(sidebarWidth).FillHeight().Background(p.sidebar).Children(func() {
+	sidebar := ui.Column(c).Width(sidebarWidth).FillHeight()
+	a.applySidebarSurface(c, sidebar)
+	sidebar.Children(func() {
 		// The sidebar header matches the main header's first row, so the
 		// toggle and the main toolbar controls share one vertical line. The
 		// toggle stays just right of the traffic lights, inside the safe area.
@@ -49,7 +51,7 @@ func (a *App) viewSidebar(c *ui.Context) {
 }
 
 func (a *App) navRow(c *ui.Context, nav Nav, icon *ui.SVG, label string, count int) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	active := a.nav == nav
 	b := ui.ButtonBase(c.Key("nav-" + string(nav))).FillWidth().Height(30).PaddingX(8).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(8)
 	bg := ui.Transparent
@@ -72,7 +74,7 @@ func (a *App) navRow(c *ui.Context, nav Nav, icon *ui.SVG, label string, count i
 }
 
 func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	open := a.expanded[f.ID]
 	children := childFolders(a.folders, f.ID)
 	active := a.nav == NavFolder && a.folderID == f.ID

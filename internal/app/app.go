@@ -24,6 +24,7 @@ import (
 	"bowerbird/internal/i18n"
 	"bowerbird/internal/player"
 	"bowerbird/internal/plugin"
+	"bowerbird/internal/theme"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -60,9 +61,10 @@ type Filters struct {
 // Prefs are the native-only appearance preferences that used to live in
 // localStorage.
 type Prefs struct {
-	BackdropMode    string   `json:"backdropMode"`
-	BackdropSolid   string   `json:"backdropSolid"`
-	BackdropSeed    int      `json:"backdropSeed"`
+	VibrancySidebar bool     `json:"vibrancySidebar"`
+	VibrancyHeader  bool     `json:"vibrancyHeader"`
+	LightTheme      string   `json:"lightTheme"`
+	DarkTheme       string   `json:"darkTheme"`
 	InspectorOpen   bool     `json:"inspectorOpen"`
 	SidebarOpen     bool     `json:"sidebarOpen"`
 	ShowNames       bool     `json:"showNames"`
@@ -78,8 +80,10 @@ type Prefs struct {
 
 func defaultPrefs() Prefs {
 	return Prefs{
-		BackdropMode:    "default",
-		BackdropSolid:   "#141416",
+		VibrancySidebar: true,
+		VibrancyHeader:  true,
+		LightTheme:      "default-light",
+		DarkTheme:       "default-dark",
 		InspectorOpen:   true,
 		SidebarOpen:     true,
 		ShowNames:       true,
@@ -251,12 +255,21 @@ type App struct {
 	pluginHost     *plugin.Host
 	pendingInstall *core.PluginInstallRequest
 
+	// Themes and their resolved palettes. Both variants are kept ready so
+	// following the system can switch without loading files.
+	themes       []*theme.Theme
+	themeIndex   map[string]*theme.Theme
+	paletteLight palette
+	paletteDark  palette
+	uiLight      *ui.Theme
+	uiDark       *ui.Theme
+	themeEditID  string
+	themeDraft   *theme.Theme
+	themeDirty   bool
+
 	// Thumbnails.
 	thumbs    *thumbCache
 	thumbJobs *thumbJobQueue
-
-	// backdropMode is the resolved background mode used by the painter.
-	backdropMode string
 
 	// Toast feedback.
 	toast      string
@@ -347,6 +360,7 @@ func New(svc *core.Service) *App {
 		start:          time.Now(),
 	}
 	a.loadPrefs()
+	a.loadThemes()
 	// The service may already own a manager (tests, or a window created after
 	// startup), so pick the persisted language before the first frame.
 	a.syncLanguage()
@@ -393,9 +407,15 @@ func (a *App) SetMainWindow(w *mygo.Window) {
 }
 func (a *App) SetSettingsWindow(w *mygo.Window) {
 	a.settingsWin = w
-	// A new settings window starts without a recorder left open from a
-	// previous one.
+	// A new settings window starts without a recorder or theme draft left
+	// open from a previous one.
 	a.cancelShortcutDialog()
+	a.themeEditID = ""
+	a.themeDraft = nil
+	a.themeDirty = false
+	// Pick up themes added while the window was closed; the page also has a
+	// manual reload button for changes made while it is open.
+	a.loadThemes()
 	a.refreshSettings()
 }
 func (a *App) SetLogsWindow(w *mygo.Window)  { a.logsWin = w; a.syncLanguage(); a.refreshLogs() }
@@ -403,28 +423,31 @@ func (a *App) SetSetupWindow(w *mygo.Window) { a.setupWin = w; a.syncLanguage() 
 
 // content wraps a view so a panic is logged and the window keeps painting
 // rather than falling back to an unexplained black frame.
-func content(name string, view func(*ui.Context)) *ui.Content {
+func (a *App) content(name string, view func(*ui.Context)) *ui.Content {
 	return ui.View(func(c *ui.Context) {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("[NativeUI] %s view panic: %v", name, r)
 			}
 		}()
+		// The JSON theme drives mygo's own controls too, so switches, inputs
+		// and pickers match the custom surfaces.
+		c.SetTheme(a.uiTheme(c))
 		view(c)
 	})
 }
 
 // MainContent is the mygo content for the main window.
-func (a *App) MainContent() *ui.Content { return content("main", a.viewMain) }
+func (a *App) MainContent() *ui.Content { return a.content("main", a.viewMain) }
 
 // SettingsContent is the mygo content for the settings window.
-func (a *App) SettingsContent() *ui.Content { return content("settings", a.viewSettings) }
+func (a *App) SettingsContent() *ui.Content { return a.content("settings", a.viewSettings) }
 
 // LogsContent is the mygo content for the logs window.
-func (a *App) LogsContent() *ui.Content { return content("logs", a.viewLogs) }
+func (a *App) LogsContent() *ui.Content { return a.content("logs", a.viewLogs) }
 
 // SetupContent is the mygo content for the first-run library setup window.
-func (a *App) SetupContent() *ui.Content { return content("setup", a.viewSetup) }
+func (a *App) SetupContent() *ui.Content { return a.content("setup", a.viewSetup) }
 
 // post runs fn on the main thread and redraws the main window. Calls from the
 // main thread may run inline; background calls go through Window.Update.
@@ -1154,6 +1177,16 @@ func (a *App) savePrefs() {
 	_ = os.WriteFile(path, data, 0o644)
 }
 
+// invalidateWindows repaints every open window after an appearance-only
+// preference changed, without reloading library data.
+func (a *App) invalidateWindows() {
+	for _, w := range []*mygo.Window{a.win, a.settingsWin, a.logsWin, a.setupWin} {
+		if w != nil {
+			w.Invalidate()
+		}
+	}
+}
+
 func (a *App) loadPrefs() {
 	path := filepath.Join(core.UserDataDir(), "native-ui.json")
 	data, err := os.ReadFile(path)
@@ -1166,11 +1199,14 @@ func (a *App) loadPrefs() {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return
 	}
-	if p.BackdropMode == "" {
-		p.BackdropMode = "default"
-	}
 	if p.SortOrder == "" {
 		p.SortOrder = "desc"
+	}
+	if p.LightTheme == "" {
+		p.LightTheme = "default-light"
+	}
+	if p.DarkTheme == "" {
+		p.DarkTheme = "default-dark"
 	}
 	if p.RowHeight <= 0 {
 		p.RowHeight = 190

@@ -391,35 +391,29 @@ func (h *appHost) WriteTextToClipboard(text string) error {
 	return nil
 }
 
-// windowBackgroundColor follows the light/dark appearance so chrome and the
-// first paint stay in sync with the page theme.
-const windowBackgroundColor = "light-dark(#ffffff, #06070f)"
-
 // windowVibrancyMaterial is the translucent material shown behind the native
-// header when the user turns on the blur switch. macOS shows the sidebar
-// material; Windows 11 falls back to Acrylic for it. Windows keeps the material
-// in the window it was created with, so slim windows are always created with
-// one.
+// header and sidebars when the user turns on the blur switch. macOS shows the
+// sidebar material; Windows 11 falls back to Acrylic for it. Windows keeps the
+// material in the window it was created with, so every window is always created
+// with one.
 const windowVibrancyMaterial = mygo.VibrancySidebar
 
 // windowOptions returns the options for one of the app's windows, following the
 // current theme and vibrancy preference.
 func (h *appHost) windowOptions(spec core.WindowSpec) mygo.WindowOptions {
-	svc := h.svc
-	vibrant := svc != nil && svc.GetVibrancyEnabled()
-	// The main window is always created with the material and a transparent
-	// surface, even while the setting is off. macOS changes the material of
-	// an existing window; Windows only changes one it was created with. This
-	// lets the Settings switch turn blur on without recreating the window.
-	mainWindow := spec.Name == "" || spec.Name == "main"
 	opts := mygo.WindowOptions{
 		Title:           spec.Title,
 		Width:           spec.Width,
 		Height:          spec.Height,
 		MinWidth:        spec.MinWidth,
 		MinHeight:       spec.MinHeight,
-		Transparent:     vibrant || mainWindow,
-		BackgroundColor: windowBackgroundColor,
+		Transparent:     true,
+		BackgroundColor: h.views.WindowBackgroundColor(),
+		// Every window is created with the material, even while the switch is
+		// off: macOS changes the material of an existing window, and Windows
+		// only changes one it was created with. applyWindowVibrancy removes it
+		// when the setting is off, so the switch works later for every window.
+		Vibrancy: windowVibrancyMaterial,
 	}
 	switch spec.Name {
 	case "settings":
@@ -442,14 +436,11 @@ func (h *appHost) windowOptions(spec core.WindowSpec) mygo.WindowOptions {
 			opts.TitleBarHeight = 52
 		}
 	}
-	if vibrant || mainWindow {
-		opts.Vibrancy = windowVibrancyMaterial
-	}
 	return opts
 }
 
 // applyWindowVibrancy reconciles a newly created window with the current
-// setting. The main window is created with a material so the switch can add it
+// setting. Every window is created with a material so the switch can add it
 // back later on Windows; when the setting is off, remove it now.
 func (h *appHost) applyWindowVibrancy(w *mygo.Window) {
 	if w == nil || h.svc == nil || h.svc.GetVibrancyEnabled() {
@@ -521,7 +512,9 @@ func (h *appHost) ApplyTheme(theme string) {
 			continue
 		}
 		seen[w] = struct{}{}
-		_ = w.SetBackgroundColor(windowBackgroundColor)
+		if h.views != nil {
+			_ = w.SetBackgroundColor(h.views.WindowBackgroundColor())
+		}
 	}
 }
 

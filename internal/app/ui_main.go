@@ -9,15 +9,14 @@ import (
 )
 
 // viewMain builds one frame of the primary workspace. It has a single root:
-// mygo lays out the top-level children of a view as the window, so a backdrop,
-// the workspace, toasts and dialogs must be children of one Box rather than
+// mygo lays out the top-level children of a view as the window, so the
+// workspace, toasts and dialogs must be children of one Box rather than
 // sibling roots.
 func (a *App) viewMain(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	a.handleMainShortcuts(c)
 	a.applyVibrancyRoot(c)
 	root := ui.Box(c).Fill()
-	a.applyBackdrop(root, c.Theme())
 	a.attachURLDropTarget(root)
 	root.Children(func() {
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
@@ -29,14 +28,14 @@ func (a *App) viewMain(c *ui.Context) {
 				if a.previewOpen && a.previewMode == "inline" {
 					a.viewPreviewToolbar(c)
 					ui.Box(c).FillWidth().Height(1).Background(p.hairline)
-					a.mainBodySurface(c, func() {
+					a.mainBodySurface(c, 0, func() {
 						if len(a.items) > 0 && a.previewIndex >= 0 && a.previewIndex < len(a.items) {
 							a.viewPreviewBody(c, a.items[a.previewIndex])
 						}
 					})
 					return
 				}
-				a.mainBodySurface(c, func() {
+				a.mainBodySurface(c, mainHeaderHeight, func() {
 					if a.library == nil {
 						a.emptyState(c, iconLibrary, a.t("app.noActiveLibrary"), a.t("app.openSetup"))
 						return
@@ -101,19 +100,28 @@ func (a *App) viewMain(c *ui.Context) {
 	})
 }
 
-// mainBodySurface keeps the native window material behind the header only:
-// the workspace under it is opaque whenever the transparent backdrop exposes
-// that material. With the material switched off, the window backdrop already
-// paints the body, so no extra fill is needed.
-func (a *App) mainBodySurface(c *ui.Context, body func()) {
+// paintBelowHeader fills e with the fixed workspace colour below the strip
+// that the floating header owns. At rest the header paints that strip itself;
+// while content scrolls under it, the strip stays clear so the header's blur
+// sees the content rather than an opaque fill.
+func (a *App) paintBelowHeader(c *ui.Context, e ui.Element, inset float32) {
+	p := a.palette(c)
+	e.Draw(func(pt *ui.Painter, r ui.Rect) {
+		top := minF(inset, r.H)
+		if r.H > top {
+			pt.Fill(ui.Rect{X: r.X, Y: r.Y + top, W: r.W, H: r.H - top}, p.bg, 0)
+		}
+	})
+}
+
+// mainBodySurface is the workspace column under the floating header. It uses a
+// fixed opaque fill so only the sidebar and the header carry the system
+// material; painting the workspace itself over the window material costs too
+// much on every scroll and resize.
+func (a *App) mainBodySurface(c *ui.Context, topInset float32, body func()) {
 	e := ui.Box(c).FillWidth().Grow(1).Shrink(1)
+	a.paintBelowHeader(c, e, topInset)
 	e.ContextMenu(a.viewContextMenu)
-	if c.Vibrancy() && a.backdropMode == "transparent" {
-		// The workspace fills the whole column, including the strip behind
-		// the floating header. Leaving that strip unpainted made the top of
-		// the window look like a missing piece of the background.
-		e.Background(paletteFor(c.Theme()).bg)
-	}
 	e.Children(body)
 }
 
@@ -303,7 +311,7 @@ func (a *App) viewToast(c *ui.Context) {
 	if !a.toastActive() {
 		return
 	}
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	ui.Row(c).Absolute().Left(0).Right(0).Bottom(24).Justify(ui.Center).Children(func() {
 		ui.Row(c).PaddingX(16).Height(38).Radius(999).Background(p.text).Shadow(0, 12, 30, -8, p.cardShade).AlignItems(ui.Center).Gap(8).Children(func() {
 			ui.Icon(c, iconCheck).Size(15, 15).TextColor(p.bg)
@@ -319,7 +327,8 @@ func (a *App) viewDialog(c *ui.Context) {
 		return
 	}
 	open := true
-	backdropFill := func(backdrop ui.Element) { backdrop.Background(ui.RGBA(0, 0, 0, 0.35)) }
+	p := a.palette(c)
+	backdropFill := func(backdrop ui.Element) { backdrop.Background(p.overlay) }
 	show := func(title string, body func(), confirmLabel string, confirm func()) {
 		ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
 			backdropFill(backdrop)
@@ -329,7 +338,7 @@ func (a *App) viewDialog(c *ui.Context) {
 	switch a.dialog {
 	case dialogNewLibrary:
 		show(a.t("sidebar.createLibrary"), func() {
-			p := paletteFor(c.Theme())
+			p := a.palette(c)
 			ui.Text(c, a.t("setup.createDescription")).FontSize(12).TextColor(p.muted)
 			ui.TextInput(c, &a.dialogValue).Placeholder(a.t("setup.libraryName")).AutoFocus()
 			if a.dialogError != "" {
@@ -350,7 +359,7 @@ func (a *App) viewDialog(c *ui.Context) {
 		}, a.t("common.delete"), a.deleteFolderFromDialog)
 	case dialogPluginInstall:
 		show(a.t("settings.plugins.installTitle"), func() {
-			p := paletteFor(c.Theme())
+			p := a.palette(c)
 			req := a.pendingInstall
 			if req != nil {
 				ui.Text(c, req.Name).FontSize(15).FontWeight(600).TextColor(p.text)
@@ -372,7 +381,7 @@ func (a *App) viewDialog(c *ui.Context) {
 }
 
 func (a *App) dialogPanel(c *ui.Context, panel ui.Element, title string, body func(), confirmLabel string, confirm func()) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	panel.Width(420).Padding(22).Radius(14).Background(p.surface).Border(1, p.hairline).Shadow(0, 26, 64, -18, p.cardShade).Children(func() {
 		ui.Column(c).FillWidth().Gap(14).Children(func() {
 			ui.Text(c, title).FontSize(17).FontWeight(650).TextColor(p.text)

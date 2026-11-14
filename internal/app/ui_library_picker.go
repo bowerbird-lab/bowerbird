@@ -136,7 +136,7 @@ func (a *App) reorderLibraries(rows []int, to int) {
 }
 
 func (a *App) sidebarLibrarySwitcher(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	if !a.libraryPickerOpen && a.librarySearch != "" {
 		a.librarySearch = ""
 	}
@@ -173,7 +173,7 @@ func (a *App) sidebarLibrarySwitcher(c *ui.Context) {
 }
 
 func (a *App) viewLibraryPicker(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	all := a.libraryRefsInOrder()
 	visible := a.filteredLibraryRefs(all)
 	canReorder := len(all) > 1 && strings.TrimSpace(a.librarySearch) == ""
@@ -239,7 +239,7 @@ func (a *App) viewLibraryPicker(c *ui.Context) {
 }
 
 func (a *App) libraryPickerRow(c *ui.Context, ref core.LibraryRef, canReorder bool) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	active := a.library != nil && ref.ID == a.library.ID
 	row := ui.ButtonBase(c.Key("library-pick-" + ref.ID)).FillWidth().Height(32).PaddingX(6).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(8)
 	bg := ui.Transparent
@@ -275,7 +275,7 @@ func (a *App) libraryPickerRow(c *ui.Context, ref core.LibraryRef, canReorder bo
 }
 
 func (a *App) libraryPickerAction(c *ui.Context, key string, icon *ui.SVG, label string, onClick func()) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	row := ui.ButtonBase(c.Key(key)).FillWidth().Height(32).PaddingX(8).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(8)
 	bg := ui.Transparent
 	if row.Hovered() {

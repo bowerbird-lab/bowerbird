@@ -13,7 +13,7 @@ import (
 // viewTags is the tag manager page: search, sort, open a filtered gallery, and
 // rename/delete a taxonomy entry.
 func (a *App) viewTags(c *ui.Context) {
-	p := paletteFor(c.Theme())
+	p := a.palette(c)
 	tags := append([]core.Tag(nil), a.tags...)
 	if q := strings.ToLower(strings.TrimSpace(a.tagSearch)); q != "" {
 		filtered := tags[:0]

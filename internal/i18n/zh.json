@@ -352,10 +352,14 @@
       "autoDescription": "自动匹配系统外观"
     },
     "vibrancy": {
-      "title": "系统模糊材质",
-      "description": "在 Header 等透明区域后方使用系统模糊材质。默认开启；关闭后所有区域都不再显示模糊。",
-      "enable": "启用系统模糊",
-      "enableDescription": "统一控制所有模糊；关闭后 Header 与其他区域都使用不透明底色。"
+      "title": "材质设置",
+      "description": "模糊材质只用于侧边栏与标题栏（Header）；主界面使用固定配色，避免滚动和窗口缩放时的额外合成开销。",
+      "enable": "启用材质",
+      "enableDescription": "统一控制所有模糊；关闭后侧边栏与标题栏都使用不透明底色，主界面配色保持不变。",
+      "sidebar": "侧边栏使用材质",
+      "sidebarDescription": "让侧边栏透出系统模糊材质；关闭后侧边栏使用不透明底色。",
+      "titlebar": "标题栏使用材质",
+      "titlebarDescription": "内容滚动到标题栏下方时使用系统模糊材质；未滚动时标题栏使用与主界面一致的底色。"
     },
     "lightweight": {
       "title": "轻量模式",
@@ -449,7 +453,8 @@
       "network": "网络设置",
       "data": "数据与存储",
       "extension": "浏览器插件",
-      "mobile": "移动端连接"
+      "mobile": "移动端连接",
+      "themes": "主题"
     },
     "data": {
       "title": "数据与存储管理",
@@ -637,39 +642,6 @@
     },
     "subtitle": "偏好设置与个性化配置",
     "title": "偏好设置",
-    "backdrop": {
-      "title": "背景",
-      "description": "决定内容之下那一层的样子：默认使用主题固有色，也可换成纯色、渐变或透明。内容与侧边栏各自绘制底色，文字始终清晰。",
-      "modes": {
-        "default": "默认",
-        "transparent": "透明",
-        "solid": "纯色",
-        "gradient": "渐变",
-        "image": "图片"
-      },
-      "presets": {
-        "aurora": "极光",
-        "sunset": "日落",
-        "ocean": "海洋",
-        "mono": "灰阶"
-      },
-      "solidLabel": "背景颜色",
-      "invalidColor": "请输入有效的颜色值，例如 #f3f1ec",
-      "customLabel": "自定义渐变",
-      "customHint": "支持 linear-gradient / radial-gradient / conic-gradient，例如 linear-gradient(160deg, #a18cd1, #fbc2eb)。",
-      "applyCustom": "应用",
-      "clearCustom": "清除",
-      "customActive": "当前使用自定义渐变",
-      "modesHint": "侧边栏始终使用背景层的颜色。「透明」以 50% 的背景色叠在窗口之上，既能透出窗口模糊，也保证文字清晰。",
-      "opacityLabel": "背景透明度",
-      "opacityHint": "纯色、渐变与图片的不透明度，默认 20%。调低可让窗口与模糊材质透出；「默认」与「透明」不受此项影响。",
-      "imageLabel": "背景图片",
-      "imageHint": "支持本地 file:// 路径或 https:// 网址。图片会铺满窗口。",
-      "applyImage": "应用",
-      "clearImage": "清除",
-      "imageActive": "当前使用自定义图片",
-      "invalidImage": "请输入有效的 file:// 或 https:// 图片地址"
-    },
     "about": "关于",
     "aboutText": "本地优先的素材与设计库管理器。",
     "behavior": "行为",
@@ -681,7 +653,6 @@
     "search": "搜索设置",
     "shortcutsHelp": "点击键位即可录制，Esc 取消。基础快捷键不可修改。",
     "shortcutsReset": "恢复默认",
-    "solidColor": "背景颜色",
     "storage": {
       "items": "素材数量",
       "library": "当前素材库",
@@ -696,10 +667,61 @@
     "themeDark": "深色",
     "themeLight": "浅色",
     "themeSystem": "跟随系统",
-    "vibrancyHelp": "在 Header 后方使用系统模糊材质，此开关控制全部模糊",
+    "vibrancyHelp": "在侧边栏与标题栏后方使用系统模糊材质，此开关控制全部模糊",
     "recordURL": {
       "title": "记录来源 URL",
       "description": "从链接下载素材后，把解析后的页面/来源 URL 自动写入素材元数据。这是应用级设置，不受插件控制。"
+    },
+    "themes": {
+      "selection": "主题选择",
+      "light": "浅色主题",
+      "dark": "深色主题",
+      "followHint": "外观模式选择「跟随系统」时，浅色和深色主题会跟随系统外观自动切换；两者可以来自不同主题混搭。",
+      "files": "主题文件",
+      "filesHint": "文件名就是主题 ID，必须以 -light 或 -dark 结尾，文件内容为 JSON。内置的 default-light / default-dark 受保护，不会被覆盖或删除。",
+      "openFolder": "打开主题文件夹",
+      "reload": "重新加载",
+      "reloaded": "已重新加载主题",
+      "edit": "编辑颜色",
+      "editHint": "选择要编辑的主题。内置主题只读；创建副本后即可修改并保存。",
+      "editTheme": "编辑主题",
+      "builtin": "内置主题受保护，无法删除或覆盖。创建副本后可自由修改。",
+      "duplicate": "创建可编辑副本",
+      "reset": "恢复默认",
+      "revert": "撤销修改",
+      "save": "保存",
+      "saved": "主题已保存",
+      "unsaved": "有未保存的修改。",
+      "colors": {
+        "window": "窗口底色",
+        "background": "背景色",
+        "sidebar": "侧边栏颜色",
+        "surface": "表面色",
+        "surfaceAlt": "次表面色",
+        "text": "文字色",
+        "textMuted": "次要文字",
+        "textFaint": "弱化文字",
+        "border": "边框色",
+        "hover": "悬停色",
+        "pressed": "按下色",
+        "accent": "强调色",
+        "onAccent": "强调色上的文字",
+        "danger": "危险色",
+        "warning": "警告色",
+        "info": "信息色",
+        "star": "评分色",
+        "starStrong": "评分强调色",
+        "shadow": "阴影色",
+        "overlay": "遮罩色",
+        "preview": "预览背景",
+        "badge": "角标底色",
+        "onBadge": "角标文字"
+      },
+      "material": {
+        "sidebarOpacity": "侧边栏材质透明度",
+        "headerTint": "标题栏材质色",
+        "headerBlur": "标题栏模糊半径"
+      }
     }
   },
   "setup": {
