@@ -106,9 +106,11 @@ func (a *App) dragPreviewItems(item core.Item) []core.Item {
 	if len(a.selected) <= 1 || !a.selected[item.ID] {
 		return []core.Item{item}
 	}
-	byID := make(map[string]core.Item, len(a.items))
+	byID := make(map[string]core.Item, len(a.selected))
 	for _, it := range a.items {
-		byID[it.ID] = it
+		if a.selected[it.ID] {
+			byID[it.ID] = it
+		}
 	}
 	items := make([]core.Item, 0, len(a.selected))
 	seen := make(map[string]bool, len(a.selected))
@@ -207,6 +209,11 @@ func buildStackedDragPreview(load func(core.Item) image.Image, items []core.Item
 // the pipeline made one, the original for images without a thumbnail, and the
 // file's system icon otherwise.
 func (a *App) dragPreviewSource(item core.Item) image.Image {
+	if item.FilePath == "" && a.svc != nil && a.itemPages != nil {
+		if loaded, err := a.svc.GetWorkspaceCards([]string{item.ID}); err == nil && len(loaded) > 0 {
+			item = loaded[0]
+		}
+	}
 	var paths []string
 	if item.HasThumbnail {
 		paths = append(paths, filepath.Join(item.ItemPath, "thumbnail.jpg"))

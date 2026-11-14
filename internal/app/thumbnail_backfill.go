@@ -25,6 +25,7 @@ const (
 type thumbTask struct {
 	item  core.Item
 	force bool
+	owner *thumbJobQueue
 }
 
 // thumbJobQueue mirrors the old thumbnail-backfill scheduler: dedupe by item
@@ -58,6 +59,9 @@ func (a *App) canGenerateThumbnail(item core.Item) bool {
 		return false
 	}
 	ext := strings.ToLower(item.Extension)
+	if core.IsImageExtension(ext) {
+		return true
+	}
 	if (ext == "psd" || ext == "psb") && a.nativeFeature("official.psd-preview") {
 		return true
 	}
@@ -75,7 +79,7 @@ func (a *App) backfillMissingThumbnails(items []core.Item) {
 		return
 	}
 	for _, item := range items {
-		if item.HasThumbnail || item.InTrash {
+		if item.HasThumbnail && item.DominantColor != "" || item.InTrash {
 			continue
 		}
 		a.enqueueThumbnail(item, false)
@@ -137,8 +141,11 @@ func (a *App) enqueueThumbnail(item core.Item, force bool) {
 		}
 		return
 	}
+	if !force && len(j.queue) >= 64 {
+		return
+	}
 	j.queued[item.ID] = true
-	j.queue = append(j.queue, thumbTask{item: item, force: force || j.force[item.ID]})
+	j.queue = append(j.queue, thumbTask{item: item, force: force || j.force[item.ID], owner: j})
 	delete(j.force, item.ID)
 }
 
@@ -149,13 +156,14 @@ func (a *App) drainThumbnails() {
 	}
 	for j.active < thumbnailWorkers && len(j.queue) > 0 {
 		task := j.queue[0]
+		j.queue[0] = thumbTask{}
 		j.queue = j.queue[1:]
 		id := task.item.ID
 		delete(j.queued, id)
 		if j.inFlight[id] {
 			continue
 		}
-		if !task.force && (task.item.HasThumbnail || j.failed[id]) {
+		if !task.force && (task.item.HasThumbnail && task.item.DominantColor != "" || j.failed[id]) {
 			continue
 		}
 		j.active++
@@ -169,7 +177,7 @@ func (a *App) drainThumbnails() {
 
 func (a *App) finishThumbnail(task thumbTask, updated *core.Item, err error) {
 	j := a.thumbJobs
-	if j == nil {
+	if j == nil || task.owner != j {
 		return
 	}
 	id := task.item.ID
@@ -209,10 +217,14 @@ func (a *App) applyThumbnailUpdate(updated *core.Item) {
 	if updated == nil {
 		return
 	}
+	delete(a.stackCards, updated.ID)
 	changed := false
 	for i := range a.items {
 		if a.items[i].ID == updated.ID {
 			a.items[i] = *updated
+			if a.itemPages != nil && !a.itemPages[i/workspacePageSize] {
+				a.items[i] = workspaceSummary(*updated)
+			}
 			changed = true
 			break
 		}
@@ -239,6 +251,30 @@ func (a *App) applyThumbnailUpdate(updated *core.Item) {
 func (a *App) generateThumbnail(item core.Item, force bool) (*core.Item, error) {
 	start := time.Now()
 	ext := strings.ToLower(item.Extension)
+	if core.IsImageExtension(ext) || !force && item.HasThumbnail && item.DominantColor == "" {
+		path := item.FilePath
+		if !force && item.HasThumbnail {
+			path = filepath.Join(item.ItemPath, "thumbnail.jpg")
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		img, _, err := image.Decode(file)
+		_ = file.Close()
+		if err != nil {
+			return nil, err
+		}
+		width, height := item.Width, item.Height
+		if force || !item.HasThumbnail {
+			width, height = img.Bounds().Dx(), img.Bounds().Dy()
+		}
+		updated, err := a.svc.SaveItemThumbnailImage(item.ID, img, width, height)
+		if err == nil {
+			a.logThumbnailSuccess(item, "image", start)
+		}
+		return updated, err
+	}
 
 	// PSD/PSB: use the same native composite decoder as the preview.
 	if (ext == "psd" || ext == "psb") && a.nativeFeature("official.psd-preview") {

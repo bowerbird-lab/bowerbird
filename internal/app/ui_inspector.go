@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -33,6 +32,9 @@ func (a *App) loadInspector(id string) {
 	}
 	go func() {
 		item, err := a.svc.GetItem(id)
+		if err == nil && item != nil {
+			itemCopy = *item
+		}
 		var sections []plugin.InspectSection
 		if a.pluginHost != nil {
 			ctxItem := pluginContext([]core.Item{itemCopy}, a.folderID).Items[0]
@@ -40,11 +42,7 @@ func (a *App) loadInspector(id string) {
 			// document. The worker cannot read arbitrary files, so the host
 			// supplies a bounded UTF-8 copy instead.
 			if isTextDocument(itemCopy.Extension) && itemCopy.FilePath != "" {
-				if data, readErr := os.ReadFile(itemCopy.FilePath); readErr == nil {
-					const maxInspectorText = 512 << 10
-					if len(data) > maxInspectorText {
-						data = data[:maxInspectorText]
-					}
+				if data, readErr := readFilePrefix(itemCopy.FilePath, 512<<10); readErr == nil {
 					ctxItem["content"] = string(data)
 				}
 			}
@@ -168,7 +166,9 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 		// The hero is also a drag source, like a gallery card: drag the
 		// active item (or the whole selection) out to Finder or another app,
 		// or onto a folder row to classify it.
-		hero.Drag(sidebarDrag{ItemIDs: a.itemDragIDs(item)})
+		if hero.Hovered() || hero.Pressed() {
+			hero.Drag(sidebarDrag{ItemIDs: a.itemDragIDs(item)})
+		}
 		hero.DragDataFrom(func() transfer.Data { return a.itemDragData(item) }, a.dragOptions(hero, item))
 		path := ""
 		if item.HasThumbnail {
@@ -471,47 +471,8 @@ func (a *App) metaRowCopy(c *ui.Context, label, value string, copyable bool) {
 
 func (a *App) viewMultiInspector(c *ui.Context) {
 	p := a.palette(c)
-	items := a.selectedItems()
-	totalSize := int64(0)
-	for _, it := range items {
-		totalSize += it.Size
-	}
-
-	// 按照 selectedOrder 严格还原选择的时间顺序 (FIFO)
-	itemByID := make(map[string]core.Item, len(items))
-	for _, it := range items {
-		itemByID[it.ID] = it
-	}
-	var orderedItems []core.Item
-	for _, id := range a.selectedOrder {
-		if it, ok := itemByID[id]; ok {
-			orderedItems = append(orderedItems, it)
-		}
-	}
-	if len(orderedItems) < len(items) {
-		// 回退容错: 补充可能未被有序记录的 item
-		for _, it := range items {
-			found := false
-			for _, o := range orderedItems {
-				if o.ID == it.ID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				orderedItems = append(orderedItems, it)
-			}
-		}
-	}
-
-	// 截取最后选择的最多 5 张卡片形成堆叠效果 (orderedItems 尾部是最晚选中的)
-	const maxStack = 5
-	stackCount := len(orderedItems)
-	if stackCount > maxStack {
-		stackCount = maxStack
-	}
-	// 截取最后选中的卡片: 切片里最后一个元素是最晚选择的
-	stacked := orderedItems[len(orderedItems)-stackCount:]
+	stacked, selectedCount, totalSize := a.selectionSummary()
+	stacked = a.stackWorkspaceCards(stacked)
 	ui.Column(c).FillWidth().Gap(14).Children(func() {
 		// 堆叠层叠效果: 固定容器宽高并在水平/垂直中心对齐
 		const areaH = float32(160)
@@ -575,7 +536,7 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 
 		// 选中文本与容量汇总
 		ui.Column(c).FillWidth().Center().Gap(2).Children(func() {
-			ui.Text(c, a.tf("inspector.selectedCount", map[string]any{"count": len(items)})).
+			ui.Text(c, a.tf("inspector.selectedCount", map[string]any{"count": selectedCount})).
 				FontSize(14).FontWeight(650).TextColor(p.text).TextAlign(ui.Center)
 			ui.Text(c, formatBytes(totalSize)).
 				FontSize(11).TextColor(p.muted).FontFeatures("tnum").TextAlign(ui.Center)
@@ -584,9 +545,13 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 			for r := 1; r <= 5; r++ {
 				r := r
 				if ui.Button(c.Key(fmt.Sprintf("batch-rate-%d", r)), fmt.Sprintf("%d ★", r)).Clicked() {
+					ids := a.selectedIDs()
 					go func() {
-						for _, it := range items {
-							_, _ = a.svc.UpdateItemDetails(it.ID, it.Note, it.URL, r, it.Prompt)
+						for _, id := range ids {
+							item, err := a.svc.GetItem(id)
+							if err == nil && item != nil {
+								_, _ = a.svc.UpdateItemDetails(id, item.Note, item.URL, r, item.Prompt)
+							}
 						}
 						a.post(func() { a.refreshAll() })
 					}()
@@ -600,9 +565,10 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 				tag := strings.TrimSpace(a.tagInput)
 				if tag != "" {
 					a.tagInput = ""
+					ids := a.selectedIDs()
 					go func() {
-						for _, it := range items {
-							_ = a.svc.AddTagToItem(it.ID, tag)
+						for _, id := range ids {
+							_ = a.svc.AddTagToItem(id, tag)
 						}
 						a.post(func() { a.refreshAll() })
 					}()
@@ -613,9 +579,10 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 		for _, f := range flattenFolders(a.folders) {
 			f := f
 			if ui.Button(c.Key("batch-move-"+f.ID), f.Name).Clicked() {
+				ids := a.selectedIDs()
 				go func() {
-					for _, it := range items {
-						_ = a.svc.AddItemToFolder(it.ID, f.ID)
+					for _, id := range ids {
+						_ = a.svc.AddItemToFolder(id, f.ID)
 					}
 					a.post(func() { a.refreshAll() })
 				}()

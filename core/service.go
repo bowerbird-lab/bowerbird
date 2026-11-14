@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -179,6 +180,36 @@ func (s *Service) QueryWorkspace(query string, sortOrder string, offset int, lim
 		return nil, err
 	}
 	return &page, nil
+}
+
+func (s *Service) QueryWorkspaceIndex(query, sortOrder string, folderScope []string, onlyUnrated, trash bool) (*QueryPage, error) {
+	return s.QueryWorkspaceIndexContext(context.Background(), query, sortOrder, folderScope, onlyUnrated, trash)
+}
+
+func (s *Service) QueryWorkspaceIndexContext(ctx context.Context, query, sortOrder string, folderScope []string, onlyUnrated, trash bool) (*QueryPage, error) {
+	if s.mgr == nil {
+		return &QueryPage{}, nil
+	}
+	spec, err := ParseQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	page, err := s.mgr.WorkspaceIndexContext(ctx, spec, sortOrder, folderScope, onlyUnrated, trash)
+	return &page, err
+}
+
+func (s *Service) GetWorkspaceItems(ids []string) ([]Item, error) {
+	if s.mgr == nil {
+		return []Item{}, nil
+	}
+	return s.mgr.WorkspaceItems(ids)
+}
+
+func (s *Service) GetWorkspaceCards(ids []string) ([]Item, error) {
+	if s.mgr == nil {
+		return []Item{}, nil
+	}
+	return s.mgr.workspaceItems(ids, true)
 }
 
 func (s *Service) GetWorkspaceStats(sortOrder string) (*WorkspaceStats, error) {

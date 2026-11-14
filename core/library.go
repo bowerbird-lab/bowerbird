@@ -367,11 +367,6 @@ func (m *LibraryManager) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 	}
 	m.invalidateCache()
 	m.mu.Unlock()
-	go func() {
-		_ = m.ensureCacheLoaded()
-		m.backfillImageMetadata(libraryPath)
-	}()
-
 	// Persist to user data store so next launch reloads automatically
 	if m.userData != nil {
 		_ = m.userData.SetActiveLibraryPath(libraryPath)
@@ -1007,8 +1002,11 @@ func (m *LibraryManager) GetItems(query string, sortOrder string) ([]Item, error
 		return []Item{}, nil
 	}
 
-	if err := m.ensureCacheLoaded(); err != nil {
-		return nil, err
+	m.cacheMu.RLock()
+	loaded := m.cacheLoaded
+	m.cacheMu.RUnlock()
+	if !loaded {
+		return m.diskAllItems(query, sortOrder, false)
 	}
 
 	m.cacheMu.RLock()
@@ -1116,6 +1114,7 @@ func (m *LibraryManager) GetItem(id string) (*Item, error) {
 		item.UpdatedAt = item.ImportedAt
 	}
 	item.InTrash = inTrashInt == 1
+	item.HasThumbnail = hasThumbInt == 1
 	if paletteStr != "" {
 		item.Palette = strings.Split(paletteStr, ",")
 	} else {
@@ -3786,8 +3785,11 @@ func (m *LibraryManager) GetTrashItems(query string, sortOrder string) ([]Item, 
 		return []Item{}, nil
 	}
 
-	if err := m.ensureCacheLoaded(); err != nil {
-		return nil, err
+	m.cacheMu.RLock()
+	loaded := m.cacheLoaded
+	m.cacheMu.RUnlock()
+	if !loaded {
+		return m.diskAllItems(query, sortOrder, true)
 	}
 
 	m.cacheMu.RLock()

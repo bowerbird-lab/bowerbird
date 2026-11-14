@@ -8,6 +8,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -159,10 +160,17 @@ type App struct {
 	filters             Filters
 	sortOrder           string
 	items               []core.Item
+	itemPages           map[int]bool
+	itemPageOrder       []int
+	itemPagePending     map[int]bool
+	itemPageActive      int
+	stackCards          map[string]core.Item
+	stackCardsPending   bool
 	total               int
 	totalSize           int64
 	loading             bool
 	loadSeq             uint64
+	loadCancel          context.CancelFunc
 	history             []historyEntry
 	historyAt           int
 
@@ -182,6 +190,7 @@ type App struct {
 	// Gallery layout.
 	rows      [][]galleryCell
 	rowHeight int
+	rowsKey   galleryLayoutKey
 	// Side panels' widths in DIPs, kept in the prefs so they survive a
 	// restart. resizingSidebar and resizingInspector save the pref once the
 	// pointer lets the seam go instead of on every dragged frame.
@@ -239,25 +248,26 @@ type App struct {
 	menuOpen          bool
 
 	// Preview and playback.
-	previewOpen    bool
-	previewMode    string // "inline" (double click) or "full" (space key)
-	previewIndex   int
-	previewZoom    float32
-	previewPan     ui.Point
-	previewDragged bool
-	previewPanning bool
-	previewLastX   float32
-	previewLastY   float32
-	previewText    string
-	previewBitmap  *ui.Bitmap
-	psdInfo        *core.PSDInfo
-	previewError   string
-	player         *player.Player
-	video          *player.VideoPlayer
-	videoErr       string
-	videoScrub     float64
-	videoSeq       uint64
-	previewSeq     uint64
+	previewOpen      bool
+	previewMode      string // "inline" (double click) or "full" (space key)
+	previewIndex     int
+	previewZoom      float32
+	previewPan       ui.Point
+	previewDragged   bool
+	previewPanning   bool
+	previewLastX     float32
+	previewLastY     float32
+	previewText      string
+	previewBitmap    *ui.Bitmap
+	previewImagePath string
+	psdInfo          *core.PSDInfo
+	previewError     string
+	player           *player.Player
+	video            *player.VideoPlayer
+	videoErr         string
+	videoScrub       float64
+	videoSeq         uint64
+	previewSeq       uint64
 
 	// Settings values.
 	themeValue    string
@@ -543,11 +553,8 @@ func (a *App) Notify(show bool) {
 		return
 	}
 	a.thumbs.trim(0)
-	if a.player != nil {
-		a.player.Stop()
-		a.player = nil
-	}
-	a.closeVideo()
+	a.thumbJobs = newThumbJobQueue()
+	a.closePreview()
 	runtime.GC()
 	// debug.FreeOSMemory is intentionally not called on every hide: the native
 	// app keeps a small Go heap and the OS reclaims textures with the window.
@@ -639,15 +646,25 @@ func (a *App) refreshAll() {
 	}
 	a.syncLanguage()
 	a.loading = true
+	if a.loadCancel != nil {
+		a.loadCancel()
+	}
+	loadContext, cancel := context.WithCancel(context.Background())
+	a.loadCancel = cancel
 	a.loadSeq++
 	seq := a.loadSeq
 	previewNav, previewFolder := a.nav, a.folderID
 	previewSort, previewIncludeSubs := a.sortOrder, a.prefs.IncludeSubs
+	request := workspaceRequest{
+		context: loadContext,
+		query:   a.queryString(), scope: a.folderScope(), sort: a.sortOrder,
+		unrated: a.filters.Unrated, trash: a.nav == NavTrash, activeID: a.activeItemID,
+	}
 	go func() {
 		lib, _ := a.svc.GetActiveLibrary()
 		folders, _ := a.svc.GetFolders()
 		tags, _ := a.svc.GetTags()
-		statsPtr, _ := a.svc.GetWorkspaceStats(a.sortOrder)
+		statsPtr, _ := a.svc.GetWorkspaceStats(request.sort)
 		stats := core.WorkspaceStats{}
 		if statsPtr != nil {
 			stats = *statsPtr
@@ -677,7 +694,7 @@ func (a *App) refreshAll() {
 				}
 			}
 		}
-		items, total, totalSize, active, err := a.fetchItems()
+		items, total, totalSize, active, err := a.fetchWorkspace(request)
 		a.post(func() {
 			if seq != a.loadSeq {
 				return
@@ -686,6 +703,8 @@ func (a *App) refreshAll() {
 				(a.library != nil && lib != nil && a.library.ID != lib.ID)
 			if libChanged {
 				a.clearWorkspaceSelection()
+				a.thumbs.clear()
+				a.thumbJobs = newThumbJobQueue()
 				a.libIconPickerOpen = false
 				a.libNameEdit = false
 				a.crop = nil
@@ -698,6 +717,13 @@ func (a *App) refreshAll() {
 			a.trashCount = trash
 			a.recent = recent
 			a.items = items
+			a.itemPages = map[int]bool{}
+			a.itemPageOrder = nil
+			a.itemPagePending = map[int]bool{}
+			if len(items) > 0 && items[0].FilePath != "" {
+				a.itemPages[0] = true
+				a.itemPageOrder = []int{0}
+			}
 			a.total = total
 			a.totalSize = totalSize
 			a.loading = false
@@ -710,10 +736,6 @@ func (a *App) refreshAll() {
 			}
 			a.rebuildRows()
 			a.recordHistory()
-			// Entering a page wakes the thumbnail lifecycle for visible items
-			// that the import pipeline could not decode (video/PSD/plugin
-			// formats). It is idempotent and limited to two workers.
-			a.backfillMissingThumbnails(a.items)
 			if err != nil {
 				a.showToast(err.Error())
 			}
@@ -770,52 +792,6 @@ func (a *App) showToast(message string) {
 	if a.win != nil {
 		a.win.Invalidate()
 	}
-}
-
-// fetchItems reads every matching page. QueryWorkspace caps a page at 500, so
-// the gallery loops until it has the full filtered set or a safety bound.
-func (a *App) fetchItems() ([]core.Item, int, int64, *core.Item, error) {
-	if a.svc == nil {
-		return nil, 0, 0, nil, nil
-	}
-	if a.nav == NavTags && a.folderID == "" && a.query == "" && len(a.filters.Types) == 0 {
-		// The Tags page lists all items in the library.
-	}
-	query := a.queryString()
-	scope := a.folderScope()
-	onlyUnrated := a.filters.Unrated
-	if a.nav == NavTrash {
-		items, err := a.svc.GetTrashItems(query, a.sortOrder)
-		return items, len(items), 0, nil, err
-	}
-	const pageSize = 500
-	var all []core.Item
-	offset := 0
-	total := 0
-	totalSize := int64(0)
-	for {
-		page, err := a.svc.QueryWorkspace(query, a.sortOrder, offset, pageSize, scope, onlyUnrated)
-		if err != nil {
-			return all, total, totalSize, nil, err
-		}
-		if page == nil {
-			break
-		}
-		total = page.Total
-		totalSize = page.TotalSize
-		all = append(all, page.Items...)
-		offset += len(page.Items)
-		if len(page.Items) == 0 || offset >= page.Total {
-			break
-		}
-	}
-	var active *core.Item
-	if a.activeItemID != "" {
-		if it, err := a.svc.GetItem(a.activeItemID); err == nil {
-			active = it
-		}
-	}
-	return all, total, totalSize, active, nil
 }
 
 func (a *App) queryString() string {
@@ -938,6 +914,7 @@ func contains(list []string, v string) bool {
 // the active library changes so the inspector can never keep showing an item
 // from the previous library.
 func (a *App) clearWorkspaceSelection() {
+	a.stackCards = nil
 	a.selected = map[string]bool{}
 	a.selectedOrder = nil
 	a.selectedAt = -1
@@ -966,7 +943,7 @@ func (a *App) navigate(nav Nav, folderID string) {
 	a.selectedAt = -1
 	a.activeItemID = ""
 	a.activeItem = nil
-	a.previewOpen = false
+	a.closePreview()
 	a.refreshAll()
 }
 
@@ -1031,6 +1008,7 @@ func (a *App) goHistory(delta int) {
 // user's zoom level; each row takes the widest set of items whose natural
 // widths fill the content width.
 func (a *App) rebuildRows() {
+	a.rowsKey = a.galleryLayoutKey()
 	a.rows = nil
 	width := 900
 	if a.win != nil {

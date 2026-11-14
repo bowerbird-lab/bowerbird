@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -47,7 +46,7 @@ func (a *App) viewPreview(c *ui.Context) {
 	if a.previewIndex < 0 || a.previewIndex >= len(a.items) {
 		a.previewIndex = 0
 	}
-	item := a.items[a.previewIndex]
+	item := a.workspaceItem(a.previewIndex)
 	a.activeItem = &item
 	ui.Column(c).Fill().Background(ui.RGBA(0, 0, 0, 0.0)).Children(func() {
 		a.viewPreviewToolbar(c)
@@ -63,7 +62,7 @@ func (a *App) viewPreviewToolbar(c *ui.Context) {
 	if a.previewIndex < 0 || a.previewIndex >= len(a.items) {
 		return
 	}
-	item := a.items[a.previewIndex]
+	item := a.workspaceItem(a.previewIndex)
 
 	full := a.previewMode == "full"
 	closeButton := func() {
@@ -153,7 +152,7 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 				start, end := a.stripRange(c)
 				for i := start; i < end; i++ {
 					i := i
-					it := a.items[i]
+					it := a.workspaceItem(i)
 					box := ui.ButtonBase(c.Key(fmt.Sprintf("strip-%s", it.ID))).Width(stripThumbWidth).Height(stripThumbHeight).Radius(6).Background(p.surface2).Clip().FocusRing(false).KeepFocus()
 					if i == a.previewIndex {
 						box.Border(2, p.accent)
@@ -470,21 +469,41 @@ func (a *App) previewDocument(c *ui.Context, item core.Item) {
 
 func (a *App) loadPreviewContent() {
 	a.closeVideo()
+	a.previewSeq++
+	a.thumbs.invalidate(a.previewImagePath)
+	a.previewImagePath = ""
+	a.previewBitmap = nil
+	a.psdInfo = nil
 	a.previewText = ""
 	a.previewError = ""
 	if a.previewIndex < 0 || a.previewIndex >= len(a.items) {
 		return
 	}
 	item := a.items[a.previewIndex]
+	if a.itemPages != nil {
+		loaded := a.fullWorkspaceItems([]core.Item{item})
+		if len(loaded) == 0 {
+			return
+		}
+		item = loaded[0]
+	}
 	a.activeItem = &item
 	a.activeItemID = item.ID
+	if categoryOf(item) == "image" {
+		a.previewImagePath = item.FilePath
+	}
 	ext := strings.ToLower(item.Extension)
 	if ext == "md" || ext == "markdown" || ext == "txt" || ext == "json" || ext == "js" || ext == "ts" || ext == "go" || ext == "py" {
 		path := item.FilePath
 		a.previewSeq++
 		seq := a.previewSeq
 		go func() {
-			data, err := os.ReadFile(path)
+			const maxPreviewText = 16 << 20
+			data, err := readFilePrefix(path, maxPreviewText+1)
+			if err == nil && len(data) > maxPreviewText {
+				data = nil
+				err = fmt.Errorf("document exceeds the 16 MiB preview limit")
+			}
 			a.post(func() {
 				if seq != a.previewSeq {
 					return

@@ -37,7 +37,7 @@ func (a *App) viewMain(c *ui.Context) {
 					ui.Box(c).FillWidth().Height(1).Background(p.hairline)
 					a.mainBodySurface(c, 0, func() {
 						if len(a.items) > 0 && a.previewIndex >= 0 && a.previewIndex < len(a.items) {
-							a.viewPreviewBody(c, a.items[a.previewIndex])
+							a.viewPreviewBody(c, a.workspaceItem(a.previewIndex))
 						}
 					})
 				} else {
@@ -623,6 +623,14 @@ func (a *App) dialogPanelActions(c *ui.Context, panel ui.Element, title string, 
 }
 
 func (a *App) closePreview() {
+	if a.thumbs != nil {
+		a.thumbs.invalidate(a.previewImagePath)
+	}
+	a.previewImagePath = ""
+	a.previewSeq++
+	a.previewBitmap = nil
+	a.psdInfo = nil
+	a.closeVideo()
 	a.previewOpen = false
 	a.previewText = ""
 	a.previewError = ""

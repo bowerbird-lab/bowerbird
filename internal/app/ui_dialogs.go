@@ -248,7 +248,7 @@ func (a *App) deleteFromCurrentFolder() {
 	if len(scope) == 0 {
 		scope = []string{a.folderID}
 	}
-	items := a.selectedItems()
+	items := a.fullWorkspaceItems(a.selectedItems())
 	plan := planFolderDelete(items, scope)
 	if len(plan.unlinkIDs) == 0 && len(plan.trashIDs) == 0 {
 		return
@@ -319,7 +319,7 @@ func (a *App) applyFolderDelete(plan folderDeletePlan, scope []string) {
 // marked or moved yet: the dialog shows every folder it lives in and lets the
 // user choose between detaching it from those folders and trashing it.
 func (a *App) requestLibraryDelete() {
-	items := a.selectedItems()
+	items := a.fullWorkspaceItems(a.selectedItems())
 	if len(items) == 0 {
 		return
 	}

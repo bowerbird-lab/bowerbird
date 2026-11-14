@@ -79,7 +79,7 @@ func (a *App) galleryGap() float32 {
 // builds exist; each row builds only its own cards, so tens of thousands of
 // items scroll at display refresh.
 func (a *App) viewGallery(c *ui.Context) {
-	a.rebuildRows()
+	a.ensureRows()
 	if len(a.rows) == 0 {
 		container := ui.Box(c.Key("gallery-container")).Fill().Clip().Bind(&a.galleryBox)
 		container.HandleInput(a.handleGalleryZoomInput)
@@ -364,7 +364,9 @@ func (a *App) galleryRow(c *ui.Context, row []galleryCell) {
 			if cell.index < 0 || cell.index >= len(a.items) {
 				continue
 			}
-			a.itemCard(c, a.items[cell.index], cell.index, float32(cell.width), float32(cell.height))
+			item := a.workspaceItem(cell.index)
+			a.backfillMissingThumbnails([]core.Item{item})
+			a.itemCard(c, item, cell.index, float32(cell.width), float32(cell.height))
 		}
 	})
 }
@@ -504,6 +506,7 @@ func (a *App) folderCard(c *ui.Context, folderID string, w, h float32) {
 }
 
 func (a *App) folderPreviewImage(c *ui.Context, item core.Item, targetPx int) {
+	a.backfillMissingThumbnails([]core.Item{item})
 	if bmp := a.itemThumbBitmap(item, targetPx); bmp != nil {
 		ui.Image(c, bmp).Fill().Fit(ui.Cover)
 		return
@@ -515,9 +518,9 @@ func (a *App) folderPreviewImage(c *ui.Context, item core.Item, targetPx int) {
 
 func (a *App) itemThumbBitmap(item core.Item, targetPx int) *ui.Bitmap {
 	path := ""
-	if item.HasThumbnail {
+	if item.HasThumbnail && item.ItemPath != "" {
 		path = filepath.Join(item.ItemPath, "thumbnail.jpg")
-	} else if categoryOf(item) == "image" {
+	} else if categoryOf(item) == "image" && !a.canGenerateThumbnail(item) {
 		path = item.FilePath
 	}
 	if path == "" {
@@ -553,14 +556,16 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 	// card's background; it is only built for the card under the pointer.
 	// The typed payload lets folder rows in this process classify the drag
 	// without importing the files again.
-	card.Drag(sidebarDrag{ItemIDs: a.itemDragIDs(item)})
+	if card.Hovered() || card.Pressed() {
+		card.Drag(sidebarDrag{ItemIDs: a.itemDragIDs(item)})
+	}
 	card.DragDataFrom(func() transfer.Data { return a.itemDragData(item) }, a.dragOptions(card, item))
 
 	// Resolve thumbnail or system file icon
 	path := ""
-	if item.HasThumbnail {
+	if item.HasThumbnail && item.ItemPath != "" {
 		path = filepath.Join(item.ItemPath, "thumbnail.jpg")
-	} else if categoryOf(item) == "image" {
+	} else if categoryOf(item) == "image" && !a.canGenerateThumbnail(item) {
 		path = item.FilePath
 	}
 
@@ -569,7 +574,7 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 		bmp = a.thumbs.get(path, int(w*2))
 	}
 	var sysIconBmp *ui.Bitmap
-	if bmp == nil {
+	if bmp == nil && path == "" && item.FilePath != "" && categoryOf(item) != "image" {
 		sysIconBmp = a.thumbs.getSystemIcon(item.Extension, item.FilePath)
 	}
 
@@ -758,11 +763,19 @@ func (a *App) addItemsToFolder(ids []string, folderID string) {
 func (a *App) itemDragData(item core.Item) transfer.Data {
 	ids := a.itemDragIDs(item)
 	urls := make([]string, 0, len(ids))
+	wanted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		wanted[id] = true
+	}
+	var selected []core.Item
 	for _, it := range a.items {
-		for _, id := range ids {
-			if it.ID == id && it.FileURL != "" {
-				urls = append(urls, it.FileURL)
-			}
+		if wanted[it.ID] {
+			selected = append(selected, it)
+		}
+	}
+	for _, it := range a.fullWorkspaceItems(selected) {
+		if it.FileURL != "" {
+			urls = append(urls, it.FileURL)
 		}
 	}
 	return transfer.New(transfer.NewItem(transfer.Bytes(transfer.FileList, []byte(strings.Join(urls, "\r\n")))))
@@ -1254,6 +1267,9 @@ func (a *App) viewContextMenu(m *ui.Menu) {
 }
 
 func (a *App) itemContextMenu(m *ui.Menu, item core.Item) {
+	if loaded := a.fullWorkspaceItems([]core.Item{item}); len(loaded) > 0 {
+		item = loaded[0]
+	}
 	if a.nav == NavTrash {
 		if m.Item(a.t("contextMenu.restore")).Chosen() {
 			a.restoreSelected()
@@ -1310,14 +1326,15 @@ func (a *App) itemContextMenu(m *ui.Menu, item core.Item) {
 	})
 	m.Separator()
 	a.viewContextMenu(m)
-	actions := a.pluginHost.Actions(pluginContext(a.selectedItems(), a.folderID))
+	actions := a.pluginHost.Actions(pluginContext(a.fullWorkspaceItems(a.selectedItems()), a.folderID))
 	if len(actions) > 0 {
 		m.Separator()
 		for _, action := range actions {
 			action := action
 			if m.Item(action.Title).Chosen() {
+				context := pluginContext(a.fullWorkspaceItems(a.selectedItems()), a.folderID)
 				go func() {
-					err := a.pluginHost.RunAction(action.ID, pluginContext(a.selectedItems(), a.folderID))
+					err := a.pluginHost.RunAction(action.ID, context)
 					a.post(func() {
 						if err != nil {
 							a.showToast(err.Error())
