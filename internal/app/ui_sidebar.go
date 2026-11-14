@@ -37,6 +37,10 @@ func (a *App) viewSidebar(c *ui.Context) {
 				a.iconButton(c, "new-folder", iconFolderPlus, false, a.t("sidebar.newFolder"), func() {
 					a.dialog = dialogNewFolder
 					a.dialogValue = ""
+					a.newFolderParentID = ""
+					if a.nav == NavFolder {
+						a.newFolderParentID = a.folderID
+					}
 				})
 			})
 			if len(a.folders) == 0 {
@@ -78,9 +82,20 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 	open := a.expanded[f.ID]
 	children := childFolders(a.folders, f.ID)
 	active := a.nav == NavFolder && a.folderID == f.ID
-	b := ui.ButtonBase(c.Key("folder-" + f.ID)).FillWidth().Height(28).PaddingStart(float32(8 + depth*14)).PaddingEnd(8).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(6)
+	// The expand chevron is a 12px glyph centred in an 18px button, so its
+	// visible right edge sits 3px inside the row's content edge. Leaf rows get
+	// the same inset for their count, keeping both kinds of trailing glyph on
+	// one vertical line without reserving a whole empty chevron slot.
+	paddingEnd := float32(8)
+	if len(children) == 0 {
+		paddingEnd += 3
+	}
+	b := ui.ButtonBase(c.Key("folder-" + f.ID)).FillWidth().Height(28).PaddingStart(float32(8 + depth*14)).PaddingEnd(paddingEnd).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(6)
+	// Accept items dragged from the gallery: dropping classifies them into this
+	// folder instead of leaving the native file drop to re-import them.
+	_, dropOver := ui.DragOver[itemDrag](b)
 	bg := ui.Transparent
-	if active {
+	if dropOver || active {
 		bg = p.press
 	} else if b.Hovered() {
 		bg = p.hover
@@ -114,16 +129,19 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 			a.navigate(NavFolder, f.ID)
 		}
 	}
+	if dropped, ok := ui.Drop[itemDrag](b); ok {
+		a.addItemsToFolder([]string(dropped), f.ID)
+	}
 	b.ContextMenu(func(m *ui.Menu) {
 		if m.Item(a.t("common.rename")).Chosen() {
 			a.dialog = dialogRenameFolder
 			a.dialogValue = f.Name
 			a.folderID = f.ID
 		}
-		if m.Item(a.t("contextMenu.newFolder")).Chosen() {
+		if m.Item(a.t("sidebar.newSubfolderMenu")).Chosen() {
 			a.dialog = dialogNewFolder
 			a.dialogValue = ""
-			a.folderID = f.ID
+			a.newFolderParentID = f.ID
 		}
 		if m.Item(a.t("contextMenu.includeSubfolders")).Checked(a.prefs.IncludeSubs).Chosen() {
 			a.prefs.IncludeSubs = !a.prefs.IncludeSubs

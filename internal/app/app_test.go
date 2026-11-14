@@ -419,6 +419,27 @@ func TestItemDragDataFollowsSelection(t *testing.T) {
 	}
 }
 
+func TestItemDragIDsFollowSelection(t *testing.T) {
+	a := seededApp(t)
+
+	// A single selection drags only the pressed item.
+	if got := fmt.Sprint(a.itemDragIDs(a.items[0])); got != "[a]" {
+		t.Fatalf("single drag IDs = %s, want [a]", got)
+	}
+
+	// Dragging a member of a multi-selection carries the whole selection in
+	// gallery order.
+	a.selected = map[string]bool{"a": true, "b": true}
+	if got := fmt.Sprint(a.itemDragIDs(a.items[1])); got != "[a b]" {
+		t.Fatalf("multi drag IDs = %s, want [a b]", got)
+	}
+
+	// Dragging an item outside the selection carries only that item.
+	if got := fmt.Sprint(a.itemDragIDs(a.items[2])); got != "[c]" {
+		t.Fatalf("outside drag IDs = %s, want [c]", got)
+	}
+}
+
 func TestGalleryContextMenuTogglesSidebarAndInspector(t *testing.T) {
 	a := seededApp(t)
 	tester := ui.NewTester(a.viewMain, 1280, 800)
@@ -471,6 +492,34 @@ func TestEmptyGalleryKeepsDefaultContextMenu(t *testing.T) {
 	}
 	if !a.prefs.IncludeSubs {
 		t.Fatal("subfolder toggle did not update the preference")
+	}
+}
+
+func TestFolderContextMenuCreatesSubfolderUnderFolder(t *testing.T) {
+	a := seededApp(t)
+	tester := ui.NewTester(a.viewMain, 1100, 760)
+	tester.Frame()
+
+	if err := tester.RightClick("Inspiration"); err != nil {
+		t.Fatalf("right click folder: %v", err)
+	}
+	tester.Frame()
+	if !contains(tester.Menu(), a.t("sidebar.newSubfolderMenu")) {
+		t.Fatalf("folder context menu is missing new subfolder: %v", tester.Menu())
+	}
+	if err := tester.ChooseMenuItem(a.t("sidebar.newSubfolderMenu")); err != nil {
+		t.Fatalf("choose new subfolder: %v", err)
+	}
+	tester.Frame()
+
+	if a.dialog != dialogNewFolder {
+		t.Fatalf("dialog = %v, want new folder", a.dialog)
+	}
+	if a.newFolderParentID != "f1" {
+		t.Fatalf("new folder parent = %q, want f1", a.newFolderParentID)
+	}
+	if !tester.HasText(a.t("sidebar.newSubfolder")) {
+		t.Fatalf("dialog is missing its subfolder title: %v", tester.Texts())
 	}
 }
 

@@ -211,7 +211,11 @@ type App struct {
 	dialog      dialogKind
 	dialogValue string
 	dialogError string
-	menuOpen    bool
+	// newFolderParentID is the folder a new folder dialog creates under; empty
+	// means the library root. It is separate from folderID so opening the
+	// dialog from a folder's context menu does not change the current view.
+	newFolderParentID string
+	menuOpen          bool
 
 	// Preview and playback.
 	previewOpen    bool

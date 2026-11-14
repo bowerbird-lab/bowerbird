@@ -165,7 +165,9 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 		}
 		hero := ui.Box(c).FillWidth().Height(h).Radius(10).Background(p.surface2).Clip().Cursor(ui.CursorPointer)
 		// The hero is also a drag source, like a gallery card: drag the
-		// active item (or the whole selection) out to Finder or another app.
+		// active item (or the whole selection) out to Finder or another app,
+		// or onto a folder row to classify it.
+		hero.Drag(itemDrag(a.itemDragIDs(item)))
 		hero.DragDataFrom(func() transfer.Data { return a.itemDragData(item) }, a.dragOptions(hero, item))
 		path := ""
 		if item.HasThumbnail {

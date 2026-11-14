@@ -445,6 +445,9 @@ func (a *App) folderCard(c *ui.Context, folderID string, w, h float32) {
 		bg = p.hover
 		a.dropFolderID = f.ID
 	}
+	if _, over := ui.DragOver[itemDrag](card); over {
+		bg = p.press
+	}
 	card.Background(card.AnimateColor("bg", bg, ui.Animation{Duration: 110 * time.Millisecond}))
 	card.Children(func() {
 		preview := a.folderPreviews[f.ID]
@@ -494,6 +497,9 @@ func (a *App) folderCard(c *ui.Context, folderID string, w, h float32) {
 	})
 	if card.Clicked() {
 		a.navigate(NavFolder, f.ID)
+	}
+	if dropped, ok := ui.Drop[itemDrag](card); ok {
+		a.addItemsToFolder([]string(dropped), f.ID)
 	}
 }
 
@@ -545,6 +551,9 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 	// Native drag out: advertises the file list to Finder and other apps. The
 	// preview is the image itself (a stack for a multi-selection), not the
 	// card's background; it is only built for the card under the pointer.
+	// The typed payload lets folder rows in this process classify the drag
+	// without importing the files again.
+	card.Drag(itemDrag(a.itemDragIDs(item)))
 	card.DragDataFrom(func() transfer.Data { return a.itemDragData(item) }, a.dragOptions(card, item))
 
 	// Resolve thumbnail or system file icon
@@ -707,19 +716,43 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 	})
 }
 
+// itemDrag is the in-app payload carried from a gallery card or inspector
+// hero to a folder target. It lists item IDs, not paths, so dropping onto a
+// folder classifies the existing items instead of importing them again.
+type itemDrag []string
+
+// itemDragIDs returns the items a drag anchored at item carries: the whole
+// selection when item is part of a multi-selection, otherwise just item.
+func (a *App) itemDragIDs(item core.Item) []string {
+	if len(a.selected) <= 1 || !a.selected[item.ID] {
+		return []string{item.ID}
+	}
+	ids := make([]string, 0, len(a.selected))
+	for _, it := range a.items {
+		if a.selected[it.ID] {
+			ids = append(ids, it.ID)
+		}
+	}
+	return ids
+}
+
+// addItemsToFolder links dropped items to a folder. Items keep every folder
+// they already belong to; this is classification, not a move between folders.
+func (a *App) addItemsToFolder(ids []string, folderID string) {
+	if a.svc == nil || folderID == "" {
+		return
+	}
+	for _, id := range ids {
+		_ = a.svc.AddItemToFolder(id, folderID)
+	}
+	a.refreshAll()
+}
+
 // itemDragData builds the native file-list drag for a gallery card or the
 // inspector hero. Dragging a member of a multi-selection carries the whole
 // selection; dragging any other item carries just that item.
 func (a *App) itemDragData(item core.Item) transfer.Data {
-	ids := []string{item.ID}
-	if len(a.selected) > 1 && a.selected[item.ID] {
-		ids = ids[:0]
-		for _, it := range a.items {
-			if a.selected[it.ID] {
-				ids = append(ids, it.ID)
-			}
-		}
-	}
+	ids := a.itemDragIDs(item)
 	urls := make([]string, 0, len(ids))
 	for _, it := range a.items {
 		for _, id := range ids {

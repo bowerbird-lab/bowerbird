@@ -38,10 +38,8 @@ func (a *App) createFolderFromDialog() {
 	if name == "" {
 		return
 	}
-	parent := ""
-	if a.nav == NavFolder {
-		parent = a.folderID
-	}
+	parent := a.newFolderParentID
+	a.newFolderParentID = ""
 	a.dialog = dialogNone
 	go func() {
 		_, err := a.svc.CreateFolder(name, parent)

@@ -347,7 +347,11 @@ func (a *App) viewDialog(c *ui.Context) {
 			}
 		}, a.t("common.create"), a.createLibraryFromDialog)
 	case dialogNewFolder:
-		show(a.t("sidebar.newFolder"), func() {
+		title := a.t("sidebar.newFolder")
+		if a.newFolderParentID != "" {
+			title = a.t("sidebar.newSubfolder")
+		}
+		show(title, func() {
 			ui.TextInput(c, &a.dialogValue).Placeholder(a.t("sidebar.folderName")).AutoFocus()
 		}, a.t("common.create"), a.createFolderFromDialog)
 	case dialogRenameFolder:
@@ -376,6 +380,9 @@ func (a *App) viewDialog(c *ui.Context) {
 		}, a.t("common.save"), a.addTagToActive)
 	}
 	if !open {
+		if a.dialog == dialogNewFolder {
+			a.newFolderParentID = ""
+		}
 		a.dialog = dialogNone
 		a.dialogError = ""
 	}
