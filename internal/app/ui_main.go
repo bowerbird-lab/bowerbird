@@ -523,6 +523,8 @@ func (a *App) viewDialog(c *ui.Context) {
 		a.viewLastFolderDeleteDialog(c, &open)
 	case dialogFolderPicker:
 		a.viewFolderPickerDialog(c, &open)
+	case dialogTagPicker:
+		a.viewTagPickerDialog(c, &open)
 	}
 	if !open {
 		if a.dialog == dialogNewFolder {
@@ -531,6 +533,10 @@ func (a *App) viewDialog(c *ui.Context) {
 		if a.dialog == dialogFolderPicker {
 			a.folderPickerItems = nil
 			a.folderPickerQuery = ""
+		}
+		if a.dialog == dialogTagPicker {
+			a.tagPickerItems = nil
+			a.tagPickerQuery = ""
 		}
 		a.dialog = dialogNone
 		a.dialogError = ""

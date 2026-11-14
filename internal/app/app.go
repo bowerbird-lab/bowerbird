@@ -254,6 +254,10 @@ type App struct {
 	folderPickerItems    []core.Item
 	folderPickerQuery    string
 	folderPickerExpanded map[string]bool
+	// tagPickerItems are the items the "add tag" dialog targets, and
+	// tagPickerQuery is the text its list filters by.
+	tagPickerItems []core.Item
+	tagPickerQuery string
 
 	// Preview and playback.
 	previewOpen       bool
@@ -392,6 +396,7 @@ const (
 	dialogDeleteItems
 	dialogDeleteLastFolder
 	dialogFolderPicker
+	dialogTagPicker
 )
 
 type settingsGroup struct {

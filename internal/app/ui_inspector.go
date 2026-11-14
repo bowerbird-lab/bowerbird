@@ -294,14 +294,7 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 					}()
 				}
 			}
-			add := ui.ButtonBase(c.Key("tag-add")).Height(22).PaddingX(7).Radius(999).Background(p.hover).FocusRing(false).AlignItems(ui.Center).Gap(3).Children(func() {
-				ui.Icon(c, iconPlus).Size(10, 10).TextColor(p.muted)
-				ui.Text(c, a.t("inspector.addTag")).FontSize(10.5).TextColor(p.muted)
-			})
-			if add.Clicked() {
-				a.dialog = dialogTag
-				a.dialogValue = ""
-			}
+			a.tagAddButton(c, []core.Item{item}, true)
 		})
 
 		a.inspectorDivider(c)
@@ -593,22 +586,10 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 				}
 			}
 		})
-		a.sectionLabel(c, a.t("inspector.batchTags"))
+		// Tags are added from the picker: it lists the library's tags, where
+		// the section label alone would only repeat the button.
 		ui.Row(c).Gap(6).Children(func() {
-			ui.TextInput(c.Key("batch-tag"), &a.tagInput).Placeholder(a.t("inspector.tagName")).Grow(1).FontSize(12)
-			if ui.Button(c, a.t("common.add")).Clicked() {
-				tag := strings.TrimSpace(a.tagInput)
-				if tag != "" {
-					a.tagInput = ""
-					ids := a.selectedIDs()
-					go func() {
-						for _, id := range ids {
-							_ = a.svc.AddTagToItem(id, tag)
-						}
-						a.post(func() { a.refreshAll() })
-					}()
-				}
-			}
+			a.tagAddButton(c, items, true)
 		})
 		a.inspectorFolders(c, items, sharedFolders(items), a.t("multiInspector.folders"))
 		a.inspectorDivider(c)

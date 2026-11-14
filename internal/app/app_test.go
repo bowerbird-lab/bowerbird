@@ -1887,3 +1887,61 @@ func TestFolderPickerExpansionIsIndependentOfTheSidebar(t *testing.T) {
 		t.Fatal("the picker's expansion leaked into the sidebar's state")
 	}
 }
+
+// TestTagPickerShowsAllTagsAndCreatesTheTypedOne covers the shared tag picker:
+// it lists every tag by default, narrows with the search, offers the typed name
+// when no tag has it, and adds the clicked tag.
+func TestTagPickerShowsAllTagsAndCreatesTheTypedOne(t *testing.T) {
+	a := seededApp(t)
+	a.tags = []core.Tag{
+		{Name: "reference", ItemCount: 2},
+		{Name: "mood", ItemCount: 5},
+	}
+	a.activeItem.Tags = []string{"reference"}
+	a.openTagPicker([]core.Item{*a.activeItem})
+	if a.dialog != dialogTagPicker {
+		t.Fatalf("the tag picker did not open: dialog=%v", a.dialog)
+	}
+	open := true
+	tester := ui.NewTester(func(c *ui.Context) { a.viewTagPickerDialog(c, &open) }, 420, 700)
+	for _, want := range []string{"reference", "mood"} {
+		if !tester.HasText(want) {
+			t.Fatalf("the picker does not list %q by default: %q", want, tester.Texts())
+		}
+	}
+
+	// The search narrows the list, and offers the typed name as a new tag.
+	a.tagPickerQuery = "mo"
+	tester.Frame()
+	if !tester.HasText("mood") {
+		t.Fatalf("the search dropped the matching tag: %q", tester.Texts())
+	}
+	if tester.HasText("reference") {
+		t.Fatalf("the search kept a tag that does not match: %q", tester.Texts())
+	}
+	create := a.tf("inspector.createTag", map[string]any{"name": "mo"})
+	if !tester.HasText(create) {
+		t.Fatalf("no row creates the typed tag %q: %q", create, tester.Texts())
+	}
+
+	// A name that is already a tag needs no create row.
+	a.tagPickerQuery = "reference"
+	tester.Frame()
+	if tester.HasText(a.tf("inspector.createTag", map[string]any{"name": "reference"})) {
+		t.Fatal("the picker offers to create a tag that already exists")
+	}
+
+	// Clicking a tag applies it and closes the picker.
+	a.tagPickerQuery = ""
+	tester.Frame()
+	row, ok := tester.Find("mood")
+	if !ok {
+		t.Fatalf("the tag has no row: %q", tester.Texts())
+	}
+	tester.Press(row.X+row.W/2, row.Y+row.H/2)
+	tester.Release(row.X+row.W/2, row.Y+row.H/2)
+	tester.Frame()
+	if a.dialog != dialogNone || len(a.tagPickerItems) != 0 {
+		t.Fatalf("the picker stayed open after a tag was chosen: dialog=%v items=%d", a.dialog, len(a.tagPickerItems))
+	}
+}
