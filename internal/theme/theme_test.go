@@ -11,8 +11,15 @@ func TestBuiltinsAreProtectedAndValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(builtins) != 2 {
-		t.Fatalf("builtins = %d, want 2", len(builtins))
+	if len(builtins) != 4 {
+		t.Fatalf("builtins = %d, want 4", len(builtins))
+	}
+	appearances := map[Appearance]int{}
+	for _, th := range builtins {
+		appearances[th.Appearance]++
+	}
+	if appearances[Light] == 0 || appearances[Dark] == 0 {
+		t.Fatalf("builtins lack a light or dark variant: %v", appearances)
 	}
 	for _, th := range builtins {
 		if !th.Builtin {

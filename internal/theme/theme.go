@@ -94,6 +94,8 @@ func AppearanceFor(id string) (Appearance, error) {
 var BuiltinIDs = map[string]bool{
 	"default-light": true,
 	"default-dark":  true,
+	"sand-light":    true,
+	"midnight-dark": true,
 }
 
 // Builtins returns the embedded default themes.
