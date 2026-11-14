@@ -215,7 +215,7 @@ func (a *App) viewSearchField(c *ui.Context) {
 }
 
 func (a *App) folderDisplayName(id string) string {
-	if f, ok := findFolder(a.folders, id); ok {
+	if f, ok := a.folderIndex().byID[id]; ok {
 		return f.Name
 	}
 	return ""

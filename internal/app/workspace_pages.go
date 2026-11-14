@@ -28,6 +28,84 @@ func workspaceSummary(item core.Item) core.Item {
 	}
 }
 
+func (a *App) refreshWorkspace() {
+	if a.svc == nil {
+		return
+	}
+	if a.loading || a.library == nil {
+		a.refreshAll()
+		return
+	}
+	a.loading = true
+	if a.loadCancel != nil {
+		a.loadCancel()
+	}
+	loadContext, cancel := context.WithCancel(context.Background())
+	a.loadCancel = cancel
+	a.loadSeq++
+	sequence := a.loadSeq
+	request := workspaceRequest{
+		context: loadContext, query: a.queryString(), scope: a.folderScope(), sort: a.sortOrder,
+		unrated: a.filters.Unrated, trash: a.nav == NavTrash, activeID: a.activeItemID,
+	}
+	index := a.folderIndex()
+	nav, folderID := a.nav, a.folderID
+	go func() {
+		previews := a.fetchFolderPreviews(index, nav, folderID, request.sort)
+		items, total, totalSize, active, err := a.fetchWorkspace(request)
+		a.post(func() {
+			if sequence != a.loadSeq {
+				return
+			}
+			a.folderPreviews = previews
+			a.setWorkspaceItems(items, total, totalSize)
+			a.loading = false
+			if active != nil {
+				a.activeItem = active
+			}
+			a.rebuildRows()
+			a.recordHistory()
+			if err != nil {
+				a.showToast(err.Error())
+			}
+		})
+	}()
+}
+
+func (a *App) fetchFolderPreviews(index *folderIndex, nav Nav, folderID, sortOrder string) map[string]core.FolderPreview {
+	if nav != NavFolder || folderID == "" {
+		return nil
+	}
+	children := index.children[folderID]
+	if len(children) == 0 {
+		return nil
+	}
+	previews, err := a.svc.GetFolderPreviews(index.previewGroups(folderID), sortOrder)
+	if err != nil {
+		return nil
+	}
+	result := make(map[string]core.FolderPreview, len(children))
+	for position, child := range children {
+		if position < len(previews) {
+			result[child.ID] = previews[position]
+		}
+	}
+	return result
+}
+
+func (a *App) setWorkspaceItems(items []core.Item, total int, totalSize int64) {
+	a.items = items
+	a.itemPages = map[int]bool{}
+	a.itemPageOrder = nil
+	a.itemPagePending = map[int]bool{}
+	if len(items) > 0 && items[0].FilePath != "" {
+		a.itemPages[0] = true
+		a.itemPageOrder = []int{0}
+	}
+	a.total = total
+	a.totalSize = totalSize
+}
+
 func (a *App) fetchWorkspace(request workspaceRequest) ([]core.Item, int, int64, *core.Item, error) {
 	if request.context == nil {
 		request.context = context.Background()

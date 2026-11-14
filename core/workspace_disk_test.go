@@ -197,6 +197,79 @@ func TestDiskWorkspaceCancelsSupersededQueries(t *testing.T) {
 	}
 }
 
+func TestDiskFolderScopeUsesRelationIndexAndDeduplicates(t *testing.T) {
+	manager := diskWorkspaceSeed(t, 7)
+	for _, id := range []string{"item-000003", "item-000005"} {
+		if _, err := manager.db.Exec("INSERT INTO item_folders(item_id,folder_id,added_at) VALUES (?,'f2',1)", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope := []string{"f1", "f2"}
+	page, err := manager.WorkspaceIndex(QuerySpec{}, "desc", scope, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 3 || page.TotalSize != 3072 ||
+		!equalStrings(itemIDs(page.Items), []string{"item-000006", "item-000005", "item-000003"}) {
+		t.Fatalf("folder scope duplicated items or included trash: ids=%v total=%d size=%d", itemIDs(page.Items), page.Total, page.TotalSize)
+	}
+	where, arguments := diskItemScope(false, scope)
+	rows, err := manager.db.Query("EXPLAIN QUERY PLAN SELECT i.id FROM items i WHERE "+where, arguments...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var identifier, parent, unused int
+		var detail string
+		if err := rows.Scan(&identifier, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+		if strings.HasPrefix(strings.ToUpper(detail), "SCAN I") {
+			t.Fatalf("folder query scans all items: %v", plan)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(plan, "\n"), "idx_item_folders_folder") {
+		t.Fatalf("folder query did not use the relation index: %v", plan)
+	}
+}
+
+func BenchmarkFolderScopeCount30000(b *testing.B) {
+	manager := diskWorkspaceSeed(b, 30000)
+	for index := 1; index <= 16; index++ {
+		if _, err := manager.db.Exec("INSERT INTO item_folders(item_id,folder_id,added_at) VALUES (?,'sparse',1)", fmt.Sprintf("item-%06d", index)); err != nil {
+			b.Fatal(err)
+		}
+	}
+	where, arguments := diskItemScope(false, []string{"sparse"})
+	for _, scenario := range []struct {
+		name  string
+		query string
+	}{
+		{"baseline", "SELECT COUNT(*),COALESCE(SUM(i.size),0) FROM items i WHERE COALESCE(i.in_trash,0)=0 AND EXISTS (SELECT 1 FROM item_folders f WHERE f.item_id=i.id AND f.folder_id IN (?))"},
+		{"indexed", "SELECT COUNT(*),COALESCE(SUM(i.size),0) FROM items i WHERE " + where},
+	} {
+		b.Run(scenario.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				var total int
+				var size int64
+				if err := manager.db.QueryRow(scenario.query, arguments...).Scan(&total, &size); err != nil {
+					b.Fatal(err)
+				}
+				if total != 14 || size != 14*1024 {
+					b.Fatalf("folder count=%d size=%d", total, size)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkDiskWorkspace30000(b *testing.B) {
 	manager := diskWorkspaceSeed(b, 30000)
 	b.Run("layout_index", func(b *testing.B) {

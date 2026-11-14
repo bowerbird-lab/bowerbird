@@ -378,7 +378,7 @@ func (a *App) folderSectionRows(width int) [][]galleryCell {
 	if a.nav != NavFolder || a.folderID == "" {
 		return nil
 	}
-	children := childFolders(a.folders, a.folderID)
+	children := a.folderIndex().children[a.folderID]
 	if len(children) == 0 {
 		return nil
 	}
@@ -415,7 +415,7 @@ func (a *App) folderSectionRows(width int) [][]galleryCell {
 
 func (a *App) folderSectionHeader(c *ui.Context, width int) {
 	p := a.palette(c)
-	children := childFolders(a.folders, a.folderID)
+	children := a.folderIndex().children[a.folderID]
 	b := ui.ButtonBase(c.Key("subfolders-toggle")).Width(float32(width)).Height(30).PaddingX(4).Radius(6).FocusRing(false).AlignItems(ui.Center).Gap(6)
 	bg := ui.Transparent
 	if b.Hovered() {
@@ -436,7 +436,7 @@ func (a *App) folderSectionHeader(c *ui.Context, width int) {
 }
 
 func (a *App) folderCard(c *ui.Context, folderID string, w, h float32) {
-	f, ok := findFolder(a.folders, folderID)
+	f, ok := a.folderIndex().byID[folderID]
 	if !ok {
 		return
 	}
@@ -1232,7 +1232,9 @@ func (a *App) viewContextMenu(m *ui.Menu) {
 	if m.Item(a.t("workspace.includeSubfolders")).Checked(a.prefs.IncludeSubs).Chosen() {
 		a.prefs.IncludeSubs = !a.prefs.IncludeSubs
 		a.savePrefs()
-		a.refreshAll()
+		if a.nav == NavFolder && a.folderID != "" {
+			a.refreshWorkspace()
+		}
 	}
 	if m.Item(a.t("contextMenu.showInspector")).Checked(a.prefs.InspectorOpen).Chosen() {
 		a.prefs.InspectorOpen = !a.prefs.InspectorOpen
@@ -1314,7 +1316,7 @@ func (a *App) itemContextMenu(m *ui.Menu, item core.Item) {
 		a.refreshAll()
 	}
 	m.Submenu(a.t("contextMenu.addToFolder"), func(sub *ui.Menu) {
-		for _, f := range flattenFolders(a.folders) {
+		for _, f := range a.folderIndex().all {
 			id := f.ID
 			if sub.Item(f.Name).Chosen() {
 				for _, itemID := range a.selectedIDs() {

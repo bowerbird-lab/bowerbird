@@ -148,6 +148,7 @@ type App struct {
 	libIconBusy       bool
 
 	folders             []core.Folder
+	folderLookup        *folderIndex
 	folderPreviews      map[string]core.FolderPreview
 	subfoldersCollapsed bool
 	tags                []core.Tag
@@ -654,7 +655,7 @@ func (a *App) refreshAll() {
 	a.loadSeq++
 	seq := a.loadSeq
 	previewNav, previewFolder := a.nav, a.folderID
-	previewSort, previewIncludeSubs := a.sortOrder, a.prefs.IncludeSubs
+	previewSort := a.sortOrder
 	request := workspaceRequest{
 		context: loadContext,
 		query:   a.queryString(), scope: a.folderScope(), sort: a.sortOrder,
@@ -663,6 +664,7 @@ func (a *App) refreshAll() {
 	go func() {
 		lib, _ := a.svc.GetActiveLibrary()
 		folders, _ := a.svc.GetFolders()
+		folderLookup := newFolderIndex(folders)
 		tags, _ := a.svc.GetTags()
 		statsPtr, _ := a.svc.GetWorkspaceStats(request.sort)
 		stats := core.WorkspaceStats{}
@@ -676,24 +678,7 @@ func (a *App) refreshAll() {
 		if a.svc != nil {
 			logs = a.svc.GetLogs()
 		}
-		var folderPreviews map[string]core.FolderPreview
-		if previewNav == NavFolder && previewFolder != "" {
-			children := childFolders(folders, previewFolder)
-			if len(children) > 0 {
-				groups := make([][]string, len(children))
-				for i, child := range children {
-					groups[i] = folderGroupIDs(folders, child.ID, previewIncludeSubs)
-				}
-				if previews, previewErr := a.svc.GetFolderPreviews(groups, previewSort); previewErr == nil {
-					folderPreviews = make(map[string]core.FolderPreview, len(children))
-					for i, child := range children {
-						if i < len(previews) {
-							folderPreviews[child.ID] = previews[i]
-						}
-					}
-				}
-			}
-		}
+		folderPreviews := a.fetchFolderPreviews(folderLookup, previewNav, previewFolder, previewSort)
 		items, total, totalSize, active, err := a.fetchWorkspace(request)
 		a.post(func() {
 			if seq != a.loadSeq {
@@ -711,21 +696,13 @@ func (a *App) refreshAll() {
 			}
 			a.library = lib
 			a.folders = folders
+			a.folderLookup = folderLookup
 			a.folderPreviews = folderPreviews
 			a.tags = tags
 			a.stats = stats
 			a.trashCount = trash
 			a.recent = recent
-			a.items = items
-			a.itemPages = map[int]bool{}
-			a.itemPageOrder = nil
-			a.itemPagePending = map[int]bool{}
-			if len(items) > 0 && items[0].FilePath != "" {
-				a.itemPages[0] = true
-				a.itemPageOrder = []int{0}
-			}
-			a.total = total
-			a.totalSize = totalSize
+			a.setWorkspaceItems(items, total, totalSize)
 			a.loading = false
 			if active != nil && !libChanged {
 				a.activeItem = active
@@ -838,7 +815,7 @@ func (a *App) folderScope() []string {
 	if a.nav != NavFolder || a.folderID == "" {
 		return nil
 	}
-	return folderGroupIDs(a.folders, a.folderID, a.prefs.IncludeSubs)
+	return a.folderIndex().scopeIDs(a.folderID, a.prefs.IncludeSubs)
 }
 
 // flattenFolders returns a folder tree's roots and all descendants in
@@ -853,51 +830,6 @@ func flattenFolders(folders []core.Folder) []core.Folder {
 		}
 	}
 	walk(folders)
-	return out
-}
-
-func childFolders(folders []core.Folder, parentID string) []core.Folder {
-	all := flattenFolders(folders)
-	out := make([]core.Folder, 0, len(all))
-	for _, f := range all {
-		if f.ParentID == parentID {
-			out = append(out, f)
-		}
-	}
-	return out
-}
-
-func findFolder(folders []core.Folder, id string) (core.Folder, bool) {
-	for _, f := range flattenFolders(folders) {
-		if f.ID == id {
-			return f, true
-		}
-	}
-	return core.Folder{}, false
-}
-
-// folderGroupIDs returns a folder and, when includeSubs is set, all of its
-// descendants, for scoped queries and folder-card previews.
-func folderGroupIDs(folders []core.Folder, rootID string, includeSubs bool) []string {
-	if rootID == "" {
-		return nil
-	}
-	if !includeSubs {
-		return []string{rootID}
-	}
-	all := flattenFolders(folders)
-	out := []string{rootID}
-	seen := map[string]bool{rootID: true}
-	for progress := true; progress; {
-		progress = false
-		for _, f := range all {
-			if seen[f.ParentID] && !seen[f.ID] {
-				seen[f.ID] = true
-				out = append(out, f.ID)
-				progress = true
-			}
-		}
-	}
 	return out
 }
 

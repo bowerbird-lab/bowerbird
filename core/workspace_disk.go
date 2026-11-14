@@ -57,7 +57,7 @@ func diskItemScope(trash bool, folders []string) (string, []any) {
 			placeholders[index] = "?"
 			args = append(args, folder)
 		}
-		where += " AND EXISTS (SELECT 1 FROM item_folders f WHERE f.item_id=i.id AND f.folder_id IN (" + strings.Join(placeholders, ",") + "))"
+		where += " AND i.id IN (SELECT f.item_id FROM item_folders f WHERE f.folder_id IN (" + strings.Join(placeholders, ",") + "))"
 	}
 	return where, args
 }

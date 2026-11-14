@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"bowerbird/core"
-
 	"github.com/egoist/mygo/ui"
 )
 
@@ -430,20 +428,7 @@ type filterFolderOption struct {
 }
 
 func (a *App) filterFolderOptions() []filterFolderOption {
-	out := make([]filterFolderOption, 0, len(a.folders))
-	var walk func(folders []core.Folder, prefix string)
-	walk = func(folders []core.Folder, prefix string) {
-		for _, folder := range folders {
-			name := folder.Name
-			if prefix != "" {
-				name = prefix + " / " + name
-			}
-			out = append(out, filterFolderOption{id: folder.ID, name: name})
-			walk(folder.Children, name)
-		}
-	}
-	walk(a.folders, "")
-	return out
+	return a.folderIndex().options
 }
 
 func (a *App) filterFolderName(id string) string {

@@ -96,7 +96,7 @@ func (a *App) navRow(c *ui.Context, nav Nav, icon *ui.SVG, label string, count i
 func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 	p := a.palette(c)
 	open := a.expanded[f.ID]
-	children := childFolders(a.folders, f.ID)
+	children := a.folderIndex().children[f.ID]
 	active := a.nav == NavFolder && a.folderID == f.ID
 	// The expand chevron is a 12px glyph centred in an 18px button, so its
 	// visible right edge sits 3px inside the row's content edge. Leaf rows get
@@ -198,7 +198,7 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 			a.prefs.IncludeSubs = !a.prefs.IncludeSubs
 			a.savePrefs()
 			if a.nav == NavFolder && a.folderID == f.ID {
-				a.refreshAll()
+				a.refreshWorkspace()
 			}
 		}
 		m.Separator()
@@ -231,15 +231,7 @@ func folderDropZone(y float32) int {
 // folderCanNest reports whether parentID is outside folderID's subtree, so
 // moving the folder cannot create a cycle.
 func (a *App) folderCanNest(folderID, parentID string) bool {
-	if folderID == "" || folderID == parentID {
-		return false
-	}
-	for _, id := range folderGroupIDs(a.folders, folderID, true) {
-		if id == parentID {
-			return false
-		}
-	}
-	return true
+	return a.folderIndex().canNest(folderID, parentID)
 }
 
 // reorderFolder moves draggedID before or after targetID among their shared
@@ -248,11 +240,11 @@ func (a *App) reorderFolder(draggedID, targetID string, after bool) {
 	if a.svc == nil || draggedID == "" || targetID == "" || draggedID == targetID {
 		return
 	}
-	dragged, ok := findFolder(a.folders, draggedID)
+	dragged, ok := a.folderIndex().byID[draggedID]
 	if !ok {
 		return
 	}
-	siblings := childFolders(a.folders, dragged.ParentID)
+	siblings := a.folderIndex().children[dragged.ParentID]
 	next := make([]string, 0, len(siblings))
 	found := false
 	for _, sibling := range siblings {
@@ -308,16 +300,5 @@ func (a *App) moveFolderToParent(folderID, parentID string) {
 // whose parent is no longer present stays visible as a root instead of
 // disappearing from the tree.
 func (a *App) folderRoots() []core.Folder {
-	all := flattenFolders(a.folders)
-	known := make(map[string]bool, len(all))
-	for _, f := range all {
-		known[f.ID] = true
-	}
-	roots := make([]core.Folder, 0, len(a.folders))
-	for _, f := range all {
-		if f.ParentID == "" || !known[f.ParentID] {
-			roots = append(roots, f)
-		}
-	}
-	return roots
+	return a.folderIndex().roots
 }
