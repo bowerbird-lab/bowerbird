@@ -204,6 +204,31 @@ func (a *App) pillButton(c *ui.Context, key any, label string, active bool, onCl
 	}
 }
 
+// pillIconButton is pillButton with a leading glyph, for toggles whose state
+// reads faster as an arrow than as its label alone.
+func (a *App) pillIconButton(c *ui.Context, key any, icon *ui.SVG, label string, active bool, onClick func()) {
+	p := a.palette(c)
+	b := ui.ButtonBase(c.Key(key)).Height(28).PaddingX(10).Radius(999).FocusRing(false).AlignItems(ui.Center).Gap(6)
+	bg := p.surface2
+	fg := p.text
+	if active {
+		bg = p.accent
+		fg = p.onAccent
+	} else if b.Hovered() {
+		bg = p.hover
+	}
+	b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
+	b.Children(func() {
+		if icon != nil {
+			ui.Icon(c, icon).Size(13, 13).TextColor(fg)
+		}
+		ui.Text(c, label).FontSize(12).FontWeight(550).TextColor(fg)
+	})
+	if b.Clicked() && onClick != nil {
+		onClick()
+	}
+}
+
 func (a *App) sectionLabel(c *ui.Context, text string) {
 	p := a.palette(c)
 	ui.Text(c, strings.ToUpper(text)).FontSize(10).FontWeight(650).LetterSpacing(0.6).TextColor(p.faint).Padding(0, 4).MarginY(6)

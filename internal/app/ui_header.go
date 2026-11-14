@@ -125,10 +125,12 @@ func (a *App) viewHeader(c *ui.Context) {
 			// Sort order and the multi-facet filter live on their own row so
 			// neither label gets squeezed on narrow windows.
 			sortLabel := a.t("header.newest")
+			sortIcon := iconArrowDown
 			if a.sortOrder == "asc" {
 				sortLabel = a.t("header.oldest")
+				sortIcon = iconArrowUp
 			}
-			a.pillButton(c, "sort", sortLabel, false, func() {
+			a.pillIconButton(c, "sort", sortIcon, sortLabel, false, func() {
 				if a.sortOrder == "asc" {
 					a.sortOrder = "desc"
 				} else {
