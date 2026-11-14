@@ -47,14 +47,7 @@ func (a *App) viewSidebar(c *ui.Context) {
 			foldersHeader.Children(func() {
 				a.sectionLabel(c, a.t("sidebar.folders"))
 				ui.Box(c).Grow(1)
-				a.iconButton(c, "new-folder", iconFolderPlus, false, a.t("sidebar.newFolder"), func() {
-					a.dialog = dialogNewFolder
-					a.dialogValue = ""
-					a.newFolderParentID = ""
-					if a.nav == NavFolder {
-						a.newFolderParentID = a.folderID
-					}
-				})
+				a.newFolderPlusButton(c, foldersHeader.Hovered())
 			})
 			if dropped, ok := ui.Drop[sidebarDrag](foldersHeader); ok && dropped.FolderID != "" && dropped.ParentID != "" {
 				a.moveFolderToParent(dropped.FolderID, "")
@@ -68,6 +61,31 @@ func (a *App) viewSidebar(c *ui.Context) {
 			}
 		})
 	})
+}
+
+// newFolderPlusButton is the bare plus that creates a folder. It stays hidden
+// until the pointer is over the folder section header, so the section label
+// stays calm while the action is still one hover away.
+func (a *App) newFolderPlusButton(c *ui.Context, show bool) {
+	p := a.palette(c)
+	b := ui.ButtonBase(c.Key("new-folder")).Size(20, 20).Radius(5).FocusRing(false).AlignItems(ui.Center).Justify(ui.Center).Hidden(!show)
+	bg := ui.Transparent
+	if b.Hovered() {
+		bg = p.hover
+	}
+	b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
+	b.Tooltip(a.t("sidebar.newFolder"))
+	b.Children(func() {
+		ui.Icon(c, iconPlus).Size(15, 15).TextColor(p.muted)
+	})
+	if b.Clicked() {
+		a.dialog = dialogNewFolder
+		a.dialogValue = ""
+		a.newFolderParentID = ""
+		if a.nav == NavFolder {
+			a.newFolderParentID = a.folderID
+		}
+	}
 }
 
 func (a *App) navRow(c *ui.Context, nav Nav, icon *ui.SVG, label string, count int) {
