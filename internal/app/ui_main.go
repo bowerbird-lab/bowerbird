@@ -57,14 +57,23 @@ func (a *App) viewMain(c *ui.Context) {
 		if a.previewOpen && a.previewMode == "full" {
 			ui.Overlay(c, func() {
 				overlay := ui.Box(c).Absolute().Fill().Background(p.bg).Focusable().AutoFocus().Modal()
+				previewMods, previewKey, previewOK := a.shortcutKeys(core.ShortcutTogglePreview)
+				dismissMods, dismissKey, dismissOK := a.shortcutKeys(core.ShortcutDismiss)
 				overlay.HandleInput(func(ev ui.InputEvent) bool {
-					if ev.Kind == ui.InputKeyDown && (ev.Key == ui.KeySpace || ev.Key == ui.KeyEscape) {
+					if ev.Kind != ui.InputKeyDown {
+						return false
+					}
+					if (previewOK && ev.Mods == previewMods && ev.Key == previewKey) ||
+						(dismissOK && ev.Mods == dismissMods && ev.Key == dismissKey) {
 						a.closePreview()
 						return true
 					}
 					return false
 				})
-				if overlay.OverlayShortcut(0, ui.KeySpace) || overlay.OverlayShortcut(0, ui.KeyEscape) {
+				if previewOK && overlay.OverlayShortcut(previewMods, previewKey) {
+					a.closePreview()
+				}
+				if dismissOK && overlay.OverlayShortcut(dismissMods, dismissKey) {
 					a.closePreview()
 				}
 				overlay.Children(func() {
@@ -93,27 +102,54 @@ func (a *App) mainBodySurface(c *ui.Context, body func()) {
 	e.Children(body)
 }
 
+// handleMainShortcuts runs the main window's keys. Every binding comes from
+// core's catalog, so the list Settings shows is exactly what this window
+// answers to, whether the binding is rebindable or fixed.
 func (a *App) handleMainShortcuts(c *ui.Context) {
-	if c.Shortcut(ui.Cmd, ui.KeyF) {
+	// Every check reads the pre-resolved catalog, so a frame does one map
+	// lookup per binding instead of re-parsing the settings map.
+	matched := func(id string) bool {
+		pair, ok := a.shortcutPairs[id]
+		return ok && pair.ok && c.Shortcut(pair.mods, pair.key)
+	}
+	if matched(core.ShortcutSearch) {
 		a.searchBox.Focus(c)
 	}
-	if a.shortcutMatched(c, core.ShortcutOpenSettings) {
+	if matched(core.ShortcutOpenSettings) {
 		if a.OnOpenSettings != nil {
 			a.OnOpenSettings()
+		} else if a.svc != nil {
+			_ = a.svc.OpenSettingsWindow()
 		}
 	}
-	if a.shortcutMatched(c, core.ShortcutLogs) {
+	if matched(core.ShortcutLogs) {
 		if a.OnOpenLogs != nil {
 			a.OnOpenLogs()
+		} else if a.svc != nil {
+			_ = a.svc.OpenLogsWindow()
 		}
 	}
-	if a.shortcutMatched(c, core.ShortcutReload) {
+	if matched(core.ShortcutReload) {
 		a.refreshAll()
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyC) || c.Shortcut(ui.Ctrl, ui.KeyC) {
+	if matched(core.ShortcutForceReload) {
+		a.reloadIgnoringCache()
+	}
+	if matched(core.ShortcutFullscreen) && a.win != nil {
+		a.win.ToggleFullScreen()
+	}
+	if matched(core.ShortcutCloseWindow) && a.win != nil {
+		a.win.Close()
+	}
+	if matched(core.ShortcutQuit) {
+		a.quit()
+	}
+	// Ctrl+C copies even on macOS: the catalog binding is CmdOrCtrl+C, and
+	// Ctrl+C is what long-time users of the app still reach for.
+	if matched(core.ShortcutCopy) || c.Shortcut(ui.Ctrl, ui.KeyC) {
 		a.copySelected()
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyA) && !a.previewOpen {
+	if matched(core.ShortcutSelectAll) && !a.previewOpen {
 		for _, it := range a.items {
 			a.selected[it.ID] = true
 		}
@@ -122,7 +158,7 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 			a.activeItemID = a.items[0].ID
 		}
 	}
-	if c.Shortcut(0, ui.KeyEscape) {
+	if matched(core.ShortcutDismiss) {
 		if a.previewOpen {
 			a.closePreview()
 		} else if a.dialog != dialogNone {
@@ -131,7 +167,7 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 			a.clearSelection()
 		}
 	}
-	if c.Shortcut(0, ui.KeySpace) {
+	if matched(core.ShortcutTogglePreview) {
 		if a.previewOpen {
 			a.closePreview()
 		} else {
@@ -148,53 +184,65 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 		}
 	}
 	if a.previewOpen {
-		if c.Shortcut(0, ui.KeyLeft) {
+		if matched(core.ShortcutMoveLeft) {
 			a.movePreview(-1)
 		}
-		if c.Shortcut(0, ui.KeyRight) {
+		if matched(core.ShortcutMoveRight) {
 			a.movePreview(1)
 		}
-		if c.Shortcut(ui.Cmd, ui.KeyEqual) {
+		if matched(core.ShortcutZoomIn) {
 			a.previewZoom = minF(a.previewZoom*1.2, 8)
 		}
-		if c.Shortcut(ui.Cmd, ui.KeyMinus) {
+		if matched(core.ShortcutZoomOut) {
 			a.previewZoom = maxF(a.previewZoom/1.2, 0.2)
 		}
-		if c.Shortcut(ui.Cmd, ui.Key0) {
+		if matched(core.ShortcutZoomReset) {
 			a.previewZoom = 1
 			a.previewPan = ui.Point{}
 		}
 		return
 	}
-	if c.Shortcut(0, ui.KeyLeft) {
+	if matched(core.ShortcutMoveLeft) {
 		a.moveGallerySelection(-1, 0)
 	}
-	if c.Shortcut(0, ui.KeyRight) {
+	if matched(core.ShortcutMoveRight) {
 		a.moveGallerySelection(1, 0)
 	}
-	if c.Shortcut(0, ui.KeyUp) {
+	if matched(core.ShortcutMoveUp) {
 		a.moveGallerySelection(0, -1)
 	}
-	if c.Shortcut(0, ui.KeyDown) {
+	if matched(core.ShortcutMoveDown) {
 		a.moveGallerySelection(0, 1)
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyEqual) {
+	if matched(core.ShortcutZoomIn) {
 		a.setRowHeight(a.rowHeight + 24)
 	}
-	if c.Shortcut(ui.Cmd, ui.KeyMinus) {
+	if matched(core.ShortcutZoomOut) {
 		a.setRowHeight(a.rowHeight - 24)
 	}
-	if c.Shortcut(ui.Cmd, ui.Key0) {
+	if matched(core.ShortcutZoomReset) {
 		a.setRowHeight(190)
 	}
-	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyB) {
+	if matched(core.ShortcutToggleSidebar) {
 		a.prefs.SidebarOpen = !a.prefs.SidebarOpen
 		a.savePrefs()
 		a.rebuildRows()
 	}
-	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyI) {
+	if matched(core.ShortcutToggleInspector) {
 		a.prefs.InspectorOpen = !a.prefs.InspectorOpen
 		a.savePrefs()
+	}
+}
+
+// reloadIgnoringCache drops decoded thumbnails before refetching the library,
+// the native-UI counterpart of a force reload.
+func (a *App) reloadIgnoringCache() {
+	if a.thumbs != nil {
+		a.thumbs.clear()
+	}
+	a.refreshAll()
+	if a.win != nil {
+		a.win.Invalidate()
 	}
 }
 

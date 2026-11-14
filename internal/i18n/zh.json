@@ -373,7 +373,7 @@
     },
     "shortcuts": {
       "title": "键盘快捷键",
-      "description": "点击快捷键后按下新组合即可自定义。录制时按 Backspace 或 Delete 可取消该快捷键。默认仅在应用内生效，截图和显示/隐藏主窗口为全局热键。",
+      "description": "全局热键在应用处于后台时也生效；应用内快捷键仅在窗口聚焦时生效。在输入框中键入组合键（例如 Alt+Shift+A）后按回车保存，冲突会提示。基础快捷键为固定按键，仅供查看。",
       "areaTitle": "区域截图",
       "areaDesc": "自由框选屏幕区域并导入资源库",
       "windowTitle": "窗口截图",
@@ -383,6 +383,9 @@
       "toggleMainTitle": "显示 / 隐藏主窗口",
       "toggleMainDesc": "即使应用在后台也可切换主窗口显示",
       "globalBadge": "全局",
+      "globalGroup": "全局热键",
+      "appGroup": "应用内快捷键",
+      "fixedGroup": "基础快捷键",
       "settingsTitle": "打开设置",
       "settingsDesc": "打开偏好设置窗口",
       "logsTitle": "打开日志",
@@ -664,7 +667,7 @@
     "lightweightHelp": "窗口隐藏一分钟后释放窗口资源",
     "rowHeight": "缩略图行高",
     "search": "搜索设置",
-    "shortcutsHelp": "在输入框中按回车保存；冲突会提示。",
+    "shortcutsHelp": "在输入框中按回车保存；冲突会提示。基础快捷键不可修改。",
     "shortcutsReset": "恢复默认",
     "solidColor": "背景颜色",
     "storage": {
@@ -1005,6 +1008,17 @@
     "close-window": "关闭窗口",
     "zoom-in": "放大",
     "zoom-out": "缩小",
-    "zoom-reset": "重置缩放"
+    "zoom-reset": "重置缩放",
+    "search": "搜索资源库",
+    "copy": "复制选中项",
+    "select-all": "全选",
+    "dismiss": "关闭预览 / 清除选择",
+    "toggle-preview": "预览选中项",
+    "move-left": "向左移动",
+    "move-right": "向右移动",
+    "move-up": "向上移动",
+    "move-down": "向下移动",
+    "toggle-sidebar": "切换侧栏",
+    "toggle-inspector": "切换检查器"
   }
 }

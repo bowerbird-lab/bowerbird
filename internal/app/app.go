@@ -221,6 +221,7 @@ type App struct {
 	vibrancyValue bool
 	network       core.NetworkSettings
 	shortcuts     core.ShortcutSettings
+	shortcutPairs map[string]uiShortcut
 	mobile        *core.MobileServerStatus
 	mobileDevices []core.MobileDeviceInfo
 	settingsDirty bool
@@ -344,6 +345,7 @@ func New(svc *core.Service) *App {
 	// copies under plugins/ override them with richer marketplace metadata.
 	a.pluginHost.RegisterBuiltin(plugin.OfficialManifests()...)
 	a.syncPluginHTTPClient()
+	a.rebuildShortcutPairs()
 	return a
 }
 
@@ -1179,10 +1181,16 @@ func (a *App) HandleDrop(paths []string) {
 
 func (a *App) toastActive() bool { return a.toast != "" && time.Now().Before(a.toastUntil) }
 
-// quit delegates to the desktop entry point.
+// quit asks the desktop entry point to exit, falling back to the service's
+// host when the entry point did not install a callback (the native build wires
+// the host through core instead of through App).
 func (a *App) quit() {
 	if a.OnQuit != nil {
 		a.OnQuit()
+		return
+	}
+	if a.svc != nil {
+		_ = a.svc.InvokeAppMenu(core.AppMenuQuit)
 	}
 }
 

@@ -373,7 +373,7 @@
     },
     "shortcuts": {
       "title": "Keyboard shortcuts",
-      "description": "Click a shortcut, then press a new key combination. Press Backspace or Delete while recording to clear it. Most shortcuts work only while Bowerbird is focused; a few (capture and show/hide the main window) are global hotkeys.",
+      "description": "Global hotkeys work even while the app is in the background; in-app shortcuts need a focused window. Type an accelerator (for example Alt+Shift+A) and press Enter to save it; conflicts are reported. Basic shortcuts are fixed and listed for reference.",
       "areaTitle": "Area Capture",
       "areaDesc": "Drag to select any screen area and save to library",
       "windowTitle": "Window Capture",
@@ -383,6 +383,9 @@
       "toggleMainTitle": "Show / Hide Main Window",
       "toggleMainDesc": "Toggle the main window even when Bowerbird is in the background",
       "globalBadge": "Global",
+      "globalGroup": "Global hotkeys",
+      "appGroup": "In-app shortcuts",
+      "fixedGroup": "Basic shortcuts",
       "settingsTitle": "Open Settings",
       "settingsDesc": "Open the settings window",
       "logsTitle": "Open Logs",
@@ -664,7 +667,7 @@
     "lightweightHelp": "Tear down windows when hidden for a minute",
     "rowHeight": "Thumbnail row height",
     "search": "Search settings",
-    "shortcutsHelp": "Press Enter in a field to save; conflicts are reported.",
+    "shortcutsHelp": "Press Enter in a field to save; conflicts are reported. Basic shortcuts cannot be changed.",
     "shortcutsReset": "Reset to defaults",
     "solidColor": "Background color",
     "storage": {
@@ -1005,6 +1008,17 @@
     "close-window": "Close window",
     "zoom-in": "Zoom in",
     "zoom-out": "Zoom out",
-    "zoom-reset": "Reset zoom"
+    "zoom-reset": "Reset zoom",
+    "search": "Search library",
+    "copy": "Copy selection",
+    "select-all": "Select all",
+    "dismiss": "Close preview / clear selection",
+    "toggle-preview": "Preview selection",
+    "move-left": "Move left",
+    "move-right": "Move right",
+    "move-up": "Move up",
+    "move-down": "Move down",
+    "toggle-sidebar": "Toggle sidebar",
+    "toggle-inspector": "Toggle inspector"
   }
 }

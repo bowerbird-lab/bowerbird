@@ -27,6 +27,7 @@ func (a *App) refreshSettings() {
 	a.vibrancyValue = a.svc.GetVibrancyEnabled()
 	a.network = a.svc.GetNetworkSettings()
 	a.shortcuts = a.svc.GetShortcutSettings()
+	a.rebuildShortcutPairs()
 	if status, err := a.svc.GetMobileServerStatus(); err == nil {
 		a.mobile = status
 	}
@@ -158,8 +159,11 @@ func (a *App) settingsSectionTitle(section int) string {
 }
 
 func (a *App) handleSettingsShortcuts(c *ui.Context) {
-	if c.Shortcut(ui.Cmd, ui.KeyW) && a.settingsWin != nil {
+	if a.shortcutMatched(c, core.ShortcutCloseWindow) && a.settingsWin != nil {
 		a.settingsWin.Close()
+	}
+	if a.shortcutMatched(c, core.ShortcutFullscreen) && a.settingsWin != nil {
+		a.settingsWin.ToggleFullScreen()
 	}
 }
 
@@ -350,35 +354,23 @@ func (a *App) settingsAppearance(c *ui.Context) {
 	})
 }
 
+// settingsShortcuts renders the whole keyboard map: global hotkeys, the
+// rebindable in-app actions, and the fixed basic bindings. Fixed rows show
+// their keys but offer no field, so the list doubles as documentation.
 func (a *App) settingsShortcuts(c *ui.Context) {
 	p := paletteFor(c.Theme())
 	a.settingsCard(c, a.t("settings.shortcuts.title"), func() {
-		ids := make([]string, 0, len(a.shortcuts.Bindings))
-		for _, def := range core.ShortcutCatalog() {
-			ids = append(ids, def.ID)
-		}
-		for _, id := range ids {
-			id := id
-			label := a.t("shortcuts." + id)
-			if label == "shortcuts."+id {
-				label = id
-			}
-			a.settingsRow(c, label, "", func() {
-				val := a.shortcuts.Bindings[id]
-				field := ui.TextInput(c.Key("shortcut-"+id), &val).Width(190).FontSize(12).FontFeatures("tnum")
-				if field.Submitted() {
-					next := core.NormalizeShortcutSettings(a.shortcuts)
-					next.Bindings[id] = val
-					if err := a.svc.SetShortcutSettings(next); err != nil {
-						a.showToast(err.Error())
-					} else {
-						a.shortcuts = next
-						a.showToast(a.t("common.saved"))
-					}
-				}
-			})
-		}
+		ui.Text(c, a.t("settings.shortcuts.description")).FontSize(11).TextColor(p.faint).Wrap()
 	})
+	for _, section := range core.ShortcutSections() {
+		section := section
+		a.settingsCard(c, a.t("settings.shortcuts."+section.Key+"Group"), func() {
+			for _, def := range section.Defs {
+				def := def
+				a.shortcutRow(c, def)
+			}
+		})
+	}
 	ui.Row(c).Gap(8).Children(func() {
 		if ui.Button(c, a.t("settings.shortcutsReset")).Clicked() {
 			go func() {
@@ -393,6 +385,57 @@ func (a *App) settingsShortcuts(c *ui.Context) {
 			}()
 		}
 		ui.Text(c, a.t("settings.shortcutsHelp")).FontSize(10.5).TextColor(p.faint)
+	})
+}
+
+// shortcutRow draws one catalog entry: an editable accelerator field, or the
+// read-only badge of a fixed binding.
+func (a *App) shortcutRow(c *ui.Context, def core.ShortcutDef) {
+	label := a.shortcutLabel(def.ID)
+	if def.Fixed {
+		a.settingsRow(c, label, "", func() { a.shortcutBadge(c, def.ID) })
+		return
+	}
+	a.settingsRow(c, label, "", func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			a.shortcutBadge(c, def.ID)
+			val := a.shortcuts.Bindings[def.ID]
+			field := ui.TextInput(c.Key("shortcut-"+def.ID), &val).Width(150).FontSize(12).FontFeatures("tnum")
+			if field.Submitted() {
+				next := core.NormalizeShortcutSettings(a.shortcuts)
+				next.Bindings[def.ID] = val
+				if err := a.svc.SetShortcutSettings(next); err != nil {
+					a.showToast(err.Error())
+				} else {
+					a.shortcuts = next
+					a.rebuildShortcutPairs()
+					a.showToast(a.t("common.saved"))
+				}
+			}
+		})
+	})
+}
+
+func (a *App) shortcutLabel(id string) string {
+	key := "shortcuts." + id
+	if label := a.t(key); label != key {
+		return label
+	}
+	return id
+}
+
+// shortcutBadge renders the current accelerator of a catalog entry.
+func (a *App) shortcutBadge(c *ui.Context, id string) {
+	p := paletteFor(c.Theme())
+	text := core.AcceleratorDisplay(a.shortcuts.Accelerator(id))
+	if text == "" {
+		text = a.t("settings.shortcuts.unset")
+		if text == "settings.shortcuts.unset" {
+			text = "—"
+		}
+	}
+	ui.Row(c).MinWidth(56).Height(24).PaddingX(8).Radius(6).Background(p.surface2).Border(1, p.hairline).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+		ui.Text(c, text).FontSize(11.5).TextColor(p.muted).FontFeatures("tnum")
 	})
 }
 

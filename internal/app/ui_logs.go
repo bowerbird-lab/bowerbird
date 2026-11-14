@@ -39,6 +39,12 @@ func (a *App) filteredLogs() []core.LogEntry {
 // viewLogs is the standalone virtualized log viewer.
 func (a *App) viewLogs(c *ui.Context) {
 	p := paletteFor(c.Theme())
+	if a.shortcutMatched(c, core.ShortcutCloseWindow) && a.logsWin != nil {
+		a.logsWin.Close()
+	}
+	if a.shortcutMatched(c, core.ShortcutFullscreen) && a.logsWin != nil {
+		a.logsWin.ToggleFullScreen()
+	}
 	a.applyVibrancyRoot(c)
 	entries := a.filteredLogs()
 	a.logsList.FollowEnd = a.logsAutoScroll

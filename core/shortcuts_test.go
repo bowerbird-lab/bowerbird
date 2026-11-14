@@ -146,3 +146,45 @@ func TestCaptureHonorsScreenshotSettings(t *testing.T) {
 		t.Fatalf("expected folder %s, got %v", folder.ID, item.Folders)
 	}
 }
+
+func TestFixedShortcutsAreListedButNotEditable(t *testing.T) {
+	defaults := DefaultShortcutSettings()
+	seen := map[string]bool{}
+	for _, section := range ShortcutSections() {
+		for _, def := range section.Defs {
+			if seen[def.ID] {
+				t.Fatalf("%q appears in more than one section", def.ID)
+			}
+			seen[def.ID] = true
+			if defaults.Bindings[def.ID] == "" {
+				t.Errorf("%q has no default accelerator", def.ID)
+			}
+		}
+	}
+	if len(seen) != len(ShortcutCatalog()) {
+		t.Fatalf("sections cover %d ids, catalog has %d", len(seen), len(ShortcutCatalog()))
+	}
+
+	// Stored user data cannot rebind or clear a fixed binding.
+	s := DefaultShortcutSettings()
+	s.Bindings[ShortcutSearch] = "CmdOrCtrl+K"
+	s.Bindings[ShortcutDismiss] = ""
+	norm := NormalizeShortcutSettings(s)
+	if got := norm.Bindings[ShortcutSearch]; got != "CmdOrCtrl+F" {
+		t.Errorf("fixed search binding = %q, want the default", got)
+	}
+	if got := norm.Accelerator(ShortcutDismiss); got != "Escape" {
+		t.Errorf("fixed dismiss accelerator = %q, want Escape", got)
+	}
+	if IsFixedShortcut(ShortcutOpenSettings) {
+		t.Error("settings must stay rebindable")
+	}
+}
+
+func TestEditableShortcutsCannotShadowFixedOnes(t *testing.T) {
+	s := DefaultShortcutSettings()
+	s.Bindings[ShortcutLogs] = "CmdOrCtrl+F"
+	if err := ValidateShortcutSettings(s); err == nil {
+		t.Fatal("expected a conflict with the fixed search binding")
+	}
+}

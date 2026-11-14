@@ -40,3 +40,14 @@ func TestUIShortcutKeysHandlesCustomBindings(t *testing.T) {
 		t.Fatal("empty accelerator must not match")
 	}
 }
+
+// TestEveryCatalogShortcutHasUIKeys guards the settings list against drift:
+// every entry the list shows must resolve to a key the handlers can match.
+func TestEveryCatalogShortcutHasUIKeys(t *testing.T) {
+	settings := core.DefaultShortcutSettings()
+	for _, def := range core.ShortcutCatalog() {
+		if _, _, ok := uiShortcutKeys(settings.Accelerator(def.ID)); !ok {
+			t.Errorf("%q (%q) does not map to a ui key", def.ID, settings.Accelerator(def.ID))
+		}
+	}
+}

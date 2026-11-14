@@ -156,10 +156,13 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 
 func (a *App) previewImage(c *ui.Context, item core.Item) {
 	p := paletteFor(c.Theme())
+	previewMods, previewKey, previewOK := a.shortcutKeys(core.ShortcutTogglePreview)
+	dismissMods, dismissKey, dismissOK := a.shortcutKeys(core.ShortcutDismiss)
 	ui.Box(c).Fill().Grow(1).Shrink(1).Clip().HandleInput(func(ev ui.InputEvent) bool {
 		switch ev.Kind {
 		case ui.InputKeyDown:
-			if ev.Key == ui.KeySpace || ev.Key == ui.KeyEscape {
+			if (previewOK && ev.Mods == previewMods && ev.Key == previewKey) ||
+				(dismissOK && ev.Mods == dismissMods && ev.Key == dismissKey) {
 				a.closePreview()
 				return true
 			}

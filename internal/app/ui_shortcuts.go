@@ -20,11 +20,42 @@ func (a *App) shortcutSettings() core.ShortcutSettings {
 }
 
 func (a *App) shortcutMatched(c *ui.Context, id string) bool {
-	mods, key, ok := uiShortcutKeys(a.shortcutSettings().Accelerator(id))
+	mods, key, ok := a.shortcutKeys(id)
 	if !ok {
 		return false
 	}
 	return c.Shortcut(mods, key)
+}
+
+// uiShortcut is one catalog entry resolved to the values ui.Context.Shortcut
+// compares against.
+type uiShortcut struct {
+	mods ui.Modifiers
+	key  ui.Key
+	ok   bool
+}
+
+// rebuildShortcutPairs resolves the whole catalog once per settings change. The
+// main window checks two dozen bindings every frame, so reading and
+// normalizing the settings map inside each check was pure overhead.
+func (a *App) rebuildShortcutPairs() {
+	settings := a.shortcutSettings()
+	pairs := make(map[string]uiShortcut, len(core.ShortcutCatalog()))
+	for _, def := range core.ShortcutCatalog() {
+		mods, key, ok := uiShortcutKeys(settings.Accelerator(def.ID))
+		pairs[def.ID] = uiShortcut{mods: mods, key: key, ok: ok}
+	}
+	a.shortcutPairs = pairs
+}
+
+// shortcutKeys resolves one catalog entry, fixed or not, to the modifiers and
+// key ui.Shortcut compares against. Every handler goes through it so the
+// binding Settings lists is the binding the window answers to.
+func (a *App) shortcutKeys(id string) (ui.Modifiers, ui.Key, bool) {
+	if pair, ok := a.shortcutPairs[id]; ok {
+		return pair.mods, pair.key, pair.ok
+	}
+	return uiShortcutKeys(a.shortcutSettings().Accelerator(id))
 }
 
 // uiShortcutKeys converts a stored accelerator such as "CmdOrCtrl+Shift+L"

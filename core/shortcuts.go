@@ -29,47 +29,124 @@ const (
 	ShortcutReload            = "reload"
 	ShortcutForceReload       = "force-reload"
 	ShortcutFullscreen        = "fullscreen"
-	ShortcutDevTools          = "devtools"
 	ShortcutQuit              = "quit"
 	ShortcutCloseWindow       = "close-window"
 	ShortcutZoomIn            = "zoom-in"
 	ShortcutZoomOut           = "zoom-out"
 	ShortcutZoomReset         = "zoom-reset"
+
+	// ShortcutDevTools is not part of the catalog: the windows render native
+	// content, so there is no web inspector to toggle. The app menu keeps the
+	// action for the platforms that draw the ≡ menu.
+	ShortcutDevTools = "devtools"
 )
 
-// ShortcutDef is the catalog entry for one action. Scope is the only
-// distinction: global actions are registered as OS hotkeys; everything else
-// is in-app only (the default).
+// Shortcut IDs for the fixed bindings. They are part of the keyboard map the
+// app ships and cannot be rebound, but Settings lists them so the whole map is
+// visible in one place.
+const (
+	ShortcutSearch          = "search"
+	ShortcutCopy            = "copy"
+	ShortcutSelectAll       = "select-all"
+	ShortcutDismiss         = "dismiss"
+	ShortcutTogglePreview   = "toggle-preview"
+	ShortcutMoveLeft        = "move-left"
+	ShortcutMoveRight       = "move-right"
+	ShortcutMoveUp          = "move-up"
+	ShortcutMoveDown        = "move-down"
+	ShortcutToggleSidebar   = "toggle-sidebar"
+	ShortcutToggleInspector = "toggle-inspector"
+)
+
+// ShortcutDef is the catalog entry for one action. Scope tells whether the
+// binding is registered as an OS hotkey or handled in-app. Fixed entries are
+// listed only: their accelerator is always the default and cannot be changed.
 type ShortcutDef struct {
 	ID    string
 	Scope ShortcutScope
+	Fixed bool
 }
 
+// ShortcutCatalog lists every binding the app knows about, in display order:
+// global hotkeys, rebindable in-app actions, then the fixed basic bindings.
 func ShortcutCatalog() []ShortcutDef {
 	return []ShortcutDef{
 		{ID: ShortcutCaptureArea, Scope: ShortcutScopeGlobal},
 		{ID: ShortcutCaptureFullscreen, Scope: ShortcutScopeGlobal},
 		{ID: ShortcutCaptureWindow, Scope: ShortcutScopeGlobal},
 		{ID: ShortcutToggleMainWindow, Scope: ShortcutScopeGlobal},
+
 		{ID: ShortcutOpenSettings, Scope: ShortcutScopeApp},
 		{ID: ShortcutLogs, Scope: ShortcutScopeApp},
 		{ID: ShortcutReload, Scope: ShortcutScopeApp},
 		{ID: ShortcutForceReload, Scope: ShortcutScopeApp},
 		{ID: ShortcutFullscreen, Scope: ShortcutScopeApp},
-		{ID: ShortcutDevTools, Scope: ShortcutScopeApp},
 		{ID: ShortcutQuit, Scope: ShortcutScopeApp},
 		{ID: ShortcutCloseWindow, Scope: ShortcutScopeApp},
 		{ID: ShortcutZoomIn, Scope: ShortcutScopeApp},
 		{ID: ShortcutZoomOut, Scope: ShortcutScopeApp},
 		{ID: ShortcutZoomReset, Scope: ShortcutScopeApp},
+
+		{ID: ShortcutSearch, Fixed: true},
+		{ID: ShortcutCopy, Fixed: true},
+		{ID: ShortcutSelectAll, Fixed: true},
+		{ID: ShortcutDismiss, Fixed: true},
+		{ID: ShortcutTogglePreview, Fixed: true},
+		{ID: ShortcutMoveLeft, Fixed: true},
+		{ID: ShortcutMoveRight, Fixed: true},
+		{ID: ShortcutMoveUp, Fixed: true},
+		{ID: ShortcutMoveDown, Fixed: true},
+		{ID: ShortcutToggleSidebar, Fixed: true},
+		{ID: ShortcutToggleInspector, Fixed: true},
 	}
 }
 
-func ShortcutScopeFor(id string) ShortcutScope {
+// ShortcutSection groups the catalog the way Settings shows it.
+type ShortcutSection struct {
+	// Key is the i18n key suffix: "global", "app" or "fixed".
+	Key  string
+	Defs []ShortcutDef
+}
+
+// ShortcutSections splits the catalog into the groups Settings renders.
+func ShortcutSections() []ShortcutSection {
+	sections := []ShortcutSection{
+		{Key: "global"},
+		{Key: "app"},
+		{Key: "fixed"},
+	}
+	for _, def := range ShortcutCatalog() {
+		switch {
+		case def.Fixed:
+			sections[2].Defs = append(sections[2].Defs, def)
+		case def.Scope == ShortcutScopeGlobal:
+			sections[0].Defs = append(sections[0].Defs, def)
+		default:
+			sections[1].Defs = append(sections[1].Defs, def)
+		}
+	}
+	return sections
+}
+
+func shortcutDefFor(id string) (ShortcutDef, bool) {
 	for _, def := range ShortcutCatalog() {
 		if def.ID == id {
-			return def.Scope
+			return def, true
 		}
+	}
+	return ShortcutDef{}, false
+}
+
+// IsFixedShortcut reports whether id is a basic binding that Settings only
+// lists.
+func IsFixedShortcut(id string) bool {
+	def, ok := shortcutDefFor(id)
+	return ok && def.Fixed
+}
+
+func ShortcutScopeFor(id string) ShortcutScope {
+	if def, ok := shortcutDefFor(id); ok && def.Scope != "" {
+		return def.Scope
 	}
 	return ShortcutScopeApp
 }
@@ -83,32 +160,50 @@ type ShortcutSettings struct {
 	Bindings map[string]string `json:"bindings"`
 }
 
-func DefaultShortcutSettings() ShortcutSettings {
+// defaultShortcutBindings is the immutable table every settings value starts
+// from. DefaultShortcutSettings hands out a copy so callers can mutate it.
+var defaultShortcutBindings = func() map[string]string {
 	settingsAccel := "CmdOrCtrl+I"
-	devtoolsAccel := "CmdOrCtrl+Shift+I"
 	if runtime.GOOS == "darwin" {
 		settingsAccel = "CmdOrCtrl+,"
-		devtoolsAccel = "CmdOrCtrl+Alt+I"
 	}
-	return ShortcutSettings{
-		Bindings: map[string]string{
-			ShortcutCaptureArea:       "Alt+A",
-			ShortcutCaptureFullscreen: "Alt+S",
-			ShortcutCaptureWindow:     "Alt+W",
-			ShortcutToggleMainWindow:  "Alt+B",
-			ShortcutOpenSettings:      settingsAccel,
-			ShortcutLogs:              "CmdOrCtrl+L",
-			ShortcutReload:            "CmdOrCtrl+R",
-			ShortcutForceReload:       "CmdOrCtrl+Shift+R",
-			ShortcutFullscreen:        "F11",
-			ShortcutDevTools:          devtoolsAccel,
-			ShortcutQuit:              "CmdOrCtrl+Q",
-			ShortcutCloseWindow:       "CmdOrCtrl+W",
-			ShortcutZoomIn:            "CmdOrCtrl+=",
-			ShortcutZoomOut:           "CmdOrCtrl+-",
-			ShortcutZoomReset:         "CmdOrCtrl+0",
-		},
+	return map[string]string{
+		ShortcutCaptureArea:       "Alt+A",
+		ShortcutCaptureFullscreen: "Alt+S",
+		ShortcutCaptureWindow:     "Alt+W",
+		ShortcutToggleMainWindow:  "Alt+B",
+		ShortcutOpenSettings:      settingsAccel,
+		ShortcutLogs:              "CmdOrCtrl+L",
+		ShortcutReload:            "CmdOrCtrl+R",
+		ShortcutForceReload:       "CmdOrCtrl+Shift+R",
+		ShortcutFullscreen:        "F11",
+		ShortcutQuit:              "CmdOrCtrl+Q",
+		ShortcutCloseWindow:       "CmdOrCtrl+W",
+		ShortcutZoomIn:            "CmdOrCtrl+=",
+		ShortcutZoomOut:           "CmdOrCtrl+-",
+		ShortcutZoomReset:         "CmdOrCtrl+0",
+
+		// Fixed bindings: shown in Settings, never stored or changed.
+		ShortcutSearch:          "CmdOrCtrl+F",
+		ShortcutCopy:            "CmdOrCtrl+C",
+		ShortcutSelectAll:       "CmdOrCtrl+A",
+		ShortcutDismiss:         "Escape",
+		ShortcutTogglePreview:   "Space",
+		ShortcutMoveLeft:        "Left",
+		ShortcutMoveRight:       "Right",
+		ShortcutMoveUp:          "Up",
+		ShortcutMoveDown:        "Down",
+		ShortcutToggleSidebar:   "CmdOrCtrl+Shift+B",
+		ShortcutToggleInspector: "CmdOrCtrl+Shift+I",
 	}
+}()
+
+func DefaultShortcutSettings() ShortcutSettings {
+	bindings := make(map[string]string, len(defaultShortcutBindings))
+	for id, accel := range defaultShortcutBindings {
+		bindings[id] = accel
+	}
+	return ShortcutSettings{Bindings: bindings}
 }
 
 func NormalizeShortcutSettings(in ShortcutSettings) ShortcutSettings {
@@ -117,7 +212,9 @@ func NormalizeShortcutSettings(in ShortcutSettings) ShortcutSettings {
 		return out
 	}
 	for id, accel := range in.Bindings {
-		if _, ok := out.Bindings[id]; !ok {
+		// Unknown ids and fixed bindings are dropped: the former no longer
+		// exist, the latter always keep their default.
+		if _, ok := out.Bindings[id]; !ok || IsFixedShortcut(id) {
 			continue
 		}
 		norm := NormalizeAccelerator(accel)
@@ -144,12 +241,17 @@ func ValidateShortcutSettings(in ShortcutSettings) error {
 }
 
 func (s ShortcutSettings) Accelerator(id string) string {
+	// Fixed bindings ignore the stored map, so old user data cannot override
+	// a basic key and the Settings list cannot drift from the handlers.
+	if IsFixedShortcut(id) {
+		return defaultShortcutBindings[id]
+	}
 	if s.Bindings != nil {
 		if v, ok := s.Bindings[id]; ok {
 			return NormalizeAccelerator(v)
 		}
 	}
-	return DefaultShortcutSettings().Bindings[id]
+	return defaultShortcutBindings[id]
 }
 
 // NormalizeAccelerator canonicalizes an accelerator string.
@@ -254,7 +356,7 @@ func AcceleratorDisplay(accel string) string {
 				mods = append(mods, "Shift")
 			}
 		default:
-			key = p
+			key = shortcutKeyDisplay(p)
 		}
 	}
 	if darwin {
@@ -271,4 +373,28 @@ func AcceleratorForMyGo(accel string) string {
 	accel = NormalizeAccelerator(accel)
 	accel = strings.ReplaceAll(accel, "CmdOrCtrl", "CmdOrCtrl")
 	return accel
+}
+
+// shortcutKeyDisplay shortens the key names whose full spelling would crowd a
+// menu row or a Settings badge.
+func shortcutKeyDisplay(key string) string {
+	switch strings.ToLower(key) {
+	case "escape", "esc":
+		return "Esc"
+	case "space":
+		return "Space"
+	case "left":
+		return "←"
+	case "right":
+		return "→"
+	case "up":
+		return "↑"
+	case "down":
+		return "↓"
+	case "pageup", "page-up":
+		return "Page ↑"
+	case "pagedown", "page-down":
+		return "Page ↓"
+	}
+	return key
 }

@@ -655,7 +655,7 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 			}
 		})
 	}
-	if card.Shortcut(0, ui.KeySpace) {
+	if mods, key, ok := a.shortcutKeys(core.ShortcutTogglePreview); ok && card.Shortcut(mods, key) {
 		if a.previewOpen {
 			a.closePreview()
 		} else {
@@ -1203,8 +1203,10 @@ func (a *App) itemContextMenu(m *ui.Menu, item core.Item) {
 	if m.Item(a.t("contextMenu.fullPreview")).Chosen() {
 		a.openPreview(item.ID, "full")
 	}
-	if m.Item(a.t("common.copy")).Shortcut(ui.Cmd, ui.KeyC).Chosen() {
-		a.copySelected()
+	if mods, key, ok := a.shortcutKeys(core.ShortcutCopy); ok {
+		if m.Item(a.t("common.copy")).Shortcut(mods, key).Chosen() {
+			a.copySelected()
+		}
 	}
 	if m.Item(a.t("contextMenu.revealInFinder")).Chosen() {
 		_ = a.svc.RevealInFinder(item.ID)
