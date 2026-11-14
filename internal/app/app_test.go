@@ -1785,3 +1785,105 @@ func TestSettingsLanguageRowPutsDropdownRightAndHelpInTooltip(t *testing.T) {
 		}
 	}
 }
+
+// TestInspectorListsOnlyTheItemFolders keeps the details panel to the folders
+// the item actually lives in: the full tree belongs to the picker behind the
+// plus, not to the panel.
+func TestInspectorListsOnlyTheItemFolders(t *testing.T) {
+	a := seededApp(t)
+	a.folders = []core.Folder{
+		{ID: "f1", Name: "Inspiration", ItemCount: 2},
+		{ID: "f2", Name: "Client Work", ItemCount: 4},
+	}
+	a.activeItem.Folders = []string{"f1"}
+	tester := ui.NewTester(a.viewInspector, int(defaultInspectorWidth), 1200)
+	if !tester.HasText("Inspiration") {
+		t.Fatalf("inspector is missing the folder the item lives in: %q", tester.Texts())
+	}
+	if tester.HasText("Client Work") {
+		t.Fatal("inspector lists a folder the item is not in")
+	}
+}
+
+// TestFolderPickerTreeSearchesAndAdds covers the shared picker: it draws the
+// folder tree, its search keeps a match with the parent that places it, and a
+// click adds the target and closes it.
+func TestFolderPickerTreeSearchesAndAdds(t *testing.T) {
+	a := seededApp(t)
+	a.folders = []core.Folder{
+		{ID: "f1", Name: "Inspiration", ItemCount: 2},
+		{ID: "f2", Name: "Client Work", ItemCount: 4},
+		{ID: "f3", Name: "Work 2024", ParentID: "f2"},
+	}
+	a.activeItem.Folders = []string{"f1"}
+	a.openFolderPicker([]core.Item{*a.activeItem})
+	if a.dialog != dialogFolderPicker {
+		t.Fatalf("the picker did not open: dialog=%v", a.dialog)
+	}
+	open := true
+	tester := ui.NewTester(func(c *ui.Context) { a.viewFolderPickerDialog(c, &open) }, 420, 700)
+	for _, want := range []string{"Inspiration", "Client Work"} {
+		if !tester.HasText(want) {
+			t.Fatalf("picker is missing %q: %q", want, tester.Texts())
+		}
+	}
+
+	// The search keeps a match and the ancestors that place it in the tree.
+	a.folderPickerQuery = "2024"
+	tester.Frame()
+	if !tester.HasText("Work 2024") || !tester.HasText("Client Work") {
+		t.Fatalf("search dropped the match or its parent: %q", tester.Texts())
+	}
+	if tester.HasText("Inspiration") {
+		t.Fatalf("search kept a folder that does not match: %q", tester.Texts())
+	}
+
+	row, ok := tester.Find("Work 2024")
+	if !ok {
+		t.Fatalf("the match has no row: %q", tester.Texts())
+	}
+	tester.Press(row.X+row.W/2, row.Y+row.H/2)
+	tester.Release(row.X+row.W/2, row.Y+row.H/2)
+	tester.Frame()
+	if a.dialog != dialogNone || len(a.folderPickerItems) != 0 {
+		t.Fatalf("the picker stayed open after a folder was chosen: dialog=%v items=%d", a.dialog, len(a.folderPickerItems))
+	}
+}
+
+// TestFolderPickerExpansionIsIndependentOfTheSidebar keeps the picker's tree
+// and the sidebar's from sharing one expansion map: opening the picker starts
+// from its own state, and folding a folder there leaves the sidebar as it was.
+func TestFolderPickerExpansionIsIndependentOfTheSidebar(t *testing.T) {
+	a := seededApp(t)
+	a.folders = []core.Folder{
+		{ID: "f1", Name: "Inspiration", ItemCount: 2},
+		{ID: "f2", Name: "Client Work", ItemCount: 4},
+		{ID: "f3", Name: "Work 2024", ParentID: "f2"},
+	}
+	// The sidebar has f2 open; the picker has never expanded it.
+	a.expanded["f2"] = true
+	a.openFolderPicker([]core.Item{*a.activeItem})
+	open := true
+	tester := ui.NewTester(func(c *ui.Context) { a.viewFolderPickerDialog(c, &open) }, 420, 700)
+	if tester.HasText("Work 2024") {
+		t.Fatal("the picker opened with the sidebar's expansion instead of its own")
+	}
+
+	// The arrow on the left of the parent row opens it in the picker only.
+	// Find gives the name's box: the row pads 6, the arrow is 16 wide, then a
+	// 6 gap, the 13 icon and another 6 gap put the name 33 past the arrow's
+	// middle.
+	row, ok := tester.Find("Client Work")
+	if !ok {
+		t.Fatalf("the parent row is missing: %q", tester.Texts())
+	}
+	tester.Press(row.X-33, row.Y+row.H/2)
+	tester.Release(row.X-33, row.Y+row.H/2)
+	tester.Frame()
+	if !tester.HasText("Work 2024") {
+		t.Fatalf("the picker's own arrow did not expand the folder: %q", tester.Texts())
+	}
+	if !a.expanded["f2"] {
+		t.Fatal("the picker's expansion leaked into the sidebar's state")
+	}
+}

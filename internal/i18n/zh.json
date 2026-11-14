@@ -228,6 +228,7 @@
     "mimeType": "MIME 类型",
     "moveToTrash": "移至废纸篓",
     "noFolder": "暂未加入文件夹",
+    "noFolderMatch": "没有匹配的文件夹",
     "noTags": "无标签",
     "note": "备注",
     "notePlaceholder": "添加备注…",

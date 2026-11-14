@@ -247,6 +247,13 @@ type App struct {
 	// dialog from a folder's context menu does not change the current view.
 	newFolderParentID string
 	menuOpen          bool
+	// folderPickerItems are the items the "add to folder" dialog targets,
+	// folderPickerQuery is the text its tree filters by, and
+	// folderPickerExpanded is the picker's own expansion state: the sidebar's
+	// tree keeps its own, so opening one never moves the other.
+	folderPickerItems    []core.Item
+	folderPickerQuery    string
+	folderPickerExpanded map[string]bool
 
 	// Preview and playback.
 	previewOpen       bool
@@ -384,6 +391,7 @@ const (
 	dialogTag
 	dialogDeleteItems
 	dialogDeleteLastFolder
+	dialogFolderPicker
 )
 
 type settingsGroup struct {

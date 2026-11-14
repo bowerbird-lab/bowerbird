@@ -228,6 +228,7 @@
     "mimeType": "MIME type",
     "moveToTrash": "Move to trash",
     "noFolder": "No folder assigned",
+    "noFolderMatch": "No folders match",
     "noTags": "No tags",
     "note": "Note",
     "notePlaceholder": "Add notes…",

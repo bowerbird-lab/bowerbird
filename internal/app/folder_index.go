@@ -87,6 +87,17 @@ func (index *folderIndex) previewGroups(parentID string) [][]string {
 	return groups
 }
 
+// pathOf is the folder's place in the tree, "A / B", as the filter menus show
+// it; empty when the folder is gone.
+func (index *folderIndex) pathOf(id string) string {
+	for _, option := range index.options {
+		if option.id == id {
+			return option.name
+		}
+	}
+	return ""
+}
+
 func (index *folderIndex) canNest(folderID, parentID string) bool {
 	if folderID == "" || folderID == parentID {
 		return false

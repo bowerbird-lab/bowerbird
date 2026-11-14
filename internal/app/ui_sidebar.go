@@ -124,7 +124,7 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 	if len(children) == 0 {
 		paddingEnd += 3
 	}
-	b := ui.ButtonBase(c.Key("folder-" + f.ID)).FillWidth().Height(folderRowHeight).PaddingStart(float32(8 + depth*14)).PaddingEnd(paddingEnd).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(6)
+	b := ui.ButtonBase(c.Key("folder-" + f.ID)).FillWidth().Height(folderRowHeight).PaddingStart(8 + folderTreeIndent*float32(depth)).PaddingEnd(paddingEnd).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(6)
 	b.Drag(sidebarDrag{FolderID: f.ID, ParentID: f.ParentID})
 	// A folder row takes two kinds of in-app drags: items to classify, and
 	// folders to reorder or nest. The middle of a sibling row nests the

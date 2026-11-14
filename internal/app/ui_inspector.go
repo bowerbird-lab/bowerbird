@@ -305,6 +305,10 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 		})
 
 		a.inspectorDivider(c)
+		a.inspectorFolders(c, []core.Item{item}, item.Folders,
+			a.tf("inspector.foldersCount", map[string]any{"count": len(item.Folders)}))
+
+		a.inspectorDivider(c)
 		if a.nativeFeature("official.prompt-metadata") {
 			a.sectionLabel(c, a.t("inspector.prompt"))
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
@@ -386,18 +390,6 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 		if categoryOf(item) == "audio" && a.nativeFeature("official.audio-player") {
 			a.inspectorAudio(c, item)
 		}
-
-		ui.Row(c).FillWidth().Gap(8).Margin(12, 0, 0, 0).Children(func() {
-			if ui.Button(c, a.t("inspector.reveal")).Clicked() {
-				_ = a.svc.RevealInFinder(item.ID)
-			}
-			if ui.Button(c, a.t("contextMenu.openWithDefaultApp")).Clicked() {
-				_ = a.svc.OpenWithDefaultApp(item.ID)
-			}
-			if ui.Button(c, a.deleteActionLabel()).Clicked() {
-				a.deleteSelection()
-			}
-		})
 	})
 }
 
@@ -469,10 +461,53 @@ func (a *App) metaRowCopy(c *ui.Context, label, value string, copyable bool) {
 	})
 }
 
+// inspectorFolders shows the folders the items live in, plus the plus that
+// opens the folder picker. The rows are chips like the tags above them, and
+// are read only: the picker adds, the context menu removes.
+func (a *App) inspectorFolders(c *ui.Context, items []core.Item, folderIDs []string, label string) {
+	p := a.palette(c)
+	index := a.folderIndex()
+	a.sectionLabel(c, label)
+	ui.Row(c).FillWidth().Wrap().Gap(5).Children(func() {
+		for _, id := range folderIDs {
+			folder, ok := index.byID[id]
+			if !ok {
+				continue
+			}
+			chip := ui.Row(c).Height(22).PaddingX(7).Radius(999).Background(p.surface2).Border(1, p.hairline).AlignItems(ui.Center).Gap(4)
+			chip.Tooltip(index.pathOf(id))
+			chip.Children(func() {
+				ui.Icon(c, iconFolder).Size(10, 10).TextColor(p.muted)
+				ui.Text(c, folder.Name).FontSize(10.5).TextColor(p.text).SingleLine()
+			})
+		}
+		a.folderAddButton(c, items, len(folderIDs) == 0)
+	})
+}
+
+// folderAddButton is the plus that opens the folder picker, with its label
+// when there is no folder chip beside it to explain it.
+func (a *App) folderAddButton(c *ui.Context, items []core.Item, withLabel bool) {
+	p := a.palette(c)
+	b := ui.ButtonBase(c.Key("folder-add")).Height(22).PaddingX(7).Radius(999).Background(p.hover).FocusRing(false).AlignItems(ui.Center).Gap(3)
+	b.Tooltip(a.t("inspector.addToFolder"))
+	b.Children(func() {
+		ui.Icon(c, iconPlus).Size(10, 10).TextColor(p.muted)
+		if withLabel {
+			ui.Text(c, a.t("inspector.addToFolder")).FontSize(10.5).TextColor(p.muted)
+		}
+	})
+	if b.Clicked() {
+		a.openFolderPicker(items)
+	}
+}
+
 func (a *App) viewMultiInspector(c *ui.Context) {
 	p := a.palette(c)
 	stacked, selectedCount, totalSize := a.selectionSummary()
 	stacked = a.stackWorkspaceCards(stacked)
+	// The folders a selection can name are the ones every item is already in.
+	items := a.selectedItems()
 	ui.Column(c).FillWidth().Gap(14).Children(func() {
 		// 堆叠层叠效果: 固定容器宽高并在水平/垂直中心对齐
 		const areaH = float32(160)
@@ -575,19 +610,7 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 				}
 			}
 		})
-		a.sectionLabel(c, a.t("inspector.batchMove"))
-		for _, f := range a.folderIndex().all {
-			f := f
-			if ui.Button(c.Key("batch-move-"+f.ID), f.Name).Clicked() {
-				ids := a.selectedIDs()
-				go func() {
-					for _, id := range ids {
-						_ = a.svc.AddItemToFolder(id, f.ID)
-					}
-					a.post(func() { a.refreshAll() })
-				}()
-			}
-		}
+		a.inspectorFolders(c, items, sharedFolders(items), a.t("multiInspector.folders"))
 		a.inspectorDivider(c)
 		ui.Row(c).Gap(8).Children(func() {
 			if ui.Button(c, a.deleteActionLabel()).Clicked() {

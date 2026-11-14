@@ -521,10 +521,16 @@ func (a *App) viewDialog(c *ui.Context) {
 		a.viewDeleteDialog(c, &open)
 	case dialogDeleteLastFolder:
 		a.viewLastFolderDeleteDialog(c, &open)
+	case dialogFolderPicker:
+		a.viewFolderPickerDialog(c, &open)
 	}
 	if !open {
 		if a.dialog == dialogNewFolder {
 			a.newFolderParentID = ""
+		}
+		if a.dialog == dialogFolderPicker {
+			a.folderPickerItems = nil
+			a.folderPickerQuery = ""
 		}
 		a.dialog = dialogNone
 		a.dialogError = ""
