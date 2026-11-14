@@ -266,6 +266,7 @@
     "hex": "内容指纹",
     "imported": "导入时间",
     "layers": "图层",
+    "libraryPath": "库位置",
     "metadata": "元数据",
     "noSelection": "未选择素材",
     "noSelectionHint": "选择一个素材查看详情。",

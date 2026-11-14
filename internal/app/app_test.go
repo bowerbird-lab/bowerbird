@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"bowerbird/core"
 	"bowerbird/internal/plugin"
@@ -92,6 +93,57 @@ func TestInspectorShowsLibraryInfoWhenSelectionEmpty(t *testing.T) {
 		if !tester.HasText(want) {
 			t.Fatalf("library inspector is missing %q", want)
 		}
+	}
+	// The name is the header now; the "current library" caption is gone and
+	// the path is a hover tooltip on the location row rather than a block.
+	if tester.HasText(a.t("settings.storage.library")) {
+		t.Fatal("library inspector still repeats the current library caption")
+	}
+	if tester.HasText(a.library.Path) {
+		t.Fatal("library inspector shows the path without hovering")
+	}
+	r, ok := tester.Find(a.t("settings.storage.open"))
+	if !ok {
+		t.Fatal("library inspector has no open-in-file-manager action")
+	}
+	tester.Move(r.X+r.W/2, r.Y+r.H/2)
+	tester.Advance(2 * time.Second)
+	tester.Frame()
+	if !tester.HasText(a.library.Path) {
+		t.Fatal("hovering the location row does not show the library path")
+	}
+}
+
+// TestInspectorHasCompactTopStrip keeps the inspector from reserving a full
+// header row it has no controls for, while still leaving room for the window
+// buttons on platforms that draw them on the right.
+func TestInspectorHasCompactTopStrip(t *testing.T) {
+	a := seededApp(t)
+	a.library.Name = "ArchiveLib"
+	a.activeItem = nil
+	a.activeItemID = ""
+	a.selected = map[string]bool{}
+	tester := ui.NewTester(a.viewInspector, inspectorWidth, 800)
+	tester.SetTitleBar(ui.TitleBar{Height: 52, Left: 80})
+	tester.Frame()
+	mac, ok := tester.Find("ArchiveLib")
+	if !ok {
+		t.Fatal("library inspector is missing its title")
+	}
+	if mac.Y > headerHeight+20 {
+		t.Fatalf("inspector content starts too low: y=%v", mac.Y)
+	}
+
+	// Windows-style controls reserve room on the right; the content must stay
+	// below them instead of sliding under the buttons.
+	tester.SetTitleBar(ui.TitleBar{Height: 52, Right: 138})
+	tester.Frame()
+	win, ok := tester.Find("ArchiveLib")
+	if !ok {
+		t.Fatal("library inspector is missing its title")
+	}
+	if win.Y <= mac.Y {
+		t.Fatalf("inspector content did not move below the window buttons: mac y=%v win y=%v", mac.Y, win.Y)
 	}
 }
 

@@ -266,6 +266,7 @@
     "hex": "Fingerprint",
     "imported": "Imported",
     "layers": "Layers",
+    "libraryPath": "Library location",
     "metadata": "Metadata",
     "noSelection": "Nothing selected",
     "noSelectionHint": "Select an item to see its details.",

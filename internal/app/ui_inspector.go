@@ -69,8 +69,12 @@ func (a *App) loadInspector(id string) {
 
 func (a *App) viewInspector(c *ui.Context) {
 	p := a.palette(c)
+	top := float32(inspectorTopHeight)
+	if bar := c.TitleBar(); bar.Right > 0 {
+		top = maxF(top, bar.Height)
+	}
 	ui.Column(c).Width(inspectorWidth).FillHeight().Background(p.sidebar).Children(func() {
-		ui.Row(c).Height(headerHeight).PaddingX(14).AlignItems(ui.Center).DragWindow()
+		ui.Row(c).Height(top).PaddingX(14).AlignItems(ui.Center).DragWindow()
 		ui.Scroll(c).Grow(1).Shrink(1).Padding(0, 14, 20, 14).Children(func() {
 			if len(a.selected) > 1 {
 				a.viewMultiInspector(c)
@@ -95,25 +99,43 @@ func (a *App) viewLibraryInspector(c *ui.Context) {
 		return
 	}
 	lib := a.library
+	openFolder := func() {
+		if a.svc != nil {
+			_ = a.svc.OpenFolder(lib.Path)
+		}
+	}
 	ui.Column(c).FillWidth().Gap(10).Children(func() {
-		a.sectionLabel(c, a.t("settings.storage.library"))
-		ui.Column(c).FillWidth().Gap(12).Children(func() {
-			ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(42, 42).Radius(10).Background(p.surface2).Center().Children(func() {
-					ui.Icon(c, iconLibrary).Size(20, 20).TextColor(p.accent)
-				})
-				ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
-					ui.Text(c, lib.Name).FontSize(15).FontWeight(650).TextColor(p.text).SingleLine()
-					ui.Text(c, a.t("settings.storage.library")).FontSize(10.5).TextColor(p.faint)
-				})
+		// The name is the header: no "current library" caption repeats it.
+		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Size(42, 42).Radius(10).Background(p.surface2).Center().Children(func() {
+				ui.Icon(c, iconLibrary).Size(20, 20).TextColor(p.accent)
 			})
-			ui.Text(c, lib.Path).FontSize(10.5).TextColor(p.muted).Wrap().MaxLines(3)
-			a.inspectorDivider(c)
-			a.metaRow(c, a.t("settings.storage.items"), fmt.Sprintf("%d", a.stats.Total))
-			a.metaRow(c, a.t("inspector.storageUsed"), formatBytes(a.stats.TotalSize))
-			a.metaRow(c, a.t("sidebar.folders"), fmt.Sprintf("%d", len(flattenFolders(a.folders))))
-			a.metaRow(c, a.t("sidebar.tags"), fmt.Sprintf("%d", len(a.tags)))
-			a.metaRow(c, a.t("inspector.createdAt"), formatDate(lib.CreatedAt))
+			ui.Text(c, lib.Name).FontSize(15).FontWeight(650).TextColor(p.text).Grow(1).Shrink(1).MinWidth(0).SingleLine()
+		})
+		a.inspectorDivider(c)
+		a.metaRow(c, a.t("settings.storage.items"), fmt.Sprintf("%d", a.stats.Total))
+		a.metaRow(c, a.t("inspector.storageUsed"), formatBytes(a.stats.TotalSize))
+		a.metaRow(c, a.t("sidebar.folders"), fmt.Sprintf("%d", len(flattenFolders(a.folders))))
+		a.metaRow(c, a.t("sidebar.tags"), fmt.Sprintf("%d", len(a.tags)))
+		a.metaRow(c, a.t("inspector.createdAt"), formatDate(lib.CreatedAt))
+
+		// The library folder sits in the details. Hovering the row shows the
+		// path; the single Open button reveals it in the file manager.
+		a.inspectorDivider(c)
+		row := ui.Row(c).FillWidth().Height(22).AlignItems(ui.Center).Gap(6).Tooltip(lib.Path)
+		row.Children(func() {
+			ui.Text(c, strings.ToUpper(a.t("inspector.libraryPath"))).FontSize(10).FontWeight(650).LetterSpacing(0.6).TextColor(p.faint).Grow(1)
+			open := ui.ButtonBase(c.Key("library-open")).Height(22).PaddingX(6).Radius(5).FocusRing(false).AlignItems(ui.Center).Gap(4).Tooltip(lib.Path)
+			if open.Hovered() {
+				open.Background(p.hover)
+			}
+			open.Children(func() {
+				ui.Icon(c, iconFolder).Size(12, 12).TextColor(p.muted)
+				ui.Text(c, a.t("settings.storage.open")).FontSize(10.5).TextColor(p.muted)
+			})
+			if open.Clicked() {
+				openFolder()
+			}
 		})
 	})
 }
@@ -136,7 +158,7 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 		hero := ui.Box(c).FillWidth().Height(h).Radius(10).Background(p.surface2).Clip().Cursor(ui.CursorPointer)
 		// The hero is also a drag source, like a gallery card: drag the
 		// active item (or the whole selection) out to Finder or another app.
-		hero.DragDataFrom(func() transfer.Data { return a.itemDragData(item) })
+		hero.DragDataFrom(func() transfer.Data { return a.itemDragData(item) }, a.dragOptions(hero, item))
 		path := ""
 		if item.HasThumbnail {
 			path = filepath.Join(item.ItemPath, "thumbnail.jpg")

@@ -20,6 +20,12 @@ const (
 	mainHeaderHeight      = headerHeight + headerSecondRowHeight
 	galleryTopPadding     = 10
 	gallerySidePadding    = 10
+	// inspectorTopHeight is the inspector's window-drag strip. The panel has
+	// no toolbar of its own, so a short strip is enough; the content starts
+	// right below it instead of leaving a whole header row empty. Platforms
+	// that draw window buttons on the right (Windows, Linux) keep the full
+	// title bar height so the buttons never sit on top of the content.
+	inspectorTopHeight = 20
 )
 
 // palette is the app's semantic colour set, resolved from a theme JSON. It is

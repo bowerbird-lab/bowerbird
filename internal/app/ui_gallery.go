@@ -542,8 +542,10 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 		}
 	}
 	card.Background(card.AnimateColor("bg", bg, ui.Animation{Duration: 110 * time.Millisecond}))
-	// Native drag out: advertises the file list to Finder and other apps.
-	card.DragDataFrom(func() transfer.Data { return a.itemDragData(item) })
+	// Native drag out: advertises the file list to Finder and other apps. The
+	// preview is the image itself (a stack for a multi-selection), not the
+	// card's background; it is only built for the card under the pointer.
+	card.DragDataFrom(func() transfer.Data { return a.itemDragData(item) }, a.dragOptions(card, item))
 
 	// Resolve thumbnail or system file icon
 	path := ""

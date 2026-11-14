@@ -276,6 +276,11 @@ type App struct {
 	thumbs    *thumbCache
 	thumbJobs *thumbJobQueue
 
+	// Drag previews, keyed by the dragged selection. They hold decoded pixels,
+	// so only a handful are kept.
+	dragPreviews     map[string]*dragPreview
+	dragPreviewOrder []string
+
 	// Toast feedback.
 	toast      string
 	toastUntil time.Time
