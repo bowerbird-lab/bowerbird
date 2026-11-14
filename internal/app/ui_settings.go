@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"bowerbird/core"
+	"bowerbird/internal/i18n"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -17,13 +18,19 @@ func (a *App) refreshSettings() {
 	if a.svc == nil {
 		return
 	}
+	a.syncLanguage()
 	a.themeValue = a.svc.GetTheme()
 	if a.themeValue == "" {
 		a.themeValue = core.ThemeSystem
 	}
 	a.languageValue = a.svc.GetLanguage()
-	if a.languageValue == "" {
+	switch a.languageValue {
+	case "", "system":
 		a.languageValue = "system"
+	default:
+		// Older builds persisted full locale tags such as "zh-CN"; the pills
+		// use the short dictionary code.
+		a.languageValue = i18n.Resolve(a.languageValue)
 	}
 	a.vibrancyValue = a.svc.GetVibrancyEnabled()
 	a.network = a.svc.GetNetworkSettings()
@@ -186,7 +193,9 @@ func (a *App) handleSettingsShortcuts(c *ui.Context) {
 func (a *App) settingsCard(c *ui.Context, title string, fn func()) {
 	p := paletteFor(c.Theme())
 	ui.Column(c).FillWidth().Padding(14).Radius(10).Background(p.surface).Border(1, p.hairline).Gap(10).Children(func() {
-		ui.Text(c, title).FontSize(11).FontWeight(650).LetterSpacing(0.4).TextColor(p.muted)
+		if title != "" {
+			ui.Text(c, title).FontSize(11).FontWeight(650).LetterSpacing(0.4).TextColor(p.muted)
+		}
 		fn()
 	})
 	ui.Box(c).Height(10)
@@ -205,41 +214,49 @@ func (a *App) settingsRow(c *ui.Context, label, help string, control func()) {
 	})
 }
 
+// settingsRowInfo is settingsRow with the help copy behind a small info icon
+// instead of under the label, so dense settings keep one line per control.
+func (a *App) settingsRowInfo(c *ui.Context, label, help string, control func()) {
+	p := paletteFor(c.Theme())
+	ui.Row(c).FillWidth().MinHeight(36).AlignItems(ui.Center).Gap(14).Children(func() {
+		ui.Row(c).Grow(1).Shrink(1).MinWidth(0).AlignItems(ui.Center).Gap(6).Children(func() {
+			ui.Text(c, label).FontSize(12.5).TextColor(p.text).Shrink(1).SingleLine()
+			if help != "" {
+				icon := ui.Icon(c, iconInfo).Size(13, 13).Shrink(0).Tooltip(help)
+				if icon.Hovered() {
+					icon.TextColor(p.muted)
+				} else {
+					icon.TextColor(p.faint)
+				}
+			}
+		})
+		control()
+	})
+}
+
 func (a *App) settingsGeneral(c *ui.Context) {
-	a.settingsCard(c, a.t("settings.language.title"), func() {
-		ui.Row(c).Gap(6).Children(func() {
-			for _, lang := range []string{"system", "en", "zh"} {
-				lang := lang
-				label := map[string]string{"system": a.t("settings.languageSystem"), "en": "English", "zh": "中文"}[lang]
-				a.pillButton(c, "lang-"+lang, label, a.languageValue == lang, func() {
-					go func() {
-						err := a.svc.SetLanguage(lang)
-						a.postSettings(func() {
-							if err != nil {
-								a.showToast(err.Error())
-							}
-							a.languageValue = lang
-							a.trans.SetLanguage(lang)
-							if a.svc != nil {
-								a.trans.SetLanguage(a.currentLanguage())
-							}
-							a.refreshAll()
-						})
-					}()
-				})
+	a.settingsCard(c, "", func() {
+		a.settingsRowInfo(c, a.t("settings.language.title"), a.t("settings.language.description"), func() {
+			options := []SelectOption{
+				{Value: "system", Label: a.t("settings.language.auto")},
+				{Value: "en", Label: a.t("settings.language.en")},
+				{Value: "zh", Label: a.t("settings.language.zh")},
+			}
+			if lang, changed := Dropdown(c, "settings-language", a.languageValue, options); changed {
+				a.setLanguage(lang)
 			}
 		})
 	})
 	a.settingsCard(c, a.t("settings.behavior"), func() {
 		enabled := a.svc.GetLightweightModeEnabled()
-		a.settingsRow(c, a.t("settings.lightweight.title"), a.t("settings.lightweight.description"), func() {
+		a.settingsRowInfo(c, a.t("settings.lightweight.title"), a.t("settings.lightweight.description"), func() {
 			on := enabled
 			if ui.Switch(c.Key("lightweight"), &on).Changed() {
 				go a.svc.SetLightweightModeEnabled(on)
 			}
 		})
 		recordURL := a.prefs.RecordImportURL
-		a.settingsRow(c, a.t("settings.recordURL.title"), a.t("settings.recordURL.description"), func() {
+		a.settingsRowInfo(c, a.t("settings.recordURL.title"), a.t("settings.recordURL.description"), func() {
 			on := recordURL
 			if ui.Switch(c.Key("record-import-url"), &on).Changed() {
 				a.prefs.RecordImportURL = on
@@ -247,6 +264,27 @@ func (a *App) settingsGeneral(c *ui.Context) {
 			}
 		})
 	})
+}
+
+// setLanguage persists a new UI language and re-applies it to every open
+// window. Persisting happens off the UI thread; state and redraws come back
+// through postSettings.
+func (a *App) setLanguage(lang string) {
+	if a.svc == nil {
+		return
+	}
+	go func() {
+		err := a.svc.SetLanguage(lang)
+		a.postSettings(func() {
+			if err != nil {
+				a.showToast(err.Error())
+				return
+			}
+			a.languageValue = lang
+			a.syncLanguage()
+			a.refreshAll()
+		})
+	}()
 }
 
 func (a *App) settingsThemeCard(c *ui.Context) {
@@ -282,7 +320,7 @@ func (a *App) settingsAppearance(c *ui.Context) {
 	p := paletteFor(c.Theme())
 	a.settingsThemeCard(c)
 	a.settingsCard(c, a.t("settings.vibrancy.title"), func() {
-		a.settingsRow(c, a.t("settings.vibrancy.enable"), a.t("settings.vibrancy.enableDescription"), func() {
+		a.settingsRowInfo(c, a.t("settings.vibrancy.enable"), a.t("settings.vibrancy.enableDescription"), func() {
 			on := a.vibrancyValue
 			if ui.Switch(c.Key("vibrancy"), &on).Changed() {
 				a.vibrancyValue = on

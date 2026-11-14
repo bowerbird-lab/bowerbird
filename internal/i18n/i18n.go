@@ -61,21 +61,44 @@ func (b *Bundle) Language() string {
 // Resolve maps a stored preference to a concrete language.
 func Resolve(language string) string {
 	switch strings.ToLower(strings.TrimSpace(language)) {
-	case "zh", "zh-cn", "zh-hans":
+	case "zh", "zh-cn", "zh-hans", "zh-hant", "zh-tw":
 		return "zh"
-	case "en":
+	case "en", "en-us", "en-gb":
 		return "en"
 	case "", "system":
-		// The desktop app used the system UI language. Read the common
-		// environment variables without pulling in a platform dependency.
-		for _, key := range []string{"LANG", "LC_ALL", "LC_MESSAGES"} {
-			if strings.HasPrefix(strings.ToLower(os.Getenv(key)), "zh") {
-				return "zh"
-			}
-		}
-		return "en"
+		return systemLanguage()
 	default:
 		return "en"
+	}
+}
+
+// systemLanguage follows the desktop's UI language. Environment variables come
+// first (they are what a terminal launch sets and what tests can override),
+// then the platform lookup for apps started from the Finder or Explorer.
+func systemLanguage() string {
+	for _, key := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+		if lang := matchLanguage(os.Getenv(key)); lang != "" {
+			return lang
+		}
+	}
+	if lang := osLanguage(); lang != "" {
+		return lang
+	}
+	return "en"
+}
+
+// matchLanguage maps a locale tag such as "zh_CN.UTF-8" or "en-US" to a
+// dictionary. Empty means "not a language we ship", which keeps the caller
+// falling through to the next source instead of always resolving to English.
+func matchLanguage(tag string) string {
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	switch {
+	case strings.HasPrefix(tag, "zh"):
+		return "zh"
+	case strings.HasPrefix(tag, "en"):
+		return "en"
+	default:
+		return ""
 	}
 }
 

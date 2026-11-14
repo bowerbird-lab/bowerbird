@@ -347,6 +347,9 @@ func New(svc *core.Service) *App {
 		start:          time.Now(),
 	}
 	a.loadPrefs()
+	// The service may already own a manager (tests, or a window created after
+	// startup), so pick the persisted language before the first frame.
+	a.syncLanguage()
 	a.pluginHost = plugin.NewHost(filepath.Join(core.UserDataDir(), "plugins"))
 	if cwd, err := os.Getwd(); err == nil {
 		a.pluginHost.SetLocalDirs(filepath.Join(cwd, "plugins"))
@@ -395,8 +398,8 @@ func (a *App) SetSettingsWindow(w *mygo.Window) {
 	a.cancelShortcutDialog()
 	a.refreshSettings()
 }
-func (a *App) SetLogsWindow(w *mygo.Window)  { a.logsWin = w; a.refreshLogs() }
-func (a *App) SetSetupWindow(w *mygo.Window) { a.setupWin = w }
+func (a *App) SetLogsWindow(w *mygo.Window)  { a.logsWin = w; a.syncLanguage(); a.refreshLogs() }
+func (a *App) SetSetupWindow(w *mygo.Window) { a.setupWin = w; a.syncLanguage() }
 
 // content wraps a view so a panic is logged and the window keeps painting
 // rather than falling back to an unexplained black frame.
@@ -485,7 +488,10 @@ func (a *App) HandleEvent(name string, payload any) {
 			a.post(func() { a.trans.SetLanguage(a.currentLanguage()); _ = s; a.refreshAll() })
 		}
 	case core.LanguageChangedEvent:
-		a.post(func() { a.trans.SetLanguage(a.currentLanguage()); a.refreshAll() })
+		// Apply the dictionary synchronously: the host rebuilds the native menu
+		// and tray immediately after dispatching this event.
+		a.trans.SetLanguage(a.currentLanguage())
+		a.post(func() { a.refreshAll() })
 	case core.VibrancyChangedEvent, core.LightweightModeChangedEvent:
 		a.post(func() { a.refreshAll() })
 	case core.NetworkSettingsChangedEvent:
@@ -534,11 +540,28 @@ func (a *App) currentLanguage() string {
 	return lang
 }
 
+// syncLanguage applies the persisted preference to the native translator. The
+// app is constructed before the library manager exists (the service cannot read
+// user data yet), so the stored language has to be re-applied once the manager
+// is attached instead of falling back to the system default at startup.
+func (a *App) syncLanguage() {
+	lang := a.currentLanguage()
+	if a.trans.Language() == i18n.Resolve(lang) {
+		return
+	}
+	a.trans.SetLanguage(lang)
+}
+
+// SyncLanguage re-reads the persisted language. The desktop entry point calls
+// it after attaching the manager so the menu bar and tray start translated.
+func (a *App) SyncLanguage() { a.syncLanguage() }
+
 // refreshAll reloads the library-wide data and the current page.
 func (a *App) refreshAll() {
 	if a.svc == nil {
 		return
 	}
+	a.syncLanguage()
 	a.loading = true
 	a.loadSeq++
 	seq := a.loadSeq

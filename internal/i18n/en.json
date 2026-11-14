@@ -6,6 +6,7 @@
   },
   "appMenu": {
     "about": "About Bowerbird",
+    "capture": "Capture",
     "captureArea": "Area Capture",
     "captureFullscreen": "Fullscreen Capture",
     "captureWindow": "Window Capture",

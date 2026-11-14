@@ -6,6 +6,7 @@
   },
   "appMenu": {
     "about": "关于 Bowerbird",
+    "capture": "截图",
     "captureArea": "区域截图",
     "captureFullscreen": "全屏截图",
     "captureWindow": "窗口截图",

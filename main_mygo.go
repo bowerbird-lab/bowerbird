@@ -551,7 +551,7 @@ func (h *appHost) rebuildTrayMenu() {
 	if tray == nil || h.svc == nil {
 		return
 	}
-	isZh := h.svc.GetLanguage() == "zh"
+	isZh := h.views != nil && h.views.Translator().Language() == "zh"
 	tray.SetMenu(h.buildTrayMenu(isZh, h.svc.GetShortcutSettings()))
 }
 
@@ -809,6 +809,11 @@ func main() {
 		coreMgr = core.NewLibraryManager()
 		coreMgr.SetHost(host)
 		core.AttachManager(coreService, coreMgr)
+		// The views were built before the manager existed, so they could not read
+		// the stored language yet. Apply it before any window, menu or tray is
+		// created so the first frame starts in the user's language.
+		host.views.SyncLanguage()
+		log.Printf("[I18n] stored language=%q active=%q", coreService.GetLanguage(), host.views.Translator().Language())
 		host.ApplyTheme(coreService.GetTheme())
 		host.ApplyVibrancy(coreService.GetVibrancyEnabled())
 		// The manager restores the last library before it has a host, so tell
@@ -843,7 +848,7 @@ func main() {
 			Icon:           trayIcon(),
 			IconIsTemplate: runtime.GOOS == "darwin",
 			ToolTip:        "Bowerbird",
-			Menu:           host.buildTrayMenu(coreService.GetLanguage() == "zh", coreService.GetShortcutSettings()),
+			Menu:           host.buildTrayMenu(host.views.Translator().Language() == "zh", coreService.GetShortcutSettings()),
 		})
 		if err != nil {
 			log.Printf("[Tray] %v", err)

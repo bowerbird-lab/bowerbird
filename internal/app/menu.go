@@ -23,6 +23,17 @@ func (a *App) BuildAppMenu() *mygo.Menu {
 		}
 		return core.AppMenuItem{Action: action, Title: action}
 	}
+	// Native menu items keep the model's English fallback, but render the
+	// translated label so the menu bar follows the language setting too.
+	label := func(action string) string {
+		row := find(action)
+		if row.LabelKey != "" {
+			if translated := a.t(row.LabelKey); translated != row.LabelKey {
+				return translated
+			}
+		}
+		return row.Title
+	}
 	invoke := func(action string) func(*mygo.MenuItem, *mygo.Window) {
 		return func(*mygo.MenuItem, *mygo.Window) {
 			if err := a.svc.InvokeAppMenu(action); err != nil {
@@ -31,16 +42,15 @@ func (a *App) BuildAppMenu() *mygo.Menu {
 		}
 	}
 	captureItem := func(action string) *mygo.MenuItem {
-		row := find(action)
-		return &mygo.MenuItem{Label: row.Title, Accelerator: core.AcceleratorForMyGo(a.svc.ShortcutAccelerator(action)), Click: invoke(action)}
+		return &mygo.MenuItem{Label: label(action), Accelerator: core.AcceleratorForMyGo(a.svc.ShortcutAccelerator(action)), Click: invoke(action)}
 	}
 	appMenu := &mygo.MenuItem{
 		Role: mygo.RoleAppMenu,
 		Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleAbout},
 			mygo.Separator(),
-			{Label: find(core.AppMenuSettings).Title, Accelerator: core.AcceleratorForMyGo(a.svc.ShortcutAccelerator(core.AppMenuSettings)), Click: invoke(core.AppMenuSettings)},
-			{Label: find(core.AppMenuLogs).Title, Accelerator: core.AcceleratorForMyGo(a.svc.ShortcutAccelerator(core.AppMenuLogs)), Click: invoke(core.AppMenuLogs)},
+			{Label: label(core.AppMenuSettings), Accelerator: core.AcceleratorForMyGo(a.svc.ShortcutAccelerator(core.AppMenuSettings)), Click: invoke(core.AppMenuSettings)},
+			{Label: label(core.AppMenuLogs), Accelerator: core.AcceleratorForMyGo(a.svc.ShortcutAccelerator(core.AppMenuLogs)), Click: invoke(core.AppMenuLogs)},
 			mygo.Separator(),
 			{Role: mygo.RoleHide},
 			{Role: mygo.RoleHideOthers},
@@ -51,7 +61,7 @@ func (a *App) BuildAppMenu() *mygo.Menu {
 	}
 	return mygo.NewMenu([]*mygo.MenuItem{
 		appMenu,
-		{Label: "Capture", Submenu: []*mygo.MenuItem{
+		{Label: a.t("appMenu.capture"), Submenu: []*mygo.MenuItem{
 			captureItem(core.AppMenuCaptureArea),
 			captureItem(core.AppMenuCaptureFullscreen),
 			captureItem(core.AppMenuCaptureWindow),
@@ -69,7 +79,7 @@ func (a *App) BuildTrayMenu() *mygo.Menu {
 	if a.svc == nil {
 		return mygo.NewMenu(nil)
 	}
-	isZh := a.svc.GetLanguage() == "zh"
+	isZh := a.trans.Language() == "zh"
 	settings := a.svc.GetShortcutSettings()
 	var items []*mygo.MenuItem
 	for _, row := range core.TrayMenuModelWithSettings("Bowerbird", isZh, settings) {

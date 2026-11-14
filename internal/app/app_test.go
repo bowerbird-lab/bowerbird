@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -1076,4 +1078,77 @@ func TestShortcutRecorder(t *testing.T) {
 			t.Fatalf("warning stayed after a free combination: %q", a.shortcutEditError)
 		}
 	})
+}
+
+func TestSyncLanguageAppliesPersistedPreference(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", dir)
+	t.Setenv("LANG", "en_US.UTF-8")
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_MESSAGES", "")
+	if err := os.WriteFile(filepath.Join(dir, "user_data.json"), []byte(`{"language":"zh"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := core.NewLibraryManager()
+	t.Cleanup(func() { _ = mgr.CloseLibrary() })
+
+	// Mirror the desktop startup order: the app is constructed before the
+	// manager is attached, then the language is re-read in WhenReady.
+	svc := core.NewService(nil)
+	a := New(svc)
+	if got := a.Translator().Language(); got != "en" {
+		t.Fatalf("pre-attach language = %q, want en (system default)", got)
+	}
+	core.AttachManager(svc, mgr)
+	a.SyncLanguage()
+	if got := a.Translator().Language(); got != "zh" {
+		t.Fatalf("language after attach = %q, want zh", got)
+	}
+	if got := a.Translator().T("settings.languageSystem"); got != "跟随系统" {
+		t.Fatalf("translated label = %q, want 跟随系统", got)
+	}
+}
+
+func TestSettingsLanguageRowPutsDropdownRightAndHelpInTooltip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", dir)
+	t.Setenv("LANG", "en_US.UTF-8")
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_MESSAGES", "")
+	mgr := core.NewLibraryManager()
+	t.Cleanup(func() { _ = mgr.CloseLibrary() })
+
+	svc := core.NewService(nil)
+	core.AttachManager(svc, mgr)
+	a := New(svc)
+	a.settingsSection = 0
+	a.refreshSettings()
+
+	tester := ui.NewTester(a.viewSettings, 900, 700)
+	tester.Frame()
+
+	label, ok := tester.Find(a.t("settings.language.title"))
+	if !ok {
+		t.Fatalf("language label %q is missing", a.t("settings.language.title"))
+	}
+	value, ok := tester.Find(a.t("settings.language.auto"))
+	if !ok {
+		t.Fatalf("language dropdown %q is missing", a.t("settings.language.auto"))
+	}
+	if value.X <= label.X {
+		t.Fatalf("dropdown starts at %.1f, label at %.1f: control is not on the right", value.X, label.X)
+	}
+	if diff := value.Y + value.H/2 - (label.Y + label.H/2); diff < -12 || diff > 12 {
+		t.Fatalf("dropdown and label are not on one row (y offset %.1f)", diff)
+	}
+	for _, key := range []string{
+		"settings.language.description",
+		"settings.lightweight.description",
+		"settings.recordURL.description",
+	} {
+		if tester.HasText(a.t(key)) {
+			t.Fatalf("%s is rendered inline instead of a tooltip", key)
+		}
+	}
 }
