@@ -542,6 +542,25 @@ func TestFilterQueryStringIncludesAllCriteria(t *testing.T) {
 	}
 }
 
+func TestSmartViewNavScopesQuery(t *testing.T) {
+	a := seededApp(t)
+	a.query = "sunset"
+	cases := []struct {
+		nav  Nav
+		want string
+	}{
+		{NavAll, "sunset"},
+		{NavUntagged, "sunset is:untagged"},
+		{NavUncategorized, "sunset is:uncategorized"},
+	}
+	for _, tc := range cases {
+		a.nav = tc.nav
+		if got := a.queryString(); got != tc.want {
+			t.Fatalf("nav %s queryString = %q, want %q", tc.nav, got, tc.want)
+		}
+	}
+}
+
 func TestSidebarFolderTreeRendersChildrenAfterParent(t *testing.T) {
 	a := seededApp(t)
 	a.folders = []core.Folder{{

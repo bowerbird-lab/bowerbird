@@ -752,7 +752,7 @@ func (a *App) fetchItems() ([]core.Item, int, int64, *core.Item, error) {
 	}
 	query := a.queryString()
 	scope := a.folderScope()
-	onlyUnrated := a.nav == NavUntagged || a.filters.Unrated
+	onlyUnrated := a.filters.Unrated
 	if a.nav == NavTrash {
 		items, err := a.svc.GetTrashItems(query, a.sortOrder)
 		return items, len(items), 0, nil, err
@@ -791,6 +791,14 @@ func (a *App) queryString() string {
 	parts := []string{}
 	if s := strings.TrimSpace(a.query); s != "" {
 		parts = append(parts, s)
+	}
+	// The smart views are query scopes, not a UI-only highlight: without the
+	// is: token the gallery would show the whole library.
+	switch a.nav {
+	case NavUntagged:
+		parts = append(parts, "is:untagged")
+	case NavUncategorized:
+		parts = append(parts, "is:uncategorized")
 	}
 	for _, t := range a.filters.Types {
 		parts = append(parts, "type:"+t)
