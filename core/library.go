@@ -2945,12 +2945,23 @@ func (m *LibraryManager) CreateFolder(name string, parentID string) (*Folder, er
 	if cleanName == "" {
 		cleanName = "New Folder"
 	}
+	parentID = strings.TrimSpace(parentID)
+
+	// Ordering restarts under each parent. New folders append to their level
+	// instead of jumping in front of folders the user already reordered.
+	var sortOrder int
+	if err := db.QueryRow(
+		"SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE COALESCE(parent_id, '') = ?",
+		parentID,
+	).Scan(&sortOrder); err != nil {
+		return nil, fmt.Errorf("failed to determine folder order: %w", err)
+	}
 
 	folderID := fmt.Sprintf("folder_%d_%04d", time.Now().UnixNano(), time.Now().Nanosecond()%10000)
 	now := time.Now().Unix()
 
 	_, err := db.Exec("INSERT INTO folders (id, name, parent_id, created_at, sort_order) VALUES (?, ?, ?, ?, ?)",
-		folderID, cleanName, strings.TrimSpace(parentID), now, 0,
+		folderID, cleanName, parentID, now, sortOrder,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create folder: %w", err)
@@ -2959,12 +2970,76 @@ func (m *LibraryManager) CreateFolder(name string, parentID string) (*Folder, er
 	return &Folder{
 		ID:        folderID,
 		Name:      cleanName,
-		ParentID:  strings.TrimSpace(parentID),
+		ParentID:  parentID,
 		CreatedAt: now,
-		SortOrder: 0,
+		SortOrder: sortOrder,
 		Children:  []Folder{},
 		ItemCount: 0,
 	}, nil
+}
+
+// SetFolderOrder persists the order of one parent's folders. The caller must
+// list every sibling exactly once; sort_order restarts at zero under each
+// parent, so moving a folder never changes the order inside another branch.
+func (m *LibraryManager) SetFolderOrder(parentID string, orderedIDs []string) error {
+	m.mu.RLock()
+	db := m.db
+	m.mu.RUnlock()
+
+	if db == nil {
+		return errors.New("no active library")
+	}
+	parentID = strings.TrimSpace(parentID)
+
+	rows, err := db.Query("SELECT id FROM folders WHERE COALESCE(parent_id, '') = ?", parentID)
+	if err != nil {
+		return fmt.Errorf("failed to read folder order: %w", err)
+	}
+	siblings := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("failed to read folder order: %w", err)
+		}
+		siblings[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("failed to read folder order: %w", err)
+	}
+	rows.Close()
+
+	if len(orderedIDs) != len(siblings) {
+		return fmt.Errorf("folder order must list all %d folders under %q", len(siblings), parentID)
+	}
+	seen := make(map[string]bool, len(orderedIDs))
+	for _, id := range orderedIDs {
+		if !siblings[id] {
+			return fmt.Errorf("folder %q is not under %q", id, parentID)
+		}
+		if seen[id] {
+			return fmt.Errorf("folder order repeats %q", id)
+		}
+		seen[id] = true
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare("UPDATE folders SET sort_order = ? WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for i, id := range orderedIDs {
+		if _, err := stmt.Exec(i, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // RenameFolder updates a folder's display name.

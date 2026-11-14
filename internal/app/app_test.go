@@ -523,6 +523,81 @@ func TestFolderContextMenuCreatesSubfolderUnderFolder(t *testing.T) {
 	}
 }
 
+func TestDraggingFolderReordersSiblings(t *testing.T) {
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
+	mgr := core.NewLibraryManager()
+	t.Cleanup(func() { _ = mgr.CloseLibrary() })
+	if _, err := mgr.CreateLibrary(t.TempDir(), "FolderOrderLib"); err != nil {
+		t.Fatalf("create library: %v", err)
+	}
+	svc := core.NewService(mgr)
+	first, err := svc.CreateFolder("AAA", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.CreateFolder("BBB", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := svc.CreateFolder("Child", first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lib, err := svc.GetActiveLibrary()
+	if err != nil || lib == nil {
+		t.Fatalf("active library = %v, err=%v", lib, err)
+	}
+	folders, err := svc.GetFolders()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a := New(svc)
+	a.library = lib
+	a.folders = folders
+	a.prefs.SidebarOpen = true
+	a.prefs.InspectorOpen = false
+	a.stats = core.WorkspaceStats{}
+	a.tags = nil
+	a.trashCount = 0
+	tester := ui.NewTester(a.viewMain, 900, 700)
+	tester.Frame()
+
+	src, ok := tester.Find("AAA")
+	if !ok {
+		t.Fatal("source folder row missing")
+	}
+	dst, ok := tester.Find("BBB")
+	if !ok {
+		t.Fatal("target folder row missing")
+	}
+	tester.Press(src.X+src.W/2, src.Y+src.H/2)
+	for k := 1; k <= 4; k++ {
+		f := float32(k) / 4
+		tester.Move(src.X+src.W/2+(dst.X+src.W/2-(src.X+src.W/2))*f, src.Y+src.H/2+(dst.Y+src.H/2-(src.Y+src.H/2))*f)
+	}
+	tester.Release(dst.X+dst.W/2, dst.Y+dst.H/2)
+
+	folders, err = svc.GetFolders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(folders) != 2 || folders[0].ID != second.ID || folders[1].ID != first.ID {
+		t.Fatalf("root order after drag = %v, want BBB,AAA", folderNameList(folders))
+	}
+	if len(folders[1].Children) != 1 || folders[1].Children[0].ID != child.ID {
+		t.Fatalf("child folder moved with the wrong parent: %v", folderNameList(folders[1].Children))
+	}
+}
+
+func folderNameList(folders []core.Folder) []string {
+	names := make([]string, len(folders))
+	for i := range folders {
+		names[i] = folders[i].Name
+	}
+	return names
+}
+
 func TestClearWorkspaceSelectionResetsInspector(t *testing.T) {
 	a := seededApp(t)
 	a.activeItem = &a.items[0]

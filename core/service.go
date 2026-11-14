@@ -388,6 +388,14 @@ func (s *Service) CreateFolder(name string, parentID string) (*Folder, error) {
 	return s.mgr.CreateFolder(name, parentID)
 }
 
+// SetFolderOrder updates the sibling order under one parent folder.
+func (s *Service) SetFolderOrder(parentID string, orderedIDs []string) error {
+	if s.mgr == nil {
+		return ErrCoreNotInitialized
+	}
+	return s.mgr.SetFolderOrder(parentID, orderedIDs)
+}
+
 func (s *Service) RenameFolder(id string, name string) error {
 	if s.mgr == nil {
 		return ErrCoreNotInitialized

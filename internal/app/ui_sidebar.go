@@ -91,13 +91,18 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 		paddingEnd += 3
 	}
 	b := ui.ButtonBase(c.Key("folder-" + f.ID)).FillWidth().Height(28).PaddingStart(float32(8 + depth*14)).PaddingEnd(paddingEnd).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(6)
-	// Accept items dragged from the gallery: dropping classifies them into this
-	// folder instead of leaving the native file drop to re-import them.
-	_, dropOver := ui.DragOver[itemDrag](b)
+	b.Drag(sidebarDrag{FolderID: f.ID, ParentID: f.ParentID})
+	// A folder row takes two kinds of in-app drags: items to classify, and
+	// sibling folders to reorder. The item payload also drives the existing
+	// drop highlight; a folder drag shows an insertion line instead.
+	dragged, dropOver := ui.DragOver[sidebarDrag](b)
+	itemDropOver := dropOver && len(dragged.ItemIDs) > 0
+	folderDropOver := dropOver && dragged.FolderID != "" && dragged.FolderID != f.ID && dragged.ParentID == f.ParentID
+	dropAfter := folderDropOver && a.folderDropAfter(dragged.FolderID, f.ID)
 	bg := ui.Transparent
-	if dropOver || active {
+	if itemDropOver || active {
 		bg = p.press
-	} else if b.Hovered() {
+	} else if b.Hovered() || folderDropOver {
 		bg = p.hover
 	}
 	b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
@@ -123,14 +128,27 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 				a.expanded[f.ID] = !open
 			}
 		}
+		if folderDropOver {
+			line := ui.Box(c).Absolute().Left(4).Right(4).Height(2).Radius(1).Background(p.accent)
+			if dropAfter {
+				line.Bottom(0)
+			} else {
+				line.Top(0)
+			}
+		}
 	})
 	if b.Clicked() {
 		if f.ID != a.folderID || a.nav != NavFolder {
 			a.navigate(NavFolder, f.ID)
 		}
 	}
-	if dropped, ok := ui.Drop[itemDrag](b); ok {
-		a.addItemsToFolder([]string(dropped), f.ID)
+	if dropped, ok := ui.Drop[sidebarDrag](b); ok {
+		switch {
+		case len(dropped.ItemIDs) > 0:
+			a.addItemsToFolder(dropped.ItemIDs, f.ID)
+		case dropped.FolderID != "" && dropped.FolderID != f.ID && dropped.ParentID == f.ParentID:
+			a.reorderFolder(dropped.FolderID, f.ID)
+		}
 	}
 	b.ContextMenu(func(m *ui.Menu) {
 		if m.Item(a.t("common.rename")).Chosen() {
@@ -162,6 +180,78 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 			a.folderRow(c, children[i], depth+1)
 		}
 	}
+}
+
+// folderDropAfter reports whether a drop of draggedID onto targetID should
+// place it after the target: moving down inserts after, moving up before.
+func (a *App) folderDropAfter(draggedID, targetID string) bool {
+	dragged, ok := findFolder(a.folders, draggedID)
+	if !ok {
+		return false
+	}
+	siblings := childFolders(a.folders, dragged.ParentID)
+	from, to := -1, -1
+	for i := range siblings {
+		if siblings[i].ID == draggedID {
+			from = i
+		}
+		if siblings[i].ID == targetID {
+			to = i
+		}
+	}
+	return from >= 0 && to >= 0 && from < to
+}
+
+// reorderFolder moves draggedID next to targetID among their shared siblings
+// and persists sort_order from zero in the new order.
+func (a *App) reorderFolder(draggedID, targetID string) {
+	if a.svc == nil || draggedID == "" || targetID == "" || draggedID == targetID {
+		return
+	}
+	dragged, ok := findFolder(a.folders, draggedID)
+	if !ok {
+		return
+	}
+	siblings := childFolders(a.folders, dragged.ParentID)
+	from, to := -1, -1
+	for i := range siblings {
+		if siblings[i].ID == draggedID {
+			from = i
+		}
+		if siblings[i].ID == targetID {
+			to = i
+		}
+	}
+	if from < 0 || to < 0 {
+		return
+	}
+	next := make([]string, 0, len(siblings))
+	for _, sibling := range siblings {
+		if sibling.ID != draggedID {
+			next = append(next, sibling.ID)
+		}
+	}
+	at := -1
+	for i, id := range next {
+		if id == targetID {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return
+	}
+	if from < to {
+		at++
+	}
+	next = append(next, "")
+	copy(next[at+1:], next[at:])
+	next[at] = draggedID
+	if err := a.svc.SetFolderOrder(dragged.ParentID, next); err != nil {
+		a.showToast(err.Error())
+		return
+	}
+	a.refreshAll()
 }
 
 // folderRoots returns folders shown at the top of the sidebar tree. A folder
