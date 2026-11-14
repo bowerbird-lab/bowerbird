@@ -194,21 +194,54 @@ func (a *App) filterCriterionLabel(id string) string {
 	return a.filterCriterionTitle(id)
 }
 
+// filterCriterionIcon is the glyph shown beside a criterion's label, so the
+// pills read at a glance rather than only by their text.
+func filterCriterionIcon(id string) *ui.SVG {
+	switch id {
+	case filterCriterionType:
+		return iconShapes
+	case filterCriterionColor:
+		return iconPalette
+	case filterCriterionFolder:
+		return iconFolder
+	case filterCriterionOrientation:
+		return iconOrientation
+	case filterCriterionSize:
+		return iconSize
+	case filterCriterionURL:
+		return iconLink
+	case filterCriterionNotes:
+		return iconPencil
+	case filterCriterionRating:
+		return iconStar
+	default:
+		return iconFilter
+	}
+}
+
 func (a *App) filterCriterionButton(c *ui.Context, id string) {
 	p := a.palette(c)
 	active := a.filterCriterionActive(id)
-	btn := ui.PopoverMenuButton(c.Key("filter-pill-"+id), a.filterCriterionLabel(id), func(m *ui.Menu) {
-		a.filterCriterionMenu(m, id)
-	})
-	btn.Height(26).PaddingX(9).Radius(999).FocusRing(false).Border(1, p.hairline).Background(p.surface2)
+	btn := ui.ButtonBase(c.Key("filter-pill-"+id)).Height(26).PaddingX(9).Radius(999).FocusRing(false).AlignItems(ui.Center).Gap(5).Border(1, p.hairline).Background(p.surface2)
+	fg := p.muted
 	if active {
 		btn.Border(1, p.accent.Alpha(0.55)).Background(p.press)
+		fg = p.accent
 	}
+	btn.PopoverMenuButton(func(m *ui.Menu) {
+		a.filterCriterionMenu(m, id)
+	})
+	btn.Children(func() {
+		ui.Icon(c, filterCriterionIcon(id)).Size(13, 13).TextColor(fg)
+		ui.Text(c, a.filterCriterionLabel(id)).FontSize(12).SingleLine().TextColor(p.text)
+		ui.Icon(c, iconChevron).Size(11, 11).TextColor(p.faint)
+	})
 }
 
 func (a *App) filterManageButton(c *ui.Context) {
 	p := a.palette(c)
-	btn := ui.PopoverMenuButton(c.Key("filter-manage"), "+", func(m *ui.Menu) {
+	btn := ui.ButtonBase(c.Key("filter-manage")).Height(26).Width(26).Radius(999).FocusRing(false).AlignItems(ui.Center).Justify(ui.Center).Border(1, p.hairline).Background(p.surface2)
+	btn.PopoverMenuButton(func(m *ui.Menu) {
 		pinned := make(map[string]bool, len(a.prefs.PinnedFilters))
 		for _, id := range a.prefs.PinnedFilters {
 			pinned[id] = true
@@ -219,8 +252,10 @@ func (a *App) filterManageButton(c *ui.Context) {
 			}
 		}
 	})
-	btn.Height(26).PaddingX(9).Radius(999).FocusRing(false).Border(1, p.hairline).Background(p.surface2)
 	btn.Tooltip(a.t("filters.manageFilters"))
+	btn.Children(func() {
+		ui.Icon(c, iconPlus).Size(13, 13).TextColor(p.muted)
+	})
 }
 
 func (a *App) toggleFilterPin(id string) {
