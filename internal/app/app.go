@@ -258,6 +258,14 @@ type App struct {
 	// tagPickerQuery is the text its list filters by.
 	tagPickerItems []core.Item
 	tagPickerQuery string
+	// The color filter's picker: whether it shows, the hue and saturation a
+	// drag on its wheel is on, the color that drag would filter by, and
+	// whether one is in progress.
+	filterColorOpen  bool
+	filterColorHue   float32
+	filterColorSat   float32
+	filterColorDraft string
+	filterColorDrag  bool
 
 	// Preview and playback.
 	previewOpen       bool

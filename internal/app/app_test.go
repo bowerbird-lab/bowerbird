@@ -2039,3 +2039,151 @@ func TestRatingPreviewFollowsTheHover(t *testing.T) {
 		t.Fatalf("preview under the second star = %d, want 2", got)
 	}
 }
+
+func TestColorWheelPicksHueAndSaturation(t *testing.T) {
+	const size = float32(100)
+	cases := []struct {
+		name    string
+		x, y    float32
+		wantHue float32
+		wantSat float32
+	}{
+		{name: "top is red", x: 50, y: 0, wantHue: 0, wantSat: 1},
+		{name: "right is a quarter turn", x: 100, y: 50, wantHue: 90, wantSat: 1},
+		{name: "bottom is half a turn", x: 50, y: 100, wantHue: 180, wantSat: 1},
+		{name: "left is three quarters", x: 0, y: 50, wantHue: 270, wantSat: 1},
+		{name: "the middle is gray", x: 50, y: 50, wantHue: 0, wantSat: 0},
+		{name: "half way out is half saturated", x: 75, y: 50, wantHue: 90, wantSat: 0.5},
+	}
+	for _, tc := range cases {
+		hue, sat := wheelPick(tc.x, tc.y, size)
+		if math.Abs(float64(hue-tc.wantHue)) > 0.01 || math.Abs(float64(sat-tc.wantSat)) > 0.01 {
+			t.Errorf("%s: wheelPick(%v, %v) = (%v, %v), want (%v, %v)", tc.name, tc.x, tc.y, hue, sat, tc.wantHue, tc.wantSat)
+		}
+	}
+}
+
+func TestWheelColorRoundTrip(t *testing.T) {
+	cases := []struct {
+		hue     float32
+		r, g, b uint8
+	}{
+		{hue: 0, r: 255, g: 0, b: 0},
+		{hue: 120, r: 0, g: 255, b: 0},
+		{hue: 240, r: 0, g: 0, b: 255},
+		{hue: 60, r: 255, g: 255, b: 0},
+	}
+	for _, tc := range cases {
+		col := hsvColor(tc.hue, 1)
+		if col.R != tc.r || col.G != tc.g || col.B != tc.b {
+			t.Fatalf("hsvColor(%v, 1) = %v, want #%02X%02X%02X", tc.hue, col, tc.r, tc.g, tc.b)
+		}
+		if got := hexOfColor(col); got != fmt.Sprintf("#%02X%02X%02X", tc.r, tc.g, tc.b) {
+			t.Fatalf("hex of hue %v = %q", tc.hue, got)
+		}
+		hue, sat := colorHS(col)
+		if math.Abs(float64(hue-tc.hue)) > 0.5 || math.Abs(float64(sat-1)) > 0.01 {
+			t.Fatalf("colorHS(%v) = (%v, %v), want (%v, 1)", col, hue, sat, tc.hue)
+		}
+	}
+	// Gray has no hue and no saturation: its knob belongs in the middle.
+	if hue, sat := colorHS(ui.RGB(128, 128, 128)); hue != 0 || sat != 0 {
+		t.Fatalf("colorHS(gray) = (%v, %v), want (0, 0)", hue, sat)
+	}
+}
+
+// TestColorFilterOpensSwatchesAndWheel keeps the color criterion off the menu:
+// a click opens the picker with its swatches, its wheel and the way back to
+// every color, and that last one closes it again.
+func TestColorFilterOpensSwatchesAndWheel(t *testing.T) {
+	a := seededApp(t)
+	a.stats.TopColors = []string{"#EF4444", "#3B82F6"}
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	chip, ok := tester.Find(a.t("filters.color"))
+	if !ok {
+		t.Fatalf("no color criterion: %q", tester.Texts())
+	}
+	tester.Press(chip.X+chip.W/2, chip.Y+chip.H/2)
+	tester.Release(chip.X+chip.W/2, chip.Y+chip.H/2)
+	tester.Frame()
+	if !a.filterColorOpen {
+		t.Fatalf("the color picker did not open: %q", tester.Texts())
+	}
+	if !tester.HasText(a.t("filters.allColors")) {
+		t.Fatalf("the picker shows no way back to every color: %q", tester.Texts())
+	}
+	all, ok := tester.Find(a.t("filters.allColors"))
+	if !ok {
+		t.Fatalf("no all-colors button: %q", tester.Texts())
+	}
+	tester.Press(all.X+all.W/2, all.Y+all.H/2)
+	tester.Release(all.X+all.W/2, all.Y+all.H/2)
+	tester.Frame()
+	if a.filterColorOpen || len(a.filters.Colors) != 0 {
+		t.Fatalf("choosing every color left the picker open=%v colors=%v", a.filterColorOpen, a.filters.Colors)
+	}
+}
+
+// colorPickerWheelRect finds the wheel of the open color picker from its
+// footer: the panel is as wide as a row of swatches plus its padding, and the
+// wheel sits a gap above the hex row.
+func colorPickerWheelRect(t *testing.T, tester *ui.Tester, a *App) ui.Rect {
+	t.Helper()
+	all, ok := tester.Find(a.t("filters.allColors"))
+	if !ok {
+		t.Fatalf("the color picker is closed: %q", tester.Texts())
+	}
+	panelW := colorSwatchSize*colorSwatchesInRow + 5*4 + 28
+	panelRight := all.X + all.W + 7 + 12
+	return ui.Rect{
+		X: panelRight - panelW + 12,
+		Y: all.Y + all.H/2 - 11 - 10 - colorWheelSize,
+		W: colorWheelSize,
+		H: colorWheelSize,
+	}
+}
+
+// TestColorWheelRendersAndAppliesHues checks the wheel itself: its middle is
+// unsaturated, its right side carries the green a quarter turn gives, and a
+// press there filters by a green.
+func TestColorWheelRendersAndAppliesHues(t *testing.T) {
+	a := seededApp(t)
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	chip, ok := tester.Find(a.t("filters.color"))
+	if !ok {
+		t.Fatalf("no color criterion: %q", tester.Texts())
+	}
+	tester.Press(chip.X+chip.W/2, chip.Y+chip.H/2)
+	tester.Release(chip.X+chip.W/2, chip.Y+chip.H/2)
+	tester.Frame()
+
+	wheel := colorPickerWheelRect(t, tester, a)
+	img := tester.Image()
+	pixel := func(x, y float32) (uint8, uint8, uint8) {
+		i := int(y)*img.Stride + int(x)*4
+		return img.Pix[i], img.Pix[i+1], img.Pix[i+2]
+	}
+	if r, g, b := pixel(wheel.X+wheel.W/2, wheel.Y+wheel.H/2); r < 220 || g < 220 || b < 220 {
+		t.Fatalf("the wheel's middle is not unsaturated white: (%d,%d,%d)", r, g, b)
+	}
+	rightX := wheel.X + wheel.W - 8
+	if r, g, b := pixel(rightX, wheel.Y+wheel.H/2); g < 180 || g < r+40 || g < b+40 {
+		t.Fatalf("the wheel's right side is not green: (%d,%d,%d)", r, g, b)
+	}
+
+	// A press on the right side filters by the hue there.
+	tester.Press(rightX, wheel.Y+wheel.H/2)
+	tester.Frame()
+	tester.Release(rightX, wheel.Y+wheel.H/2)
+	tester.Frame()
+	if len(a.filters.Colors) != 1 {
+		t.Fatalf("the wheel applied no color: %v", a.filters.Colors)
+	}
+	col, err := theme.ParseColor(a.filters.Colors[0])
+	if err != nil {
+		t.Fatalf("the wheel applied %q: %v", a.filters.Colors[0], err)
+	}
+	if col.G <= col.R || col.G <= col.B {
+		t.Fatalf("the wheel applied %q, which is not green", a.filters.Colors[0])
+	}
+}

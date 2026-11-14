@@ -220,6 +220,12 @@ func filterCriterionIcon(id string) *ui.SVG {
 }
 
 func (a *App) filterCriterionButton(c *ui.Context, id string) {
+	// The color criterion shows its colors rather than their names, so it
+	// opens the swatch and wheel picker instead of a menu.
+	if id == filterCriterionColor {
+		a.filterColorButton(c)
+		return
+	}
 	p := a.palette(c)
 	active := a.filterCriterionActive(id)
 	btn := ui.ButtonBase(c.Key("filter-pill-"+id)).Height(26).PaddingX(9).Radius(999).FocusRing(false).AlignItems(ui.Center).Gap(5).Border(1, p.hairline).Background(p.surface2)
@@ -293,17 +299,6 @@ func (a *App) filterCriterionMenu(m *ui.Menu, id string) {
 			value := value
 			if m.Item(a.t("filter.type." + value)).Radio(contains(a.filters.Types, value)).Chosen() {
 				a.setTypeFilter(value)
-			}
-		}
-	case filterCriterionColor:
-		if m.Item(a.t("filters.allColors")).Radio(len(a.filters.Colors) == 0).Chosen() {
-			a.setColorFilter("")
-		}
-		for _, hex := range a.filterColorOptions() {
-			hex := hex
-			selected := len(a.filters.Colors) > 0 && strings.EqualFold(a.filters.Colors[0], hex)
-			if m.Item(strings.ToUpper(hex)).Radio(selected).Chosen() {
-				a.setColorFilter(hex)
 			}
 		}
 	case filterCriterionFolder:
