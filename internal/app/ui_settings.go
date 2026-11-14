@@ -298,30 +298,26 @@ func (a *App) setLanguage(lang string) {
 }
 
 func (a *App) settingsThemeCard(c *ui.Context) {
-	a.settingsCard(c, a.t("settings.appearance.themeTitle"), func() {
-		ui.Row(c).Gap(6).Children(func() {
-			options := []struct {
-				theme string
-				label string
-			}{
-				{core.ThemeSystem, a.t("settings.appearance.auto")},
-				{core.ThemeLight, a.t("settings.appearance.light")},
-				{core.ThemeDark, a.t("settings.appearance.dark")},
+	options := []SelectOption{
+		{Value: core.ThemeSystem, Label: a.t("settings.appearance.auto")},
+		{Value: core.ThemeLight, Label: a.t("settings.appearance.light")},
+		{Value: core.ThemeDark, Label: a.t("settings.appearance.dark")},
+	}
+	a.settingsCard(c, "", func() {
+		a.settingsRowInfo(c, a.t("settings.appearance.themeTitle"), a.t("settings.appearance.themeDescription"), func() {
+			mode, changed := a.dropdown(c, "appearance-mode", a.themeValue, options)
+			if !changed {
+				return
 			}
-			for _, opt := range options {
-				opt := opt
-				a.pillButton(c, "theme-"+opt.theme, opt.label, a.themeValue == opt.theme, func() {
-					go func() {
-						err := a.svc.SetTheme(opt.theme)
-						a.postSettings(func() {
-							if err != nil {
-								a.showToast(err.Error())
-							}
-							a.themeValue = opt.theme
-						})
-					}()
+			go func() {
+				err := a.svc.SetTheme(mode)
+				a.postSettings(func() {
+					if err != nil {
+						a.showToast(err.Error())
+					}
+					a.themeValue = mode
 				})
-			}
+			}()
 		})
 	})
 }
