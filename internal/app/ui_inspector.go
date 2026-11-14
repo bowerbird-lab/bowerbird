@@ -73,7 +73,7 @@ func (a *App) viewInspector(c *ui.Context) {
 	if bar := c.TitleBar(); bar.Right > 0 {
 		top = maxF(top, bar.Height)
 	}
-	ui.Column(c).Width(inspectorWidth).FillHeight().Background(p.sidebar).Children(func() {
+	ui.Column(c).Width(a.inspectorWidth).FillHeight().Background(p.sidebar).Children(func() {
 		ui.Row(c).Height(top).PaddingX(14).AlignItems(ui.Center).DragWindow()
 		ui.Scroll(c).Grow(1).Shrink(1).Padding(0, 14, 20, 14).Children(func() {
 			if len(a.selected) > 1 {
@@ -86,6 +86,7 @@ func (a *App) viewInspector(c *ui.Context) {
 			}
 			a.viewSingleInspector(c, *a.activeItem)
 		})
+		a.viewInspectorResizer(c)
 	})
 }
 
@@ -152,7 +153,7 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 	p := a.palette(c)
 	ui.Column(c).FillWidth().Gap(10).Children(func() {
 		// Hero thumbnail.
-		w := float32(inspectorWidth - 28)
+		w := a.inspectorWidth - 28
 		h := w * 0.66
 		if item.Width > 0 && item.Height > 0 {
 			h = w * float32(item.Height) / float32(item.Width)
@@ -513,8 +514,8 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 	stacked := orderedItems[len(orderedItems)-stackCount:]
 	ui.Column(c).FillWidth().Gap(14).Children(func() {
 		// 堆叠层叠效果: 固定容器宽高并在水平/垂直中心对齐
-		const areaW = inspectorWidth - 28 // 扣除 Scroll padding (14*2)
 		const areaH = float32(160)
+		areaW := a.inspectorWidth - 28 // 扣除 Scroll padding (14*2)
 		ui.Box(c).Size(areaW, areaH).Children(func() {
 			stackPresets := []struct {
 				rotate float32

@@ -21,7 +21,7 @@ const (
 func (a *App) viewSidebar(c *ui.Context) {
 	p := a.palette(c)
 	a.dropFolderID = ""
-	sidebar := ui.Column(c).Width(sidebarWidth).FillHeight()
+	sidebar := ui.Column(c).Width(a.sidebarWidth).FillHeight()
 	a.applySidebarSurface(c, sidebar)
 	sidebar.Children(func() {
 		// The sidebar header matches the main header's first row, so the

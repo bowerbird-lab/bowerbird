@@ -29,7 +29,7 @@ func TestLibraryInspectorOpensTheIconPicker(t *testing.T) {
 	a.activeItem = nil
 	a.activeItemID = ""
 	a.selected = map[string]bool{}
-	tester := ui.NewTester(a.viewInspector, inspectorWidth, 800)
+	tester := ui.NewTester(a.viewInspector, int(defaultInspectorWidth), 800)
 	tester.Frame()
 
 	name, ok := tester.Find("Library")
@@ -68,7 +68,7 @@ func TestLibraryInspectorOffersResetForACustomIcon(t *testing.T) {
 	_ = f.Close()
 	a.library.Icon = core.LibraryIconCustom
 
-	tester := ui.NewTester(a.viewInspector, inspectorWidth, 800)
+	tester := ui.NewTester(a.viewInspector, int(defaultInspectorWidth), 800)
 	tester.Frame()
 	if a.libraryIconBitmap(a.library) == nil {
 		t.Fatal("custom icon was not decoded from the library folder")
@@ -125,7 +125,7 @@ func TestLibraryIconPickerScrollsSideways(t *testing.T) {
 	a.activeItem = nil
 	a.activeItemID = ""
 	a.selected = map[string]bool{}
-	tester := ui.NewTester(a.viewInspector, inspectorWidth, 800)
+	tester := ui.NewTester(a.viewInspector, int(defaultInspectorWidth), 800)
 	tester.Frame()
 
 	name, ok := tester.Find("Library")

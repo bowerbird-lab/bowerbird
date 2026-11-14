@@ -13,8 +13,6 @@ import (
 )
 
 const (
-	sidebarWidth          = 224
-	inspectorWidth        = 304
 	headerHeight          = 52
 	headerSecondRowHeight = 38
 	mainHeaderHeight      = headerHeight + headerSecondRowHeight
@@ -26,6 +24,24 @@ const (
 	// that draw window buttons on the right (Windows, Linux) keep the full
 	// title bar height so the buttons never sit on top of the content.
 	inspectorTopHeight = 20
+)
+
+// Side panels' widths in DIPs: the defaults, and the range their seam can
+// drag. resizerGrip is how much of the seam either side of a panel takes the
+// pointer; the divider itself is one DIP, the rest overflows the panels so the
+// pointer need not hit a hairline.
+const (
+	defaultSidebarWidth   float32 = 224
+	defaultInspectorWidth float32 = 304
+	minSidebarWidth       float32 = 160
+	maxSidebarWidth       float32 = 420
+	minInspectorWidth     float32 = 240
+	maxInspectorWidth     float32 = 560
+	resizerGrip           float32 = 6
+	// mainMinWidth is the workspace width the side panels leave before they
+	// give way, when the window is too narrow for both.
+	mainMinWidth      float32 = 500
+	panelDividerWidth float32 = 1
 )
 
 // palette is the app's semantic colour set, resolved from a theme JSON. It is

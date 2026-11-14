@@ -70,7 +70,7 @@ func (a *App) viewSettings(c *ui.Context) {
 		// Section rail. Its header matches the main window's sidebar header:
 		// the title sits right of the traffic lights, on the same line and
 		// with the same inset as the sidebar toggle there.
-		rail := ui.Column(c).Width(sidebarWidth).FillHeight()
+		rail := ui.Column(c).Width(defaultSidebarWidth).FillHeight()
 		a.applySidebarSurface(c, rail)
 		rail.Children(func() {
 			ui.Row(c).Height(headerHeight).FillWidth().Padding(0, 8, 0, bar.Left+gallerySidePadding).AlignItems(ui.Center).DragWindow().Children(func() {

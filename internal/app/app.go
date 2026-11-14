@@ -68,6 +68,8 @@ type Prefs struct {
 	SystemAccent    bool     `json:"systemAccent"`
 	InspectorOpen   bool     `json:"inspectorOpen"`
 	SidebarOpen     bool     `json:"sidebarOpen"`
+	SidebarWidth    float64  `json:"sidebarWidth"`
+	InspectorWidth  float64  `json:"inspectorWidth"`
 	ShowNames       bool     `json:"showNames"`
 	ShowExt         bool     `json:"showExt"`
 	LayoutMode      string   `json:"layoutMode"`
@@ -88,6 +90,8 @@ func defaultPrefs() Prefs {
 		SystemAccent:    true,
 		InspectorOpen:   true,
 		SidebarOpen:     true,
+		SidebarWidth:    float64(defaultSidebarWidth),
+		InspectorWidth:  float64(defaultInspectorWidth),
 		ShowNames:       true,
 		ShowExt:         true,
 		LayoutMode:      "justified",
@@ -176,11 +180,22 @@ type App struct {
 	inspectSeq      uint64
 
 	// Gallery layout.
-	rows          [][]galleryCell
-	rowHeight     int
-	galleryList   ui.ListState
-	galleryScroll ui.ScrollState
-	scrollTop     float32
+	rows      [][]galleryCell
+	rowHeight int
+	// Side panels' widths in DIPs, kept in the prefs so they survive a
+	// restart. resizingSidebar and resizingInspector save the pref once the
+	// pointer lets the seam go instead of on every dragged frame.
+	sidebarWidth   float32
+	inspectorWidth float32
+	// sidebarLimit and inspectorLimit cap each seam for the current window,
+	// so a drag cannot squeeze the workspace under mainMinWidth.
+	sidebarLimit      float32
+	inspectorLimit    float32
+	resizingSidebar   bool
+	resizingInspector bool
+	galleryList       ui.ListState
+	galleryScroll     ui.ScrollState
+	scrollTop         float32
 
 	// Gallery rubber-band selection.
 	marqueeActive   bool
@@ -386,6 +401,10 @@ func New(svc *core.Service) *App {
 		selectedAnchor: -1,
 		sortOrder:      "desc",
 		rowHeight:      190,
+		sidebarWidth:   defaultSidebarWidth,
+		inspectorWidth: defaultInspectorWidth,
+		sidebarLimit:   maxSidebarWidth,
+		inspectorLimit: maxInspectorWidth,
 		thumbs:         newThumbCache(),
 		thumbJobs:      newThumbJobQueue(),
 		libIcons:       map[string]*ui.Bitmap{},
@@ -1022,10 +1041,10 @@ func (a *App) rebuildRows() {
 	// Remove chrome: sidebar, inspector and padding.
 	width -= 24
 	if a.prefs.SidebarOpen {
-		width -= sidebarWidth
+		width -= int(a.sidebarWidth)
 	}
 	if a.inspectorVisible() {
-		width -= inspectorWidth
+		width -= int(a.inspectorWidth)
 	}
 	if width < 240 {
 		width = 240
@@ -1262,6 +1281,19 @@ func (a *App) loadPrefs() {
 	a.prefs = p
 	a.sortOrder = p.SortOrder
 	a.rowHeight = int(p.RowHeight)
+	a.sidebarWidth = clampPanelWidth(float32(p.SidebarWidth), minSidebarWidth, maxSidebarWidth, defaultSidebarWidth)
+	a.inspectorWidth = clampPanelWidth(float32(p.InspectorWidth), minInspectorWidth, maxInspectorWidth, defaultInspectorWidth)
+	a.prefs.SidebarWidth = float64(a.sidebarWidth)
+	a.prefs.InspectorWidth = float64(a.inspectorWidth)
+}
+
+// clampPanelWidth keeps a persisted side-panel width inside the range its seam
+// can drag, so a hand-edited or stale pref cannot swallow the workspace.
+func clampPanelWidth(w, lo, hi, def float32) float32 {
+	if w <= 0 {
+		return def
+	}
+	return minF(maxF(w, lo), hi)
 }
 
 // LogLines returns the filtered log rows, newest last.

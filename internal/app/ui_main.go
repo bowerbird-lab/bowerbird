@@ -15,6 +15,12 @@ import (
 // sibling roots.
 func (a *App) viewMain(c *ui.Context) {
 	p := a.palette(c)
+	// Keep the workspace's minimum by trimming the panels on a window too
+	// narrow for them, then cap the seams to what is left.
+	if w, _ := c.Size(); w > 0 {
+		a.fitPanelWidths(w)
+		a.updatePanelLimits(w)
+	}
 	a.handleMainShortcuts(c)
 	a.applyVibrancyRoot(c)
 	root := ui.Box(c).Fill()
@@ -34,20 +40,23 @@ func (a *App) viewMain(c *ui.Context) {
 							a.viewPreviewBody(c, a.items[a.previewIndex])
 						}
 					})
-					return
+				} else {
+					a.mainBodySurface(c, mainHeaderHeight, func() {
+						if a.library == nil {
+							a.emptyState(c, iconLibrary, a.t("app.noActiveLibrary"), a.t("app.openSetup"))
+							return
+						}
+						if a.nav == NavTags {
+							a.viewTags(c)
+							return
+						}
+						a.viewGallery(c)
+					})
+					a.viewHeader(c)
 				}
-				a.mainBodySurface(c, mainHeaderHeight, func() {
-					if a.library == nil {
-						a.emptyState(c, iconLibrary, a.t("app.noActiveLibrary"), a.t("app.openSetup"))
-						return
-					}
-					if a.nav == NavTags {
-						a.viewTags(c)
-						return
-					}
-					a.viewGallery(c)
-				})
-				a.viewHeader(c)
+				if a.prefs.SidebarOpen {
+					a.viewSidebarResizer(c)
+				}
 			})
 			if a.inspectorVisible() {
 				ui.Box(c).Width(1).FillHeight().Background(p.hairline)
@@ -300,6 +309,132 @@ func (a *App) setRowHeight(h int) {
 	a.prefs.RowHeight = float64(h)
 	a.savePrefs()
 	a.rebuildRows()
+}
+
+// setSidebarWidth and setInspectorWidth clamp a side panel to the range its
+// seam can drag and keep the new width in the prefs, which the drag saves once
+// the pointer lets go.
+func (a *App) setSidebarWidth(w float32) {
+	w = minF(maxF(w, minSidebarWidth), a.sidebarLimit)
+	if w == a.sidebarWidth {
+		return
+	}
+	a.sidebarWidth = w
+	a.prefs.SidebarWidth = float64(w)
+}
+
+func (a *App) setInspectorWidth(w float32) {
+	w = minF(maxF(w, minInspectorWidth), a.inspectorLimit)
+	if w == a.inspectorWidth {
+		return
+	}
+	a.inspectorWidth = w
+	a.prefs.InspectorWidth = float64(w)
+}
+
+// workspaceWidth is the main column's width in a window vw wide.
+func (a *App) workspaceWidth(vw float32) float32 {
+	w := vw
+	if a.prefs.SidebarOpen {
+		w -= a.sidebarWidth + panelDividerWidth
+	}
+	if a.inspectorVisible() {
+		w -= a.inspectorWidth + panelDividerWidth
+	}
+	return w
+}
+
+// fitPanelWidths trims the side panels when the window is too narrow to leave
+// the workspace its minimum, the inspector giving way before the sidebar. A
+// panel never goes below its own minimum, so a window smaller than all three
+// minima leaves the workspace that much narrower.
+func (a *App) fitPanelWidths(vw float32) {
+	main := a.workspaceWidth(vw)
+	if main >= mainMinWidth {
+		return
+	}
+	if a.inspectorVisible() {
+		if give := minF(a.inspectorWidth-minInspectorWidth, mainMinWidth-main); give > 0 {
+			a.inspectorWidth -= give
+			a.prefs.InspectorWidth = float64(a.inspectorWidth)
+			main += give
+		}
+	}
+	if main < mainMinWidth && a.prefs.SidebarOpen {
+		if give := minF(a.sidebarWidth-minSidebarWidth, mainMinWidth-main); give > 0 {
+			a.sidebarWidth -= give
+			a.prefs.SidebarWidth = float64(a.sidebarWidth)
+		}
+	}
+}
+
+// updatePanelLimits caps each seam so dragging it cannot squeeze the workspace
+// under mainMinWidth. The other panel keeps the width it has.
+func (a *App) updatePanelLimits(vw float32) {
+	a.sidebarLimit, a.inspectorLimit = maxSidebarWidth, maxInspectorWidth
+	if vw <= 0 {
+		return
+	}
+	sidebarRoom := vw - mainMinWidth - panelDividerWidth
+	if a.inspectorVisible() {
+		sidebarRoom -= a.inspectorWidth + panelDividerWidth
+	}
+	a.sidebarLimit = maxF(minSidebarWidth, minF(maxSidebarWidth, sidebarRoom))
+
+	inspectorRoom := vw - mainMinWidth - panelDividerWidth
+	if a.prefs.SidebarOpen {
+		inspectorRoom -= a.sidebarWidth + panelDividerWidth
+	}
+	a.inspectorLimit = maxF(minInspectorWidth, minF(maxInspectorWidth, inspectorRoom))
+}
+
+// panelResizeHandle is the strip over a panel seam. It is built inside the
+// panel that comes later in the layout, so it paints and takes the pointer over
+// the one before it; the divider sits two DIPs in from its left edge.
+func (a *App) panelResizeHandle(c *ui.Context, key string) ui.Element {
+	return ui.Box(c.Key(key)).Absolute().Left(-resizerGrip / 2).Top(0).Width(resizerGrip).
+		FillHeight().Cursor(ui.CursorResizeEW)
+}
+
+// viewSidebarResizer lets the pointer drag the sidebar's edge. Built inside the
+// workspace column, after its content, so the grip wins over both panels.
+func (a *App) viewSidebarResizer(c *ui.Context) {
+	a.panelSeam(c, "sidebar-resizer", &a.resizingSidebar, func(dx float32) {
+		a.setSidebarWidth(a.sidebarWidth + dx)
+	})
+}
+
+// viewInspectorResizer lets the pointer drag the inspector's edge; dragging
+// left widens the panel on the right.
+func (a *App) viewInspectorResizer(c *ui.Context) {
+	a.panelSeam(c, "inspector-resizer", &a.resizingInspector, func(dx float32) {
+		a.setInspectorWidth(a.inspectorWidth - dx)
+	})
+}
+
+// panelSeam applies a drag on a panel edge; resizing records the drag so the
+// width is saved once, when the pointer lets go.
+func (a *App) panelSeam(c *ui.Context, key string, resizing *bool, apply func(dx float32)) {
+	p := a.palette(c)
+	h := a.panelResizeHandle(c, key)
+	dx, _, held := h.Dragged()
+	if held {
+		if dx != 0 {
+			*resizing = true
+			apply(dx)
+			// The panes were built with the old width, so ask for the frame
+			// that paints the new one even if the pointer stops here.
+			c.After(0)
+		}
+	} else if *resizing {
+		*resizing = false
+		a.savePrefs()
+	}
+	if held || h.Hovered() {
+		h.Draw(func(pt *ui.Painter, r ui.Rect) {
+			pt.Fill(ui.Rect{X: r.X + resizerGrip/2 - 1, Y: r.Y, W: 1, H: r.H}, p.accent, 0)
+		})
+	}
 }
 
 func (a *App) clearSelection() {

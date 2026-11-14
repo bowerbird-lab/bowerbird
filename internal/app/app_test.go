@@ -24,6 +24,8 @@ func seededApp(t *testing.T) *App {
 	a.prefs = defaultPrefs()
 	a.prefs.InspectorOpen = true
 	a.prefs.SidebarOpen = true
+	a.sidebarWidth = defaultSidebarWidth
+	a.inspectorWidth = defaultInspectorWidth
 	a.rowHeight = int(a.prefs.RowHeight)
 	a.sortOrder = "desc"
 	a.library = &core.LibraryInfo{ID: "lib", Name: "Library", Path: t.TempDir()}
@@ -85,7 +87,7 @@ func TestInspectorShowsLibraryInfoWhenSelectionEmpty(t *testing.T) {
 	a.activeItem = nil
 	a.activeItemID = ""
 	a.selected = map[string]bool{}
-	tester := ui.NewTester(a.viewInspector, inspectorWidth, 800)
+	tester := ui.NewTester(a.viewInspector, int(defaultInspectorWidth), 800)
 	if tester.FramePending() {
 		t.Fatal("library inspector keeps animating")
 	}
@@ -123,7 +125,7 @@ func TestInspectorHasCompactTopStrip(t *testing.T) {
 	a.activeItem = nil
 	a.activeItemID = ""
 	a.selected = map[string]bool{}
-	tester := ui.NewTester(a.viewInspector, inspectorWidth, 800)
+	tester := ui.NewTester(a.viewInspector, int(defaultInspectorWidth), 800)
 	tester.SetTitleBar(ui.TitleBar{Height: 52, Left: 80})
 	tester.Frame()
 	mac, ok := tester.Find("ArchiveLib")
@@ -1171,6 +1173,97 @@ func TestHeaderRightPaddingOnInspectorCollapsed(t *testing.T) {
 
 	if tester.FramePending() {
 		t.Fatal("unexpected pending frame after rendering header with collapsed inspector")
+	}
+}
+
+func TestSidebarSeamDragsItsWidth(t *testing.T) {
+	a := seededApp(t)
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.Frame()
+
+	start := a.sidebarWidth
+	seam := start + 0.5
+	tester.Press(seam, 300)
+	tester.Move(seam+48, 300)
+	tester.Release(seam+48, 300)
+	tester.Frame()
+
+	if got, want := a.sidebarWidth, start+48; math.Abs(float64(got-want)) > 1 {
+		t.Fatalf("sidebar width after a 48px drag = %v, want %v", got, want)
+	}
+	if a.prefs.SidebarWidth != float64(a.sidebarWidth) {
+		t.Fatalf("sidebar pref = %v, want the dragged %v", a.prefs.SidebarWidth, a.sidebarWidth)
+	}
+
+	// A drag past the minimum stops there instead of hiding the sidebar.
+	seam = a.sidebarWidth + 0.5
+	tester.Press(seam, 300)
+	tester.Move(seam-600, 300)
+	tester.Release(seam-600, 300)
+	tester.Frame()
+	if a.sidebarWidth != minSidebarWidth {
+		t.Fatalf("sidebar width after a drag past the minimum = %v, want %v", a.sidebarWidth, minSidebarWidth)
+	}
+
+	// Dragging right stops at the panel's own maximum.
+	seam = a.sidebarWidth + 0.5
+	tester.Press(seam, 300)
+	tester.Move(1279, 300)
+	tester.Release(1279, 300)
+	tester.Frame()
+	if a.sidebarWidth != maxSidebarWidth {
+		t.Fatalf("sidebar width after a drag past the maximum = %v, want %v", a.sidebarWidth, maxSidebarWidth)
+	}
+	if got := a.workspaceWidth(1280); got < mainMinWidth-1 {
+		t.Fatalf("workspace width after the sidebar drag = %v, want at least %v", got, mainMinWidth)
+	}
+}
+
+func TestInspectorSeamDragsItsWidth(t *testing.T) {
+	a := seededApp(t)
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.Frame()
+
+	start := a.inspectorWidth
+	seam := 1280 - start - 0.5
+	tester.Press(seam, 300)
+	tester.Move(seam-40, 300)
+	tester.Release(seam-40, 300)
+	tester.Frame()
+
+	if got, want := a.inspectorWidth, start+40; math.Abs(float64(got-want)) > 1 {
+		t.Fatalf("inspector width after dragging its seam left = %v, want %v", got, want)
+	}
+	if a.prefs.InspectorWidth != float64(a.inspectorWidth) {
+		t.Fatalf("inspector pref = %v, want the dragged %v", a.prefs.InspectorWidth, a.inspectorWidth)
+	}
+
+	// Dragging left stops where the workspace meets its own minimum.
+	seam = 1280 - a.inspectorWidth - 0.5
+	tester.Press(seam, 300)
+	tester.Move(1, 300)
+	tester.Release(1, 300)
+	tester.Frame()
+	if got := a.workspaceWidth(1280); math.Abs(float64(got-mainMinWidth)) > 1 {
+		t.Fatalf("workspace width after a drag past its minimum = %v, want %v", got, mainMinWidth)
+	}
+}
+
+func TestNarrowWindowTrimsPanelsForWorkspace(t *testing.T) {
+	a := seededApp(t)
+	a.sidebarWidth = maxSidebarWidth
+	a.inspectorWidth = maxInspectorWidth
+	a.prefs.SidebarWidth = float64(a.sidebarWidth)
+	a.prefs.InspectorWidth = float64(a.inspectorWidth)
+
+	tester := ui.NewTester(a.viewMain, 1000, 800)
+	tester.Frame()
+
+	if got := a.workspaceWidth(1000); got < mainMinWidth-1 {
+		t.Fatalf("workspace width in a 1000px window = %v, want at least %v", got, mainMinWidth)
+	}
+	if a.inspectorWidth != minInspectorWidth {
+		t.Fatalf("inspector width = %v, want the minimum %v after giving way", a.inspectorWidth, minInspectorWidth)
 	}
 }
 
