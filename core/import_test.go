@@ -309,3 +309,87 @@ func TestNativeDropSkipsLooseFileInActiveLibrary(t *testing.T) {
 		t.Fatalf("loose library file was not skipped: %+v", result)
 	}
 }
+
+type dropImportHost struct {
+	core.Host
+	finished chan error
+}
+
+func (h *dropImportHost) Emit(name string, payload any) {
+	switch name {
+	case "import-completed":
+		h.finished <- nil
+	case "import-error":
+		h.finished <- fmt.Errorf("%v", payload)
+	}
+}
+
+func TestNativeDropImportsIntoFolder(t *testing.T) {
+	mgr := newRaceLibrary(t, "FolderDrop")
+	svc := core.NewService(mgr)
+	target, err := mgr.CreateFolder("Target", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &dropImportHost{finished: make(chan error, 1)}
+	core.AttachHost(svc, host)
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "asset.txt")
+	subdir := filepath.Join(dir, "Nested")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		file:                                "file dropped into the open folder",
+		filepath.Join(subdir, "nested.txt"): "file inside a dropped directory",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := svc.HandleNativeDropWithResult([]string{file, subdir}, "subfolder", target.ID)
+	if err != nil || !result.Importing {
+		t.Fatalf("drop = %+v, err=%v", result, err)
+	}
+	select {
+	case err := <-host.finished:
+		if err != nil {
+			t.Fatalf("import failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("folder import did not finish")
+	}
+
+	items, err := mgr.GetItems("", "desc")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items = %v, err=%v", items, err)
+	}
+	folders, err := mgr.GetFolders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nestedID string
+	for _, folder := range folders {
+		if folder.ID == target.ID {
+			for _, child := range folder.Children {
+				if child.Name == "Nested" {
+					nestedID = child.ID
+				}
+			}
+		}
+	}
+	if nestedID == "" {
+		t.Fatal("dropped directory was not created under the target folder")
+	}
+	for _, item := range items {
+		want := target.ID
+		if item.Name == "nested" {
+			want = nestedID
+		}
+		if len(item.Folders) != 1 || item.Folders[0] != want {
+			t.Fatalf("item %q folders = %v, want [%s]", item.Name, item.Folders, want)
+		}
+	}
+}

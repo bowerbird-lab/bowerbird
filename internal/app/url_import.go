@@ -28,8 +28,7 @@ func (a *App) attachURLDropTarget(el ui.Element) {
 		// Keep the drop target unobtrusive; the toast reports the result.
 	}
 	if drop, ok := ui.DropData(el, opts); ok {
-		folder := a.dropFolderID
-		a.dropFolderID = ""
+		folder := a.takeDropFolder()
 		// Finder/Explorer drags also advertise a URI list. Route their file
 		// URLs through the normal native-drop path instead of swallowing them.
 		if files, err := drop.Data.Files(); err == nil && len(files) > 0 {
@@ -41,6 +40,17 @@ func (a *App) attachURLDropTarget(el ui.Element) {
 			a.handleURLDropsToFolder(urls, referer, folder)
 		}
 	}
+}
+
+// takeDropFolder captures the destination before an asynchronous import starts.
+// A hovered folder takes precedence over the folder currently being viewed.
+func (a *App) takeDropFolder() string {
+	folder := a.dropFolderID
+	a.dropFolderID = ""
+	if folder == "" && a.nav == NavFolder {
+		folder = a.folderID
+	}
+	return folder
 }
 
 // urlsFromDropData extracts import URLs from a browser drag. The HTML
@@ -199,7 +209,7 @@ func (a *App) handleDroppedFiles(paths []string, folder string) {
 			err    error
 		)
 		if folder != "" {
-			result, err = a.svc.HandleNativeDropWithResult(paths, "folder", folder)
+			result, err = a.svc.HandleNativeDropWithResult(paths, "subfolder", folder)
 		} else {
 			result, err = a.svc.HandleNativeDropWithResult(paths, "", "")
 		}
@@ -243,8 +253,6 @@ func (a *App) importURL(raw string, referer string, folderID string) (*core.Item
 	}
 	if folderID != "" {
 		opts.FolderIDs = []string{folderID}
-	} else if a.nav == NavFolder && a.folderID != "" {
-		opts.FolderIDs = []string{a.folderID}
 	}
 
 	candidates := []string{raw}

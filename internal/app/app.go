@@ -1257,8 +1257,7 @@ func (a *App) HandleDrop(paths []string) {
 		return
 	}
 	urls, files := splitDroppedPaths(paths)
-	folder := a.dropFolderID
-	a.dropFolderID = ""
+	folder := a.takeDropFolder()
 	if len(urls) > 0 {
 		a.handleURLDropsToFolder(urls, "", folder)
 	}
