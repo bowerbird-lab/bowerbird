@@ -411,6 +411,12 @@ func (a *App) Render(cx *core.Scope) core.Node {
 					Background: core.RGB(0x000000), Color: core.RGB(0xffffff),
 				}
 			}
+			if a.screen.Get() == screenGallery {
+				return core.Style{
+					Width: core.Pct(100), Height: core.Pct(100),
+					Background: colors.Background(), Color: colors.Text(),
+				}
+			}
 			return core.Style{
 				Width: core.Pct(100), Height: core.Pct(100),
 				Background: colors.Background(), Color: colors.Text(),

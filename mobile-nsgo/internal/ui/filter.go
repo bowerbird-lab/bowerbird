@@ -147,20 +147,20 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 		return core.View{Style: core.Style{Gap: 14, Padding: core.Edges{Bottom: 16}}, Children: sections}
 	})
 
-	return nsui.Sheet{
+	return a.bottomDrawer(cx, bottomDrawerSpec{
 		Open:    func() bool { return a.filterOpen.Get() },
 		OnClose: func() { a.filterOpen.Set(false) },
-		Children: []core.Node{
-			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
-				core.Text{Content: "筛选条件", Style: nsui.TypeTitle.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
-				nsui.Button{Text: "重置", Variant: nsui.ButtonGhost, OnPress: func() {
-					a.resetFilterDraft()
-				}},
-				nsui.Button{Text: "应用", OnPress: func() {
-					a.applyFilterDraft(cx)
-					a.filterOpen.Set(false)
-				}, TestID: "filter.apply"},
+		Title:   "筛选条件",
+		Header: []core.Node{
+			nsui.Button{Text: "重置", Variant: nsui.ButtonGhost, OnPress: func() {
+				a.resetFilterDraft()
 			}},
+			nsui.Button{Text: "应用", OnPress: func() {
+				a.applyFilterDraft(cx)
+				a.filterOpen.Set(false)
+			}, TestID: "filter.apply"},
+		},
+		Children: []core.Node{
 			core.Show{When: func() bool { return !a.client.QuerySupported() }, Then: func(cx *core.Scope) core.Node {
 				return core.Text{
 					Content:  "旧版桌面端不支持大小/评分/链接/备注筛选，选择这些条件时将提示升级。",
@@ -173,7 +173,7 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 				Children: []core.Node{dynamicBody},
 			},
 		},
-	}
+	})
 }
 
 func (a *App) openFilterSheet(target string) {

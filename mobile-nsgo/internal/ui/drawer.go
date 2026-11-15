@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 
+	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
 	nsui "github.com/nsgo-dev/nsgo/ui"
@@ -27,43 +28,91 @@ type visibleFolderRow struct {
 	depth  int
 }
 
-func (a *App) flattenVisibleFolders() []visibleFolderRow {
-	var rows []visibleFolderRow
-	var visit func(f model.Folder, depth int)
-	visit = func(f model.Folder, depth int) {
-		rows = append(rows, visibleFolderRow{folder: f, depth: depth})
-		if len(f.Children) == 0 || !a.expandedFolders[f.ID] {
-			return
-		}
-		for _, child := range f.Children {
-			visit(child, depth+1)
-		}
-	}
-	for _, root := range a.folders {
-		visit(root, 0)
-	}
-	return rows
+type bottomDrawerSpec struct {
+	Open     func() bool
+	OnClose  func()
+	Title    string
+	Header   []core.Node
+	Children []core.Node
+	TestID   string
 }
 
-func (a *App) findFolderName(id string) string {
-	var walk func(list []model.Folder) string
-	walk = func(list []model.Folder) string {
-		for _, f := range list {
-			if f.ID == id {
-				return f.Name
-			}
-			if name := walk(f.Children); name != "" {
-				return name
-			}
-		}
-		return ""
-	}
-	return walk(a.folders)
-}
-
-func (a *App) drawerSheet(cx *core.Scope) core.Node {
+// bottomDrawer is the unified bottom drawer used across menu, libraries,
+// filters, quick preview, batch actions and metadata. CloseOnSwipe is off so
+// vertical scroll views inside the drawer always scroll smoothly.
+func (a *App) bottomDrawer(cx *core.Scope, s bottomDrawerSpec) core.Node {
 	colors := nsui.ColorsOf(cx)
-	_ = a.rev.Get()
+	var body []core.Node
+	body = append(body, core.View{
+		Style: core.Style{
+			Width: core.Pt(38), Height: core.Pt(4), CornerRadius: 2,
+			AlignSelf: core.AlignCenter, Background: colors.Border(),
+		},
+	})
+	if s.Title != "" || len(s.Header) > 0 {
+		headChildren := make([]core.Node, 0, 1+len(s.Header))
+		if s.Title != "" {
+			headChildren = append(headChildren, core.Text{
+				Content: s.Title,
+				Style:   nsui.TypeTitle.Merge(core.Style{Color: colors.Text(), FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}),
+			})
+		}
+		headChildren = append(headChildren, s.Header...)
+		body = append(body, core.View{
+			Style:    core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8},
+			Children: headChildren,
+		})
+	}
+	body = append(body, s.Children...)
+
+	return base.Sheet{
+		Open: s.Open,
+		OnOpenChange: func(open bool, _ base.Reason) {
+			if !open && s.OnClose != nil {
+				s.OnClose()
+			}
+		},
+		CloseOnSwipe:  false,
+		BackdropStyle: core.Style{Background: core.RGBA(0x000000, 0.42)},
+		PopupStyleFunc: func() core.Style {
+			safe := cx.Env().SafeArea()
+			maxH := cx.Env().Window().Height * 0.86
+			if maxH <= 0 {
+				maxH = 640
+			}
+			return core.Style{
+				Gap:         12,
+				MaxHeight:   core.Pt(maxH),
+				Padding:     core.Edges{Top: 10, Right: 16, Bottom: safe.Bottom + 16, Left: 16},
+				CornerRadii: core.Corners{TopLeft: 20, TopRight: 20},
+				Background:  colors.Surface(),
+			}
+		},
+		Children: body,
+		Label:    s.Title,
+		TestID:   s.TestID,
+	}
+}
+
+func (a *App) drawerWidth(cx *core.Scope) core.Points {
+	w := cx.Env().Window().Width
+	if w <= 0 {
+		w = 390
+	}
+	dw := w * 0.72
+	if dw < 260 {
+		dw = 260
+	}
+	if dw > 330 {
+		dw = 330
+	}
+	return dw
+}
+
+// leftDrawerPanel renders Flutter's FolderDrawer as a left side panel with
+// library switcher header, collections, and a vertically scrollable folder tree.
+func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
 
 	statText := func(v int) string {
 		if !a.statsLoaded {
@@ -173,40 +222,59 @@ func (a *App) drawerSheet(cx *core.Scope) core.Node {
 				},
 			})
 		}
-		return core.View{Style: core.Style{Gap: 4}, Children: []core.Node{
-			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Padding: core.Edges{Top: 8}}, Children: []core.Node{
+		return core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0), Gap: 4}, Children: []core.Node{
+			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Padding: core.Edges{Top: 12, Bottom: 2, Left: 4, Right: 4}}, Children: []core.Node{
 				core.Text{Content: "文件夹 (" + itoa(len(a.folders)) + ")", Style: nsui.TypeLabel.Merge(core.Style{Color: colors.Muted()})},
 			}},
 			core.Scroll{
-				Style: core.Style{MaxHeight: core.Pt(260)},
+				Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
 				Children: []core.Node{
 					core.Show{When: func() bool { return len(folderNodes) == 0 }, Then: func(cx *core.Scope) core.Node {
-						return core.Text{Content: "暂无文件夹", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Faint(), Padding: core.Symmetric(12, 4)})}
+						return core.Text{Content: "暂无文件夹", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Faint(), Padding: core.Symmetric(16, 4)})}
 					}},
-					core.View{Style: core.Style{Gap: 2}, Children: folderNodes},
+					core.View{Style: core.Style{Gap: 2, Padding: core.Edges{Bottom: 20}}, Children: folderNodes},
 				},
 			},
 		}}
 	})
 
-	return nsui.Sheet{
-		Open:    func() bool { return a.drawerOpen.Get() },
-		OnClose: func() { a.drawerOpen.Set(false) },
+	return core.View{
+		StyleFunc: func() core.Style {
+			dw := a.drawerWidth(cx)
+			safe := cx.Env().SafeArea()
+			tx := -dw
+			if a.drawerOpen.Get() {
+				tx = 0
+			}
+			return core.Style{
+				Position: core.Absolute, Left: core.Pt(0), Top: core.Pt(0), Bottom: core.Pt(0),
+				Width: core.Pt(dw), Background: colors.Background(),
+				Padding: core.Edges{Top: safe.Top + 10, Bottom: safe.Bottom + 8, Left: safe.Left + 12, Right: 12},
+				Gap:     2, ZIndex: 10,
+				Transform:  core.Transform{TranslateX: tx},
+				Transition: drawerSlideTransition,
+			}
+		},
+		PanActivation: core.PanActivation{ActiveOffsetX: 18, FailOffsetY: 16},
+		OnPan: func(ev core.PanEvent) {
+			if ev.Phase == core.GestureEnded && (ev.Translation.X < -40 || ev.Velocity.X < -300) {
+				a.drawerOpen.Set(false)
+			}
+		},
 		Children: []core.Node{
-			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
+			// Library switcher + Search row (matches Flutter FolderDrawer header)
+			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Edges{Bottom: 8}}, Children: []core.Node{
 				core.View{
-					Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Symmetric(6, 4)},
-					OnPress: func(core.PressEvent) {
-						a.drawerOpen.Set(false)
-						a.openLibraries(cx)
-					},
+					TestID:  "drawer.library",
+					Style:   core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Symmetric(8, 6), CornerRadius: 10},
+					OnPress: func(core.PressEvent) { a.openLibraries(cx) },
 					Children: []core.Node{
 						core.Text{ContentFunc: func() string { a.rev.Get(); return a.libraryName() }, MaxLines: 1,
 							Style: nsui.TypeTitle.Merge(core.Style{Color: colors.Text(), FlexShrink: 1})},
 						core.Icon{SVG: lucide.ChevronDown(), Style: core.Style{FontSize: 16, Color: colors.Muted()}},
 					},
 				},
-				nsui.Button{Text: "搜索", Variant: nsui.ButtonGhost, OnPress: func() {
+				nsui.IconButton{Icon: lucide.Search, Label: "搜索", Size: 34, IconSize: 18, OnPress: func() {
 					a.drawerOpen.Set(false)
 					a.openSearchPage()
 				}},
@@ -219,6 +287,40 @@ func (a *App) drawerSheet(cx *core.Scope) core.Node {
 			folderTree,
 		},
 	}
+}
+
+func (a *App) flattenVisibleFolders() []visibleFolderRow {
+	var rows []visibleFolderRow
+	var visit func(f model.Folder, depth int)
+	visit = func(f model.Folder, depth int) {
+		rows = append(rows, visibleFolderRow{folder: f, depth: depth})
+		if len(f.Children) == 0 || !a.expandedFolders[f.ID] {
+			return
+		}
+		for _, child := range f.Children {
+			visit(child, depth+1)
+		}
+	}
+	for _, root := range a.folders {
+		visit(root, 0)
+	}
+	return rows
+}
+
+func (a *App) findFolderName(id string) string {
+	var walk func(list []model.Folder) string
+	walk = func(list []model.Folder) string {
+		for _, f := range list {
+			if f.ID == id {
+				return f.Name
+			}
+			if name := walk(f.Children); name != "" {
+				return name
+			}
+		}
+		return ""
+	}
+	return walk(a.folders)
 }
 
 func (a *App) currentViewTitle() string {

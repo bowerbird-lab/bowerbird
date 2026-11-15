@@ -48,6 +48,8 @@ class GalleryGridComponent(
     private var spanCount = 3
     private var isDark = false
     private var lastScrollTopSeq = 0
+    private var topInsetDp = 0
+    private var bottomInsetDp = 24
     private var items: List<GridEntry> = emptyList()
     private var emptyMessage = ""
     private var loadMoreTriggeredForSize = -1
@@ -105,8 +107,7 @@ class GalleryGridComponent(
             itemAnimator = null
             setItemViewCacheSize(24)
             clipToPadding = false
-            val pad = dp(2)
-            setPadding(0, pad, 0, dp(24))
+            applyInsets()
             addOnScrollListener(object : RecyclerView.OnScrollListener() {
                 override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
                     if (dy <= 0) return
@@ -189,6 +190,20 @@ class GalleryGridComponent(
             "refreshing" -> {
                 swipeRefresh.isRefreshing = value == true
             }
+            "topInsetDp" -> {
+                val next = ((value as? Number)?.toInt() ?: 0).coerceAtLeast(0)
+                if (next != topInsetDp) {
+                    topInsetDp = next
+                    applyInsets()
+                }
+            }
+            "bottomInsetDp" -> {
+                val next = ((value as? Number)?.toInt() ?: 24).coerceAtLeast(16)
+                if (next != bottomInsetDp) {
+                    bottomInsetDp = next
+                    applyInsets()
+                }
+            }
             "emptyText" -> {
                 emptyMessage = (value as? String).orEmpty()
                 emptyView.text = emptyMessage
@@ -238,6 +253,12 @@ class GalleryGridComponent(
         }
     }
 
+    private fun applyInsets() {
+        val pad = dp(8)
+        recyclerView.setPadding(pad, dp(topInsetDp), pad, dp(bottomInsetDp))
+        swipeRefresh.setProgressViewOffset(false, dp(topInsetDp), dp(topInsetDp + 56))
+    }
+
     private fun updateEmptyVisibility() {
         val showEmpty = items.isEmpty() && emptyMessage.isNotBlank()
         emptyView.visibility = if (showEmpty) View.VISIBLE else View.GONE
@@ -267,8 +288,8 @@ class GalleryGridComponent(
         }
 
         private fun parentWidthPx(): Int {
-            val w = recyclerView.width
-            return if (w > 0) w else context.resources.displayMetrics.widthPixels - dp(24)
+            val w = recyclerView.width - recyclerView.paddingLeft - recyclerView.paddingRight
+            return if (w > 0) w else context.resources.displayMetrics.widthPixels - dp(20)
         }
     }
 

@@ -384,9 +384,17 @@ func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Nod
 
 func (a *App) metadataSheet(cx *core.Scope, item model.ItemSummary) core.Node {
 	colors := nsui.ColorsOf(cx)
-	return nsui.Sheet{
+	return a.bottomDrawer(cx, bottomDrawerSpec{
 		Open:    func() bool { return a.metaOpen.Get() },
 		OnClose: func() { a.metaOpen.Set(false) },
+		Title:   "完整元数据",
+		Header: []core.Node{
+			nsui.Button{Text: "复制汇总", Variant: nsui.ButtonSecondary, OnPress: func() {
+				detail := a.detailCache[item.ID]
+				cx.SetClipboard(itemInfoText(item, detail))
+				a.showToast("已复制 汇总信息")
+			}},
+		},
 		Children: []core.Node{
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				_ = a.rev.Get()
@@ -511,21 +519,13 @@ func (a *App) metadataSheet(cx *core.Scope, item model.ItemSummary) core.Node {
 				}
 				rows = append(rows, metaRow("ID", item.ID, true))
 
-				return core.View{Style: core.Style{Gap: 10}, Children: []core.Node{
-					core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
-						core.Text{Content: "完整元数据", Style: nsui.TypeTitle.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
-						nsui.Button{Text: "复制汇总", Variant: nsui.ButtonSecondary, OnPress: func() {
-							copyField("汇总信息", itemInfoText(item, detail))
-						}},
-					}},
-					core.Scroll{
-						Style:    core.Style{MaxHeight: core.Pt(420)},
-						Children: []core.Node{core.View{Style: core.Style{Gap: 4, Padding: core.Edges{Bottom: 16}}, Children: rows}},
-					},
-				}}
+				return core.Scroll{
+					Style:    core.Style{MaxHeight: core.Pt(440)},
+					Children: []core.Node{core.View{Style: core.Style{Gap: 4, Padding: core.Edges{Bottom: 16}}, Children: rows}},
+				}
 			}),
 		},
-	}
+	})
 }
 
 func (a *App) deleteDialog(cx *core.Scope) core.Node {

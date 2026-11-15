@@ -18,111 +18,190 @@ import (
 
 const maxAnimatedGIFBytes = 8 << 20 // 8 MiB
 
+var drawerSlideTransition = core.Transition{
+	Duration:   240 * time.Millisecond,
+	Easing:     core.EaseOut,
+	Properties: core.TransitionTransform | core.TransitionBorder | core.TransitionOpacity,
+}
+
 func (a *App) galleryPage(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
 	a.post(func() { a.ensureLoaded(cx) })
-	header := core.Show{
-		When: func() bool { return a.multiSelect.Get() },
-		Then: func(cx *core.Scope) core.Node {
-			return core.View{
-				Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6},
-				Children: []core.Node{
-					nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.exitMultiSelect() }},
-					core.Text{ContentFunc: func() string { a.rev.Get(); return "已选 " + itoa(len(a.selectedIDs)) + " 项" },
-						Style: nsui.TypeTitle.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
-					nsui.Button{Text: "全选", Variant: nsui.ButtonGhost, OnPress: func() { a.selectAllVisible() }},
-					nsui.Button{Text: "标签", Variant: nsui.ButtonSecondary,
-						Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
-						OnPress:  func() { a.batchTagOpen.Set(true) }},
-					nsui.Button{Text: "目录", Variant: nsui.ButtonSecondary,
-						Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
-						OnPress:  func() { a.batchFolderOpen.Set(true) }},
-					nsui.Button{Text: "删除", Variant: nsui.ButtonGhost,
-						Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
-						OnPress:  func() { a.batchDelOpen.Set(true) }},
+
+	// Floating simplified header (matches Flutter GalleryHeader + HeaderActionPill)
+	floatingHeader := core.View{
+		StyleFunc: func() core.Style {
+			safe := cx.Env().SafeArea()
+			return core.Style{
+				Position: core.Absolute, Top: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0),
+				Padding: core.Edges{
+					Top:    safe.Top + 6,
+					Bottom: 10,
+					Left:   safe.Left + 12,
+					Right:  safe.Right + 12,
 				},
+				Gradients: []core.Gradient{
+					core.LinearGradient(180, colors.Background(), nsui.Alpha(colors.Background(), 0)),
+				},
+				ZIndex: 12,
 			}
 		},
-		Else: func(cx *core.Scope) core.Node {
-			return core.View{
-				Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6},
-				Children: []core.Node{
-					nsui.IconButton{Icon: lucide.Menu, Label: "导航抽屉", Size: 34, OnPress: func() {
-						a.drawerOpen.Set(true)
-						a.loadSidebarData(cx)
-					}, TestID: "gallery.drawer"},
-					core.View{
-						Style:   core.Style{FlexGrow: 1, FlexShrink: 1, Gap: 2, MinWidth: core.Pt(0)},
-						OnPress: func(core.PressEvent) { a.drawerOpen.Set(true); a.loadSidebarData(cx) },
-						Children: []core.Node{
-							core.Text{ContentFunc: func() string { a.rev.Get(); return a.currentViewTitle() }, MaxLines: 1,
-								Style: nsui.TypeTitle.Merge(core.Style{Color: colors.Text()})},
-							core.Text{ContentFunc: func() string { a.rev.Get(); return countLabel(a.gallery.Snapshot()) }, MaxLines: 1,
-								Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+		Children: []core.Node{
+			core.Show{
+				When: func() bool { return a.multiSelect.Get() },
+				Then: func(cx *core.Scope) core.Node {
+					return core.View{
+						Style: core.Style{
+							Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4,
+							Padding: core.Symmetric(4, 8), CornerRadius: 22,
+							Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
 						},
-					},
-					core.Show{When: func() bool { a.rev.Get(); return a.sidebarView != SidebarTrash && a.sidebarView != SidebarHistory },
-						Then: func(cx *core.Scope) core.Node {
-							return core.Dynamic(func(cx *core.Scope) core.Node {
-								a.rev.Get()
-								label := "筛选"
-								if a.galleryFilter.String() != "" {
-									label = "筛选*"
-								}
-								return nsui.Button{Text: label, Variant: nsui.ButtonGhost,
-									OnPress: func() { a.openFilterSheet("gallery") }, TestID: "gallery.filter"}
-							})
-						}},
-					core.Dynamic(func(cx *core.Scope) core.Node {
-						a.rev.Get()
-						label := "收件箱"
-						if len(a.inboxEntries) > 0 {
-							label = "收件箱(" + itoa(len(a.inboxEntries)) + ")"
-						}
-						return nsui.Button{Text: label, Variant: nsui.ButtonGhost, OnPress: func() {
-							a.inboxBackScreen = screenGallery
-							a.screen.Set(screenInbox)
-							a.consumeShares(cx)
-						}, TestID: "gallery.inbox"}
-					}),
-					nsui.IconButton{Icon: lucide.Search, Label: "搜索", Size: 34, OnPress: func() {
-						a.openSearchPage()
-					}, TestID: "gallery.search"},
-					nsui.IconButton{Icon: lucide.EllipsisVertical, Label: "更多", Size: 34, OnPress: func() {
-						a.menuOpen.Set(true)
-					}, TestID: "gallery.more"},
+						Children: []core.Node{
+							nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.exitMultiSelect() }},
+							core.Text{ContentFunc: func() string { a.rev.Get(); return "已选 " + itoa(len(a.selectedIDs)) + " 项" },
+								Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
+							nsui.Button{Text: "全选", Variant: nsui.ButtonGhost, OnPress: func() { a.selectAllVisible() }},
+							nsui.Button{Text: "标签", Variant: nsui.ButtonGhost,
+								Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
+								OnPress:  func() { a.batchTagOpen.Set(true) }},
+							nsui.Button{Text: "目录", Variant: nsui.ButtonGhost,
+								Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
+								OnPress:  func() { a.batchFolderOpen.Set(true) }},
+							nsui.Button{Text: "删除", Variant: nsui.ButtonGhost,
+								Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
+								OnPress:  func() { a.batchDelOpen.Set(true) }},
+						},
+					}
 				},
-			}
+				Else: func(cx *core.Scope) core.Node {
+					return core.View{
+						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8},
+						Children: []core.Node{
+							core.View{
+								TestID: "gallery.drawer",
+								Style: core.Style{
+									Width: core.Pt(42), Height: core.Pt(42), CornerRadius: 21,
+									AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+									Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+								},
+								OnPress: func(core.PressEvent) {
+									next := !a.drawerOpen.Get()
+									a.drawerOpen.Set(next)
+									if next {
+										a.loadSidebarData(cx)
+									}
+								},
+								Children: []core.Node{nsui.Icon(lucide.Menu, 20, colors.Text)},
+							},
+							core.Show{
+								When: func() bool { a.rev.Get(); return a.sidebarView != SidebarAll },
+								Then: func(cx *core.Scope) core.Node {
+									return core.View{
+										Style: core.Style{
+											Padding: core.Symmetric(6, 12), CornerRadius: 16,
+											Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+										},
+										OnPress: func(core.PressEvent) {
+											a.drawerOpen.Set(true)
+											a.loadSidebarData(cx)
+										},
+										Children: []core.Node{
+											core.Text{ContentFunc: func() string { a.rev.Get(); return a.currentViewTitle() },
+												MaxLines: 1, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Text()})},
+										},
+									}
+								},
+							},
+							core.View{Style: core.Style{FlexGrow: 1}},
+							core.View{
+								Style: core.Style{
+									Direction: core.Row, AlignItems: core.AlignCenter,
+									Height: core.Pt(42), CornerRadius: 21, Overflow: core.Hidden,
+									Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+								},
+								Children: []core.Node{
+									core.View{
+										TestID: "gallery.search",
+										Style: core.Style{
+											Width: core.Pt(44), Height: core.Pt(42),
+											AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+										},
+										OnPress:  func(core.PressEvent) { a.openSearchPage() },
+										Children: []core.Node{nsui.Icon(lucide.Search, 19, colors.Text)},
+									},
+									core.View{
+										TestID: "gallery.more",
+										Style: core.Style{
+											Width: core.Pt(44), Height: core.Pt(42),
+											AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+										},
+										OnPress: func(core.PressEvent) { a.menuOpen.Set(true) },
+										Children: []core.Node{
+											nsui.Icon(lucide.Ellipsis, 19, colors.Text),
+											core.Show{
+												When: func() bool {
+													a.rev.Get()
+													return len(a.inboxEntries) > 0 || a.galleryFilter.String() != ""
+												},
+												Then: func(cx *core.Scope) core.Node {
+													return core.View{
+														Style: core.Style{
+															Position: core.Absolute, Top: core.Pt(9), Right: core.Pt(9),
+															Width: core.Pt(7), Height: core.Pt(7), CornerRadius: 4,
+															Background: colors.AccentFill(),
+														},
+													}
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					}
+				},
+			},
 		},
 	}
 
-	trashBar := core.Show{
-		When: func() bool { a.rev.Get(); return a.sidebarView == SidebarTrash && !a.multiSelect.Get() },
-		Then: func(cx *core.Scope) core.Node {
-			return core.View{
-				Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(6, 10),
-					CornerRadius: 8, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
-				Children: []core.Node{
-					core.Text{Content: "废纸篓：点按素材可恢复", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted(), FlexGrow: 1})},
-					nsui.Button{Text: "清空废纸篓", Variant: nsui.ButtonGhost,
-						Disabled: func() bool { a.rev.Get(); return len(a.gallery.Snapshot().Items) == 0 },
-						OnPress:  func() { a.emptyTrashOpen.Set(true) }},
-				},
+	bannerStack := core.View{
+		StyleFunc: func() core.Style {
+			safe := cx.Env().SafeArea()
+			return core.Style{
+				Position: core.Absolute, Top: core.Pt(safe.Top + 56), Left: core.Pt(12), Right: core.Pt(12),
+				Gap: 6, ZIndex: 11,
 			}
 		},
-	}
-
-	uploadBar := core.Show{
-		When: func() bool { return a.uploadStatus.Get() != "" },
-		Then: func(cx *core.Scope) core.Node {
-			return core.View{
-				Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(6, 10),
-					CornerRadius: 8, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
-				Children: []core.Node{
-					core.Text{ContentFunc: a.uploadStatus.Get, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
-					nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.cancelActiveUpload() }},
+		Children: []core.Node{
+			core.Show{
+				When: func() bool { a.rev.Get(); return a.sidebarView == SidebarTrash && !a.multiSelect.Get() },
+				Then: func(cx *core.Scope) core.Node {
+					return core.View{
+						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(6, 10),
+							CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
+						Children: []core.Node{
+							core.Text{Content: "废纸篓：点按素材可恢复", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted(), FlexGrow: 1})},
+							nsui.Button{Text: "清空", Variant: nsui.ButtonGhost,
+								Disabled: func() bool { a.rev.Get(); return len(a.gallery.Snapshot().Items) == 0 },
+								OnPress:  func() { a.emptyTrashOpen.Set(true) }},
+						},
+					}
 				},
-			}
+			},
+			core.Show{
+				When: func() bool { return a.uploadStatus.Get() != "" },
+				Then: func(cx *core.Scope) core.Node {
+					return core.View{
+						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(6, 10),
+							CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
+						Children: []core.Node{
+							core.Text{ContentFunc: a.uploadStatus.Get, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
+							nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.cancelActiveUpload() }},
+						},
+					}
+				},
+			},
+			a.errorBanner(cx, func() error { a.rev.Get(); return a.gallery.Snapshot().Err }),
 		},
 	}
 
@@ -153,7 +232,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 				return core.Text{Content: "加载更多…", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted(), TextAlign: core.TextAlignCenter, Padding: core.All(12)})}
 			}},
 			Empty: a.emptyState(cx),
-			Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
+			Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0), Padding: core.Edges{Top: 56, Left: 12, Right: 12}},
 		}
 		gridNode = core.View{
 			Style:    core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
@@ -163,17 +242,80 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 			},
 		}
 	}
-	pinchContainer := gridNode
+
+	uploadFAB := core.Show{
+		When: func() bool {
+			a.rev.Get()
+			return !a.multiSelect.Get() && a.sidebarView != SidebarTrash
+		},
+		Then: func(cx *core.Scope) core.Node {
+			return core.View{
+				TestID: "gallery.upload",
+				StyleFunc: func() core.Style {
+					safe := cx.Env().SafeArea()
+					return core.Style{
+						Position: core.Absolute, Right: core.Pt(safe.Right + 16), Bottom: core.Pt(safe.Bottom + 18),
+						Width: core.Pt(52), Height: core.Pt(52), CornerRadius: 16,
+						AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+						Background: colors.AccentFill(), ZIndex: 12,
+					}
+				},
+				OnPress:  func(core.PressEvent) { a.pickAndUpload(cx) },
+				Children: []core.Node{nsui.Icon(lucide.ImagePlus, 22, colors.OnAccent)},
+			}
+		},
+	}
+
+	scrim := core.Show{
+		When: func() bool { return a.drawerOpen.Get() },
+		Then: func(cx *core.Scope) core.Node {
+			return core.View{
+				Style: core.Style{
+					Position: core.Absolute, Top: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0),
+					Background: core.RGBA(0x000000, 0.28), ZIndex: 20,
+				},
+				OnPress:       func(core.PressEvent) { a.drawerOpen.Set(false) },
+				PanActivation: core.PanActivation{ActiveOffsetX: 14, FailOffsetY: 16},
+				OnPan: func(ev core.PanEvent) {
+					if ev.Phase == core.GestureEnded && (ev.Translation.X < -30 || ev.Velocity.X < -250) {
+						a.drawerOpen.Set(false)
+					}
+				},
+			}
+		},
+	}
+
+	mainShift := core.View{
+		StyleFunc: func() core.Style {
+			var tx core.Points
+			var rad core.Points
+			if a.drawerOpen.Get() {
+				tx = a.drawerWidth(cx)
+				rad = 28
+			}
+			return core.Style{
+				Width: core.Pct(100), Height: core.Pct(100),
+				Background: colors.Background(), Overflow: core.Hidden,
+				CornerRadii: core.Corners{TopLeft: rad, BottomLeft: rad},
+				Transform:   core.Transform{TranslateX: tx},
+				Transition:  drawerSlideTransition,
+				ZIndex:      15,
+			}
+		},
+		Children: []core.Node{
+			gridNode,
+			floatingHeader,
+			bannerStack,
+			uploadFAB,
+			scrim,
+		},
+	}
 
 	return core.View{
-		Style: core.Style{FlexGrow: 1, FlexShrink: 1, Gap: 8},
+		Style: core.Style{Width: core.Pct(100), Height: core.Pct(100), Overflow: core.Hidden, Background: colors.Background()},
 		Children: []core.Node{
-			header,
-			trashBar,
-			uploadBar,
-			a.errorBanner(cx, func() error { a.rev.Get(); return a.gallery.Snapshot().Err }),
-			pinchContainer,
-			a.drawerSheet(cx),
+			a.leftDrawerPanel(cx),
+			mainShift,
 			a.filterSheet(cx),
 			a.menuDialog(cx),
 			a.disconnectDialog(cx),
@@ -223,13 +365,22 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 					emptyText = a.galleryEmptyMessage(snap)
 				}
 			}
+			safe := cx.Env().SafeArea()
+			topDp := int(safe.Top) + 56
+			bottomDp := int(safe.Bottom) + 84
+			if isSearch {
+				topDp = 4
+				bottomDp = 24
+			}
 			return map[string]any{
-				"cols":         a.gridCols.Get(),
-				"isDark":       cx.Env().Dark(),
-				"refreshing":   snap.Loading,
-				"emptyText":    emptyText,
-				"scrollTopSeq": scrollSeq,
-				"rows":         entries,
+				"cols":          a.gridCols.Get(),
+				"isDark":        cx.Env().Dark(),
+				"refreshing":    snap.Loading,
+				"emptyText":     emptyText,
+				"scrollTopSeq":  scrollSeq,
+				"topInsetDp":    topDp,
+				"bottomInsetDp": bottomDp,
+				"rows":          entries,
 			}
 		},
 		OnEvent: func(name string, data any) {
@@ -655,7 +806,7 @@ func (a *App) setGridColumns(cx *core.Scope, next int) {
 
 func (a *App) quickPreviewSheet(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
-	return nsui.Sheet{
+	return a.bottomDrawer(cx, bottomDrawerSpec{
 		Open:    func() bool { return a.quickOpen.Get() },
 		OnClose: func() { a.quickOpen.Set(false) },
 		Children: []core.Node{
@@ -716,7 +867,7 @@ func (a *App) quickPreviewSheet(cx *core.Scope) core.Node {
 				}}
 			}),
 		},
-	}
+	})
 }
 
 func (a *App) openQuickPreview(item model.ItemSummary, flatIndex int) {
@@ -772,10 +923,14 @@ func (a *App) selectedIDSlice() []string {
 
 func (a *App) batchTagDialog(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
-	return nsui.Dialog{
-		Open:         func() bool { return a.batchTagOpen.Get() },
-		OnOpenChange: func(open bool, _ base.Reason) { a.batchTagOpen.Set(open) },
-		Title:        "批量添加标签",
+	return a.bottomDrawer(cx, bottomDrawerSpec{
+		Open:    func() bool { return a.batchTagOpen.Get() },
+		OnClose: func() { a.batchTagOpen.Set(false) },
+		Title:   "批量添加标签",
+		Header: []core.Node{
+			nsui.Button{Text: "添加", Disabled: func() bool { return a.batchBusy.Get() || strings.TrimSpace(a.batchTagInput.Get()) == "" },
+				OnPress: func() { a.runBatchAddTag(cx) }},
+		},
 		Children: []core.Node{
 			nsui.Input{Value: func() string { return a.batchTagInput.Get() }, OnChange: a.batchTagInput.Set,
 				Placeholder: "输入或点选下方标签", TestID: "batch.tagInput"},
@@ -784,13 +939,13 @@ func (a *App) batchTagDialog(cx *core.Scope) core.Node {
 				_ = a.batchTagOpen.Get()
 				tagChips := make([]core.Node, 0, len(a.tags))
 				for i, t := range a.tags {
-					if i >= 20 {
+					if i >= 30 {
 						break
 					}
 					tagName := t.Name
 					tagChips = append(tagChips, core.View{
-						Style: core.Style{Padding: core.Symmetric(4, 10), CornerRadius: 999,
-							Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
+						Style: core.Style{Padding: core.Symmetric(5, 11), CornerRadius: 999,
+							Background: colors.Inset(), BorderWidth: 1, BorderColor: colors.Border()},
 						OnPress:  func(core.PressEvent) { a.batchTagInput.Set(tagName) },
 						Children: []core.Node{core.Text{Content: tagName, Style: core.Style{FontSize: 12, LineHeight: 16, Color: colors.Text()}}},
 					})
@@ -798,23 +953,21 @@ func (a *App) batchTagDialog(cx *core.Scope) core.Node {
 				if len(tagChips) == 0 {
 					return core.View{}
 				}
-				return core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 6}, Children: tagChips}
+				return core.Scroll{
+					Style:    core.Style{MaxHeight: core.Pt(240)},
+					Children: []core.Node{core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 6}, Children: tagChips}},
+				}
 			}),
 		},
-		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.batchTagOpen.Set(false) }},
-			nsui.Button{Text: "添加", Disabled: func() bool { return a.batchBusy.Get() || strings.TrimSpace(a.batchTagInput.Get()) == "" },
-				OnPress: func() { a.runBatchAddTag(cx) }},
-		},
-	}
+	})
 }
 
 func (a *App) batchFolderDialog(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
-	return nsui.Dialog{
-		Open:         func() bool { return a.batchFolderOpen.Get() },
-		OnOpenChange: func(open bool, _ base.Reason) { a.batchFolderOpen.Set(open) },
-		Title:        "批量加入文件夹",
+	return a.bottomDrawer(cx, bottomDrawerSpec{
+		Open:    func() bool { return a.batchFolderOpen.Get() },
+		OnClose: func() { a.batchFolderOpen.Set(false) },
+		Title:   "批量加入文件夹",
 		Children: []core.Node{
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				_ = a.rev.Get()
@@ -824,8 +977,8 @@ func (a *App) batchFolderDialog(cx *core.Scope) core.Node {
 				for _, f := range flat {
 					folder := f
 					rows = append(rows, core.View{
-						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(9, 10),
-							CornerRadius: 8, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
+						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(10, 12),
+							CornerRadius: 10, Background: colors.Inset(), BorderWidth: 1, BorderColor: colors.Border()},
 						OnPress: func(core.PressEvent) {
 							a.batchFolderOpen.Set(false)
 							a.runBatchAddFolder(cx, folder)
@@ -838,7 +991,7 @@ func (a *App) batchFolderDialog(cx *core.Scope) core.Node {
 					})
 				}
 				return core.Scroll{
-					Style: core.Style{MaxHeight: core.Pt(300)},
+					Style: core.Style{MaxHeight: core.Pt(320)},
 					Children: []core.Node{
 						core.Show{When: func() bool { return len(rows) == 0 }, Then: func(cx *core.Scope) core.Node {
 							return core.Text{Content: "当前资源库还没有文件夹", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})}
@@ -848,10 +1001,7 @@ func (a *App) batchFolderDialog(cx *core.Scope) core.Node {
 				}
 			}),
 		},
-		Footer: []core.Node{
-			nsui.Button{Text: "关闭", Variant: nsui.ButtonGhost, OnPress: func() { a.batchFolderOpen.Set(false) }},
-		},
-	}
+	})
 }
 
 func (a *App) batchDeleteDialog(cx *core.Scope) core.Node {

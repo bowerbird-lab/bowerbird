@@ -175,14 +175,16 @@ func TestFilterSheetAppliesSizeAndRatingQueries(t *testing.T) {
 	app := nsgotest.Start(t, isolatedRoot(t), nsgotest.Size(420, 800))
 	app.Type("id:connect.address", srv.URL)
 	app.Press("id:connect.submit")
-	app.WaitFor("id:gallery.filter", 2*time.Second)
+	app.WaitFor("id:gallery.more", 2*time.Second)
 
-	app.Press("id:gallery.filter")
+	app.Press("id:gallery.more")
+	app.WaitFor("text:筛选", 2*time.Second)
+	app.Press("text:筛选")
 	app.WaitFor("text:小 <1MB", 2*time.Second)
 	app.Press("text:小 <1MB")
 	app.Press("text:5★")
 	app.Press("id:filter.apply")
-	app.WaitFor("text:筛选*", 2*time.Second)
+	app.WaitFor("id:gallery.more", 2*time.Second)
 	if seenQuery != "size:small rating:5" {
 		t.Fatalf("seenQuery = %q, want %q", seenQuery, "size:small rating:5")
 	}
