@@ -442,7 +442,7 @@ func (a *App) Render(cx *core.Scope) core.Node {
 					},
 					PointerEvents: core.PointerEventsNone,
 					Children: []core.Node{
-						core.Text{ContentFunc: a.toast.Get, MaxLines: 2, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Text()})},
+						core.Text{ContentFunc: a.toast.Get, MaxLines: 2, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Text)},
 					},
 				}
 			}},

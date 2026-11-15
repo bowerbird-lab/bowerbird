@@ -399,6 +399,7 @@ func (a *App) metadataSheet(cx *core.Scope, item model.ItemSummary) core.Node {
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				_ = a.rev.Get()
 				_ = a.metaOpen.Get()
+				_ = cx.Env().Dark()
 				detail, hasDetail := a.detailCache[item.ID]
 
 				copyField := func(label, val string) {

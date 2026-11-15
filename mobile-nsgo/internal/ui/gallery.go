@@ -51,15 +51,17 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 				When: func() bool { return a.multiSelect.Get() },
 				Then: func(cx *core.Scope) core.Node {
 					return core.View{
-						Style: core.Style{
-							Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4,
-							Padding: core.Symmetric(4, 8), CornerRadius: 22,
-							Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+						StyleFunc: func() core.Style {
+							return core.Style{
+								Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4,
+								Padding: core.Symmetric(4, 8), CornerRadius: 22,
+								Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+							}
 						},
 						Children: []core.Node{
 							nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.exitMultiSelect() }},
 							core.Text{ContentFunc: func() string { a.rev.Get(); return "已选 " + itoa(len(a.selectedIDs)) + " 项" },
-								Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
+								Style: nsui.TypeBody.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Text)},
 							nsui.Button{Text: "全选", Variant: nsui.ButtonGhost, OnPress: func() { a.selectAllVisible() }},
 							nsui.Button{Text: "标签", Variant: nsui.ButtonGhost,
 								Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
@@ -79,10 +81,12 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 						Children: []core.Node{
 							core.View{
 								TestID: "gallery.drawer",
-								Style: core.Style{
-									Width: core.Pt(42), Height: core.Pt(42), CornerRadius: 21,
-									AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
-									Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+								StyleFunc: func() core.Style {
+									return core.Style{
+										Width: core.Pt(42), Height: core.Pt(42), CornerRadius: 21,
+										AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+										Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+									}
 								},
 								OnPress: func(core.PressEvent) {
 									next := !a.drawerOpen.Get()
@@ -97,9 +101,11 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 								When: func() bool { a.rev.Get(); return a.sidebarView != SidebarAll },
 								Then: func(cx *core.Scope) core.Node {
 									return core.View{
-										Style: core.Style{
-											Padding: core.Symmetric(6, 12), CornerRadius: 16,
-											Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+										StyleFunc: func() core.Style {
+											return core.Style{
+												Padding: core.Symmetric(6, 12), CornerRadius: 16,
+												Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+											}
 										},
 										OnPress: func(core.PressEvent) {
 											a.drawerOpen.Set(true)
@@ -107,17 +113,19 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 										},
 										Children: []core.Node{
 											core.Text{ContentFunc: func() string { a.rev.Get(); return a.currentViewTitle() },
-												MaxLines: 1, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Text()})},
+												MaxLines: 1, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Text)},
 										},
 									}
 								},
 							},
 							core.View{Style: core.Style{FlexGrow: 1}},
 							core.View{
-								Style: core.Style{
-									Direction: core.Row, AlignItems: core.AlignCenter,
-									Height: core.Pt(42), CornerRadius: 21, Overflow: core.Hidden,
-									Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+								StyleFunc: func() core.Style {
+									return core.Style{
+										Direction: core.Row, AlignItems: core.AlignCenter,
+										Height: core.Pt(42), CornerRadius: 21, Overflow: core.Hidden,
+										Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+									}
 								},
 								Children: []core.Node{
 									core.View{
@@ -177,10 +185,12 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 				When: func() bool { a.rev.Get(); return a.sidebarView == SidebarTrash && !a.multiSelect.Get() },
 				Then: func(cx *core.Scope) core.Node {
 					return core.View{
-						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(6, 10),
-							CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
+						StyleFunc: func() core.Style {
+							return core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(6, 10),
+								CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()}
+						},
 						Children: []core.Node{
-							core.Text{Content: "废纸篓：点按素材可恢复", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted(), FlexGrow: 1})},
+							core.Text{Content: "废纸篓：点按素材可恢复", Style: nsui.TypeCaption.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Muted)},
 							nsui.Button{Text: "清空", Variant: nsui.ButtonGhost,
 								Disabled: func() bool { a.rev.Get(); return len(a.gallery.Snapshot().Items) == 0 },
 								OnPress:  func() { a.emptyTrashOpen.Set(true) }},
@@ -192,10 +202,12 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 				When: func() bool { return a.uploadStatus.Get() != "" },
 				Then: func(cx *core.Scope) core.Node {
 					return core.View{
-						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(6, 10),
-							CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
+						StyleFunc: func() core.Style {
+							return core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(6, 10),
+								CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()}
+						},
 						Children: []core.Node{
-							core.Text{ContentFunc: a.uploadStatus.Get, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
+							core.Text{ContentFunc: a.uploadStatus.Get, Style: nsui.TypeCaption.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Text)},
 							nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.cancelActiveUpload() }},
 						},
 					}
@@ -312,7 +324,9 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 	}
 
 	return core.View{
-		Style: core.Style{Width: core.Pct(100), Height: core.Pct(100), Overflow: core.Hidden, Background: colors.Background()},
+		StyleFunc: func() core.Style {
+			return core.Style{Width: core.Pct(100), Height: core.Pct(100), Overflow: core.Hidden, Background: colors.Background()}
+		},
 		Children: []core.Node{
 			a.leftDrawerPanel(cx),
 			mainShift,
@@ -813,6 +827,7 @@ func (a *App) quickPreviewSheet(cx *core.Scope) core.Node {
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				_ = a.rev.Get()
 				_ = a.quickOpen.Get()
+				_ = cx.Env().Dark()
 				item := a.quickItem
 				itemIdx := a.quickIndex
 				thumbURL := ""
@@ -937,6 +952,7 @@ func (a *App) batchTagDialog(cx *core.Scope) core.Node {
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				_ = a.rev.Get()
 				_ = a.batchTagOpen.Get()
+				_ = cx.Env().Dark()
 				tagChips := make([]core.Node, 0, len(a.tags))
 				for i, t := range a.tags {
 					if i >= 30 {
@@ -972,6 +988,7 @@ func (a *App) batchFolderDialog(cx *core.Scope) core.Node {
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				_ = a.rev.Get()
 				_ = a.batchFolderOpen.Get()
+				_ = cx.Env().Dark()
 				flat := a.flattenAllFolders()
 				rows := make([]core.Node, 0, len(flat))
 				for _, f := range flat {
@@ -1086,16 +1103,21 @@ func (a *App) emptyState(cx *core.Scope) core.Node {
 func (a *App) errorBanner(cx *core.Scope, errFn func() error) core.Node {
 	colors := nsui.ColorsOf(cx)
 	return core.Show{When: func() bool { return errFn() != nil }, Then: func(cx *core.Scope) core.Node {
-		return core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
-			Padding: core.All(8), CornerRadius: 8, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Danger()}, Children: []core.Node{
-			core.Text{ContentFunc: func() string {
-				if e := errFn(); e != nil {
-					return friendlyError(e)
-				}
-				return ""
-			}, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Danger(), FlexGrow: 1})},
-			nsui.Button{Text: "重试", Variant: nsui.ButtonGhost, OnPress: func() { a.refreshGalleryView(cx, true) }},
-		}}
+		return core.View{
+			StyleFunc: func() core.Style {
+				return core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
+					Padding: core.All(8), CornerRadius: 8, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Danger()}
+			},
+			Children: []core.Node{
+				core.Text{ContentFunc: func() string {
+					if e := errFn(); e != nil {
+						return friendlyError(e)
+					}
+					return ""
+				}, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Danger)},
+				nsui.Button{Text: "重试", Variant: nsui.ButtonGhost, OnPress: func() { a.refreshGalleryView(cx, true) }},
+			},
+		}
 	}}
 }
 

@@ -39,6 +39,7 @@ func (a *App) menuDialog(cx *core.Scope) core.Node {
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				_ = a.rev.Get()
 				_ = a.menuOpen.Get()
+				_ = cx.Env().Dark()
 				filterBadge := ""
 				if a.galleryFilter.String() != "" {
 					filterBadge = "已筛选"
@@ -134,13 +135,15 @@ func (a *App) librariesDialog(cx *core.Scope) core.Node {
 		},
 		Children: []core.Node{
 			core.Text{
-				Content: "切换会改变电脑当前活动库，当前列表、筛选和详情会重新加载。",
-				MaxLines: 2,
-				Style:   nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()}),
+				Content:   "切换会改变电脑当前活动库，当前列表、筛选和详情会重新加载。",
+				MaxLines:  2,
+				Style:     nsui.TypeCaption,
+				StyleFunc: nsui.Colored(colors.Muted),
 			},
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				_ = a.rev.Get()
 				_ = a.libsOpen.Get()
+				_ = cx.Env().Dark()
 				if len(a.libs) == 0 {
 					msg := "没有可切换的资源库"
 					if a.libsBusy.Get() {

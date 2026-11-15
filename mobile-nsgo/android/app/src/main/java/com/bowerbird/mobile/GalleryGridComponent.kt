@@ -184,6 +184,12 @@ class GalleryGridComponent(
                 if (dark != isDark) {
                     isDark = dark
                     emptyView.setTextColor(if (isDark) Color.parseColor("#A1A1AA") else Color.parseColor("#71717A"))
+                    swipeRefresh.setProgressBackgroundColorSchemeColor(
+                        if (isDark) Color.parseColor("#27272A") else Color.WHITE
+                    )
+                    swipeRefresh.setColorSchemeColors(
+                        if (isDark) Color.parseColor("#60A5FA") else Color.parseColor("#2563EB")
+                    )
                     adapter.notifyDataSetChanged()
                 }
             }

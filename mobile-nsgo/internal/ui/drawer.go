@@ -44,9 +44,11 @@ func (a *App) bottomDrawer(cx *core.Scope, s bottomDrawerSpec) core.Node {
 	colors := nsui.ColorsOf(cx)
 	var body []core.Node
 	body = append(body, core.View{
-		Style: core.Style{
-			Width: core.Pt(38), Height: core.Pt(4), CornerRadius: 2,
-			AlignSelf: core.AlignCenter, Background: colors.Border(),
+		StyleFunc: func() core.Style {
+			return core.Style{
+				Width: core.Pt(38), Height: core.Pt(4), CornerRadius: 2,
+				AlignSelf: core.AlignCenter, Background: colors.Border(),
+			}
 		},
 	})
 	if s.Title != "" || len(s.Header) > 0 {
@@ -54,7 +56,8 @@ func (a *App) bottomDrawer(cx *core.Scope, s bottomDrawerSpec) core.Node {
 		if s.Title != "" {
 			headChildren = append(headChildren, core.Text{
 				Content: s.Title,
-				Style:   nsui.TypeTitle.Merge(core.Style{Color: colors.Text(), FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}),
+				Style:   nsui.TypeTitle.Merge(core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}),
+				StyleFunc: nsui.Colored(colors.Text),
 			})
 		}
 		headChildren = append(headChildren, s.Header...)
@@ -170,6 +173,7 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 
 	folderTree := core.Dynamic(func(cx *core.Scope) core.Node {
 		_ = a.rev.Get()
+		_ = cx.Env().Dark()
 		visibleFolders := a.flattenVisibleFolders()
 		folderNodes := make([]core.Node, 0, len(visibleFolders))
 		for _, row := range visibleFolders {
@@ -270,8 +274,8 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 					OnPress: func(core.PressEvent) { a.openLibraries(cx) },
 					Children: []core.Node{
 						core.Text{ContentFunc: func() string { a.rev.Get(); return a.libraryName() }, MaxLines: 1,
-							Style: nsui.TypeTitle.Merge(core.Style{Color: colors.Text(), FlexShrink: 1})},
-						core.Icon{SVG: lucide.ChevronDown(), Style: core.Style{FontSize: 16, Color: colors.Muted()}},
+							Style: nsui.TypeTitle.Merge(core.Style{FlexShrink: 1}), StyleFunc: nsui.Colored(colors.Text)},
+						core.Icon{SVG: lucide.ChevronDown(), Style: core.Style{FontSize: 16}, StyleFunc: nsui.Colored(colors.Muted)},
 					},
 				},
 				nsui.IconButton{Icon: lucide.Search, Label: "搜索", Size: 34, IconSize: 18, OnPress: func() {

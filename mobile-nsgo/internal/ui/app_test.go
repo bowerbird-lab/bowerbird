@@ -189,3 +189,15 @@ func TestFilterSheetAppliesSizeAndRatingQueries(t *testing.T) {
 		t.Fatalf("seenQuery = %q, want %q", seenQuery, "size:small rating:5")
 	}
 }
+
+func TestDarkModeAppearanceUpdatesCleanly(t *testing.T) {
+	app := nsgotest.Start(t, isolatedRoot(t), nsgotest.Size(420, 800),
+		nsgotest.Environment(core.Environment{Dark: true}))
+	if v := app.Find("text:Bowerbird"); v == nil {
+		t.Fatal("connect screen missing in dark mode")
+	}
+	app.SetEnvironment(core.Environment{Dark: false})
+	if v := app.Find("id:connect.address"); v == nil {
+		t.Fatal("connect address missing after toggling light mode")
+	}
+}

@@ -50,7 +50,7 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 			})
 		}
 		return core.View{Style: core.Style{Gap: 6}, Children: []core.Node{
-			core.Text{Content: title, Style: nsui.TypeLabel.Merge(core.Style{Color: colors.Muted()})},
+			core.Text{Content: title, Style: nsui.TypeLabel, StyleFunc: nsui.Colored(colors.Muted)},
 			core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 6}, Children: btns},
 		}}
 	}
@@ -66,6 +66,7 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 	dynamicBody := core.Dynamic(func(cx *core.Scope) core.Node {
 		_ = a.rev.Get()
 		_ = a.filterOpen.Get()
+		_ = cx.Env().Dark()
 		tagOpts := [][2]string{{"全部", ""}}
 		for i, t := range a.tags {
 			if i >= 24 {
@@ -163,9 +164,10 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 		Children: []core.Node{
 			core.Show{When: func() bool { return !a.client.QuerySupported() }, Then: func(cx *core.Scope) core.Node {
 				return core.Text{
-					Content:  "旧版桌面端不支持大小/评分/链接/备注筛选，选择这些条件时将提示升级。",
-					MaxLines: 2,
-					Style:    nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()}),
+					Content:   "旧版桌面端不支持大小/评分/链接/备注筛选，选择这些条件时将提示升级。",
+					MaxLines:  2,
+					Style:     nsui.TypeCaption,
+					StyleFunc: nsui.Colored(colors.Muted),
 				}
 			}},
 			core.Scroll{

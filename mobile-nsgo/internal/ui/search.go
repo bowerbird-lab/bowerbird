@@ -90,7 +90,7 @@ func (a *App) searchPage(cx *core.Scope) core.Node {
 			core.Text{ContentFunc: func() string {
 				a.rev.Get()
 				return searchCount(a.searchGallery.Snapshot())
-			}, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+			}, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 			nsui.Button{Text: "重置", Variant: nsui.ButtonGhost, OnPress: func() {
 				a.searchText.Set("")
 				a.searchType.Set("")

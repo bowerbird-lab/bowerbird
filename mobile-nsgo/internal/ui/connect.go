@@ -31,14 +31,16 @@ func (a *App) connect(cx *core.Scope) core.Node {
 				Style: core.Style{Width: core.Pct(100), Gap: 14, Padding: core.Edges{Top: 32, Bottom: 24}},
 				Children: []core.Node{
 					core.View{Style: core.Style{Gap: 4}, Children: []core.Node{
-						core.Text{Content: "Bowerbird", Style: nsui.TypeHeading.Merge(core.Style{Color: colors.Text()})},
-						core.Text{Content: "连接电脑上的素材库", Style: nsui.TypeBody.Merge(core.Style{Color: colors.Muted()})},
+						core.Text{Content: "Bowerbird", Style: nsui.TypeHeading, StyleFunc: nsui.Colored(colors.Text)},
+						core.Text{Content: "连接电脑上的素材库", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Muted)},
 					}},
 					core.Show{When: func() bool { return a.legacyNotice.Get() != "" }, Then: func(cx *core.Scope) core.Node {
 						return core.View{
-							Style: core.Style{Padding: core.All(10), CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
+							StyleFunc: func() core.Style {
+								return core.Style{Padding: core.All(10), CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()}
+							},
 							Children: []core.Node{
-								core.Text{ContentFunc: a.legacyNotice.Get, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+								core.Text{ContentFunc: a.legacyNotice.Get, MaxLines: 3, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 							},
 						}
 					}},
@@ -102,12 +104,14 @@ func (a *App) recentRow(cx *core.Scope, c storage.Connection) core.Node {
 		name = c.BaseURL
 	}
 	return core.View{
-		Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
-			Padding: core.All(10), CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
+		StyleFunc: func() core.Style {
+			return core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
+				Padding: core.All(10), CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()}
+		},
 		Children: []core.Node{
 			core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{
-				core.Text{Content: name, MaxLines: 1, Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})},
-				core.Text{Content: c.BaseURL, MaxLines: 1, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+				core.Text{Content: name, MaxLines: 1, Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
+				core.Text{Content: c.BaseURL, MaxLines: 1, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 			}},
 			nsui.Button{Text: "重连", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.busy.Get() },
 				OnPress: func() { a.reconnect(cx, c) }, TestID: "connect.reconnect"},
@@ -139,12 +143,14 @@ func (a *App) serviceRow(cx *core.Scope, svc platform.Service) core.Node {
 		sub += " · 免配对"
 	}
 	return core.View{
-		Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
-			Padding: core.All(10), CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
+		StyleFunc: func() core.Style {
+			return core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
+				Padding: core.All(10), CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()}
+		},
 		Children: []core.Node{
 			core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{
-				core.Text{Content: svc.Name, MaxLines: 1, Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})},
-				core.Text{Content: sub, MaxLines: 1, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+				core.Text{Content: svc.Name, MaxLines: 1, Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
+				core.Text{Content: sub, MaxLines: 1, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 			}},
 			nsui.Button{Text: "使用", Variant: nsui.ButtonSecondary, OnPress: func() {
 				a.address.Set(address)

@@ -28,11 +28,11 @@ func (a *App) inboxPage(cx *core.Scope) core.Node {
 	header := core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
 		nsui.Button{Text: "返回", Variant: nsui.ButtonGhost, OnPress: back},
 		core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{
-			core.Text{Content: "收件箱", Style: nsui.TypeTitle.Merge(core.Style{Color: colors.Text()})},
+			core.Text{Content: "收件箱", Style: nsui.TypeTitle, StyleFunc: nsui.Colored(colors.Text)},
 			core.Text{ContentFunc: func() string {
 				a.rev.Get()
 				return inboxCount(a.inboxEntries)
-			}, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+			}, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 		}},
 		core.Show{When: func() bool { return a.inboxBusy.Get() }, Then: func(cx *core.Scope) core.Node {
 			return nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.cancelInboxUpload() }}
@@ -98,8 +98,10 @@ func (a *App) inboxRow(cx *core.Scope, row core.ListRow) core.Node {
 		return kind + size
 	}
 	return core.View{
-		Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
-			Padding: core.All(10), CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
+		StyleFunc: func() core.Style {
+			return core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
+				Padding: core.All(10), CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()}
+		},
 		OnPress: func(core.PressEvent) {
 			entry, ok := entryAt()
 			if ok && entry.Kind == "text" {
@@ -110,8 +112,8 @@ func (a *App) inboxRow(cx *core.Scope, row core.ListRow) core.Node {
 		},
 		Children: []core.Node{
 			core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{
-				core.Text{ContentFunc: name, MaxLines: 1, Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})},
-				core.Text{ContentFunc: meta, MaxLines: 2, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+				core.Text{ContentFunc: name, MaxLines: 1, Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
+				core.Text{ContentFunc: meta, MaxLines: 2, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 			}},
 			nsui.Button{Text: "上传", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.inboxBusy.Get() }, OnPress: func() {
 				entry, ok := entryAt()
