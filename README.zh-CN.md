@@ -102,7 +102,8 @@ macOS（arm64 + amd64 通用包）、Windows（免安装可执行文件与带 We
 │   ├── psd-preview/
 │   ├── prompt-metadata/
 │   └── pinterest/                    # 沙箱 URL 解析器
-└── packages/plugin-sdk/              # 原生插件 TypeScript 类型定义
+├── packages/plugin-sdk/              # 原生插件 TypeScript 类型定义
+└── packages/ui/                      # 浏览器扩展共用的 React 组件库
 ```
 
 ---

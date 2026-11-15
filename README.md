@@ -102,7 +102,8 @@ macOS (universal arm64 + amd64), Windows (portable executable and NSIS installer
 │   ├── psd-preview/
 │   ├── prompt-metadata/
 │   └── pinterest/                    # Sandboxed URL resolver
-└── packages/plugin-sdk/              # TypeScript definitions for native plugins
+├── packages/plugin-sdk/              # TypeScript definitions for native plugins
+└── packages/ui/                      # Shared React component kit used by the browser extension
 ```
 
 ---
