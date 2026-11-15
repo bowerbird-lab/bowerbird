@@ -1,0 +1,619 @@
+package app
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"bowerbird/core"
+	"bowerbird/internal/player"
+	"bowerbird/internal/plugin"
+	"bowerbird/internal/theme"
+
+	"github.com/egoist/mygo/transfer"
+	"github.com/egoist/mygo/ui"
+)
+
+// loadInspector fetches the full item and asks enabled plugins for extension
+// metadata. Results return on the main thread, tagged with a sequence so a fast
+// click through the gallery cannot show a stale item.
+func (a *App) loadInspector(id string) {
+	if a.svc == nil || id == "" {
+		a.inspectSections = nil
+		return
+	}
+	a.detailSeq++
+	seq := a.detailSeq
+	a.inspectSeq++
+	inspectSeq := a.inspectSeq
+	itemCopy := core.Item{}
+	if a.activeItem != nil {
+		itemCopy = *a.activeItem
+	}
+	go func() {
+		item, err := a.svc.GetItem(id)
+		if err == nil && item != nil {
+			itemCopy = *item
+		}
+		var sections []plugin.InspectSection
+		if a.pluginHost != nil {
+			ctxItem := pluginContext([]core.Item{itemCopy}, a.folderID).Items[0]
+			// Text plugins (markdown frontmatter/outline) need the actual
+			// document. The worker cannot read arbitrary files, so the host
+			// supplies a bounded UTF-8 copy instead.
+			if isTextDocument(itemCopy.Extension) && itemCopy.FilePath != "" {
+				if data, readErr := readFilePrefix(itemCopy.FilePath, 512<<10); readErr == nil {
+					ctxItem["content"] = string(data)
+				}
+			}
+			sections = a.pluginHost.Inspect(ctxItem)
+		}
+		a.post(func() {
+			if seq != a.detailSeq || inspectSeq != a.inspectSeq {
+				return
+			}
+			if err == nil && item != nil {
+				a.activeItem = item
+				a.renameValue = item.Name
+				a.ratingDraft = item.Rating
+				a.noteDraft = item.Note
+				a.promptDraft = item.Prompt
+				a.urlDraft = item.URL
+			}
+			a.inspectSections = sections
+		})
+	}()
+}
+
+func (a *App) viewInspector(c *ui.Context) {
+	p := a.palette(c)
+	top := float32(inspectorTopHeight)
+	if bar := c.TitleBar(); bar.Right > 0 {
+		top = maxF(top, bar.Height)
+	}
+	ui.Column(c).Width(a.inspectorWidth).FillHeight().Background(p.sidebar).Children(func() {
+		ui.Row(c).Height(top).PaddingX(14).AlignItems(ui.Center).DragWindow()
+		ui.Scroll(c).Grow(1).Shrink(1).Padding(0, 14, 20, 14).Children(func() {
+			if len(a.selected) > 1 {
+				a.viewMultiInspector(c)
+				return
+			}
+			if a.activeItem == nil {
+				a.viewLibraryInspector(c)
+				return
+			}
+			a.viewSingleInspector(c, *a.activeItem)
+		})
+		a.viewInspectorResizer(c)
+	})
+}
+
+// viewLibraryInspector fills the empty inspector with the active library's
+// identity and workspace totals, so the panel stays useful when nothing is
+// selected.
+func (a *App) viewLibraryInspector(c *ui.Context) {
+	p := a.palette(c)
+	if a.library == nil {
+		a.emptyState(c, iconLibrary, a.t("sidebar.noLibrary"), a.t("inspector.noSelectionHint"))
+		return
+	}
+	lib := a.library
+	openFolder := func() {
+		if a.svc != nil {
+			_ = a.svc.OpenFolder(lib.Path)
+		}
+	}
+	ui.Column(c).FillWidth().Gap(10).Children(func() {
+		// The editable tile and name are the header: no "current library"
+		// caption repeats them.
+		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+			a.libraryIconTrigger(c, lib)
+			if a.libNameEdit {
+				ui.Row(c).Grow(1).Shrink(1).MinWidth(0).AlignItems(ui.Center).Gap(4).Children(func() {
+					ui.TextInput(c.Key("library-name"), &a.libNameValue).FontSize(13.5).
+						Grow(1).Shrink(1).MinWidth(0).AutoFocus().OnSubmit(a.commitLibraryRename)
+					a.iconButton(c, "library-name-save", iconCheck, false, a.t("common.save"), a.commitLibraryRename)
+				})
+			} else {
+				ui.Text(c, lib.Name).FontSize(15).FontWeight(650).TextColor(p.text).Grow(1).Shrink(1).MinWidth(0).SingleLine()
+				a.iconButton(c, "library-rename", iconPencil, false, a.t("inspector.renameLibrary"), a.beginLibraryRename)
+			}
+		})
+		a.inspectorDivider(c)
+		a.metaRow(c, a.t("settings.storage.items"), fmt.Sprintf("%d", a.stats.Total))
+		a.metaRow(c, a.t("inspector.storageUsed"), formatBytes(a.stats.TotalSize))
+		a.metaRow(c, a.t("sidebar.folders"), fmt.Sprintf("%d", len(a.folderIndex().all)))
+		a.metaRow(c, a.t("sidebar.tags"), fmt.Sprintf("%d", len(a.tags)))
+		a.metaRow(c, a.t("inspector.createdAt"), formatDate(lib.CreatedAt))
+
+		// The library folder sits in the details. Hovering the row shows the
+		// path; the single Open button reveals it in the file manager.
+		a.inspectorDivider(c)
+		row := ui.Row(c).FillWidth().Height(22).AlignItems(ui.Center).Gap(6).Tooltip(lib.Path)
+		row.Children(func() {
+			ui.Text(c, strings.ToUpper(a.t("inspector.libraryPath"))).FontSize(10).FontWeight(650).LetterSpacing(0.6).TextColor(p.faint).Grow(1)
+			open := ui.ButtonBase(c.Key("library-open")).Height(22).PaddingX(6).Radius(5).FocusRing(false).AlignItems(ui.Center).Gap(4).Tooltip(lib.Path)
+			if open.Hovered() {
+				open.Background(p.hover)
+			}
+			open.Children(func() {
+				ui.Icon(c, iconFolder).Size(12, 12).TextColor(p.muted)
+				ui.Text(c, a.t("settings.storage.open")).FontSize(10.5).TextColor(p.muted)
+			})
+			if open.Clicked() {
+				openFolder()
+			}
+		})
+	})
+}
+
+func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
+	p := a.palette(c)
+	ui.Column(c).FillWidth().Gap(10).Children(func() {
+		// Hero thumbnail.
+		w := a.inspectorWidth - 28
+		h := w * 0.66
+		if item.Width > 0 && item.Height > 0 {
+			h = w * float32(item.Height) / float32(item.Width)
+		}
+		if h > 240 {
+			h = 240
+		}
+		if h < 80 {
+			h = 80
+		}
+		hero := ui.Box(c).FillWidth().Height(h).Radius(10).Background(p.surface2).Clip().Cursor(ui.CursorPointer)
+		// The hero is also a drag source, like a gallery card: drag the
+		// active item (or the whole selection) out to Finder or another app,
+		// or onto a folder row to classify it.
+		if hero.Hovered() || hero.Pressed() {
+			hero.Drag(sidebarDrag{ItemIDs: a.itemDragIDs(item)})
+		}
+		hero.DragDataFrom(func() transfer.Data { return a.itemDragData(item) }, a.dragOptions(hero, item))
+		path := ""
+		if item.HasThumbnail {
+			path = filepath.Join(item.ItemPath, "thumbnail.jpg")
+		} else if categoryOf(item) == "image" {
+			path = item.FilePath
+		}
+		bmp := a.thumbs.get(path, int(w*2))
+		hero.Children(func() {
+			if bmp != nil {
+				ui.Image(c, bmp).Fill().Fit(ui.Contain)
+			} else {
+				ui.Column(c).Fill().Center().Children(func() {
+					ui.Icon(c, categoryIcon(item)).Size(30, 30).TextColor(p.faint)
+				})
+			}
+		})
+		if hero.DoubleClicked() {
+			a.clearItemClick()
+			a.openPreview(item.ID, "inline")
+		} else if hero.Clicked() && a.itemClickCompletesDouble(item.ID) {
+			a.openPreview(item.ID, "inline")
+		}
+
+		// File name, edited inline.
+		ui.TextInput(c.Key("rename"), &a.renameValue).FontSize(14).FontWeight(600).OnSubmit(func() {
+			name := strings.TrimSpace(a.renameValue)
+			if name == "" || name == item.Name {
+				return
+			}
+			go func() {
+				updated, err := a.svc.RenameItem(item.ID, name)
+				a.post(func() {
+					if err != nil {
+						a.showToast(err.Error())
+						return
+					}
+					if updated != nil {
+						a.activeItem = updated
+					}
+					a.refreshAll()
+				})
+			}()
+		})
+		ui.Text(c, fmt.Sprintf("%s · %dx%d · %s", strings.ToUpper(item.Extension), item.Width, item.Height, formatBytes(item.Size))).FontSize(10.5).TextColor(p.faint).FontFeatures("tnum")
+
+		// The palette opens the details: the colors are what the item reads as
+		// first, and a swatch copies its hex.
+		if len(item.Palette) > 0 {
+			a.inspectorDivider(c)
+			a.sectionLabel(c, a.t("inspector.colorPalette"))
+			ui.Row(c).FillWidth().Height(24).Gap(4).Margin(2, 0, 0, 0).Children(func() {
+				for i, hex := range item.Palette {
+					if i >= 8 {
+						break
+					}
+					col, err := theme.ParseColor(hex)
+					if err != nil {
+						continue
+					}
+					hex := hex
+					sw := ui.ButtonBase(c.Key("swatch-"+hex+fmt.Sprint(i))).Grow(1).Height(18).Radius(5).Background(col).Border(1, p.hairline).FocusRing(false)
+					sw.Tooltip(hex)
+					if sw.Clicked() {
+						_ = a.svc.WriteClipboardText(hex)
+						a.showToast(a.tf("inspector.copiedHex", map[string]any{"hex": hex}))
+					}
+				}
+			})
+		}
+
+		// The link and the note come next: they are what the item is for, and
+		// the facts below them only describe it.
+		a.inspectorDivider(c)
+		a.sectionLabel(c, a.t("inspector.sourceUrl"))
+		ui.TextInput(c.Key("url"), &a.urlDraft).FontSize(11.5).OnSubmit(func() { a.saveDetails(item.ID) })
+		if item.URL != "" {
+			if ui.Link(c, a.t("inspector.openSource"), item.URL).FontSize(11).Clicked() {
+				_ = a.svc.OpenExternalURL(item.URL)
+			}
+		}
+		a.sectionLabel(c, a.t("inspector.note"))
+		ui.TextArea(c.Key("note"), &a.noteDraft).FontSize(12).Height(64).OnSubmit(func() { a.saveDetails(item.ID) })
+
+		a.inspectorDivider(c)
+		a.sectionLabel(c, a.t("inspector.tags"))
+		ui.Row(c).FillWidth().Wrap().Gap(5).Children(func() {
+			for _, tag := range item.Tags {
+				tag := tag
+				chip := ui.ButtonBase(c.Key("tag-"+tag)).Height(22).PaddingX(7).Radius(999).Background(p.surface2).Border(1, p.hairline).FocusRing(false).AlignItems(ui.Center).Gap(4)
+				chip.Children(func() {
+					ui.Text(c, tag).FontSize(10.5).TextColor(p.text)
+					ui.Icon(c, iconClose).Size(9, 9).TextColor(p.faint)
+				})
+				chip.Tooltip(a.t("inspector.removeTag"))
+				if chip.Clicked() {
+					go func() {
+						err := a.svc.RemoveTagFromItem(item.ID, tag)
+						a.post(func() {
+							if err != nil {
+								a.showToast(err.Error())
+							}
+							a.refreshAll()
+						})
+					}()
+				}
+			}
+			a.tagAddButton(c, []core.Item{item}, true)
+		})
+
+		a.inspectorDivider(c)
+		a.inspectorFolders(c, []core.Item{item}, item.Folders,
+			a.tf("inspector.foldersCount", map[string]any{"count": len(item.Folders)}))
+
+		a.inspectorDivider(c)
+		if a.nativeFeature("official.prompt-metadata") {
+			a.sectionLabel(c, a.t("inspector.prompt"))
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.Text(c, a.t("inspector.promptHelp")).FontSize(10.5).TextColor(p.faint).Grow(1).Shrink(1)
+				a.iconButton(c, "prompt-toggle", iconChevron, a.promptOpen, a.t("inspector.expand"), func() { a.promptOpen = !a.promptOpen })
+			})
+			if a.promptOpen {
+				ui.TextArea(c.Key("prompt"), &a.promptDraft).FontSize(12).Height(110)
+				ui.Row(c).Gap(6).Children(func() {
+					if ui.Button(c, a.t("common.save")).Clicked() {
+						a.saveDetails(item.ID)
+					}
+					if ui.Button(c, a.t("common.copy")).Clicked() {
+						_ = a.svc.WriteClipboardText(a.promptDraft)
+						a.showToast(a.t("common.copied"))
+					}
+				})
+			} else if strings.TrimSpace(item.Prompt) != "" {
+				ui.Text(c, item.Prompt).FontSize(11.5).TextColor(p.muted).MaxLines(3).Wrap()
+			}
+		}
+
+		// Built-in PSD facts (the composite preview is handled by the preview
+		// layer; the layer tree is shown there too).
+		if (strings.EqualFold(item.Extension, "psd") || strings.EqualFold(item.Extension, "psb")) && a.nativeFeature("official.psd-preview") {
+			a.inspectorDivider(c)
+			a.sectionLabel(c, a.t("inspector.psd"))
+			a.metaRow(c, a.t("inspector.format"), "Photoshop Document")
+			a.metaRow(c, a.t("inspector.colorMode"), "RGB / composite")
+			a.metaRow(c, a.t("inspector.layers"), a.t("inspector.psdLayersHint"))
+		}
+
+		// Plugin-provided sections are rendered with the same native rows.
+		for _, section := range a.inspectSections {
+			a.inspectorDivider(c)
+			a.sectionLabel(c, section.Title)
+			for _, row := range section.Rows {
+				a.metaRowCopy(c, row.Label, row.Value, row.Copyable)
+			}
+			for _, block := range section.TextBlocks {
+				ui.Text(c, block.Title).FontSize(10).FontWeight(650).TextColor(p.faint).Margin(4, 0, 0, 0)
+				ui.Text(c, block.Text).FontSize(11.5).TextColor(p.muted).Wrap().MaxLines(8)
+			}
+		}
+
+		a.inspectorDivider(c)
+		a.sectionLabel(c, a.t("inspector.metadata"))
+		a.metaRow(c, a.t("inspector.filename"), item.Filename)
+		a.metaRow(c, a.t("inspector.dimensions"), fmt.Sprintf("%d × %d", item.Width, item.Height))
+		a.metaRow(c, a.t("inspector.size"), formatBytes(item.Size))
+		a.metaRow(c, a.t("inspector.mimeType"), item.MimeType)
+		if item.Meta != nil {
+			if item.Meta.ColorSpace != "" {
+				a.metaRow(c, a.t("inspector.colorSpace"), item.Meta.ColorSpace)
+			}
+			if item.Meta.Megapixels != "" {
+				a.metaRow(c, a.t("inspector.megapixels"), item.Meta.Megapixels)
+			}
+			if item.Meta.ExifModel != "" {
+				a.metaRow(c, a.t("inspector.camera"), strings.TrimSpace(item.Meta.ExifMake+" "+item.Meta.ExifModel))
+			}
+		}
+		a.metaRow(c, a.t("inspector.created"), formatDate(item.CreatedAt))
+		a.metaRow(c, a.t("inspector.imported"), formatDate(item.ImportedAt))
+		a.metaRow(c, a.t("inspector.hex"), item.Hex)
+		// The rating is one more fact about the item, so it reads as a metadata
+		// row: its label on the left, the stars it is set with beside it, on the
+		// same column as the other values.
+		ui.Row(c).FillWidth().Height(24).AlignItems(ui.Center).Gap(6).Children(func() {
+			ui.Text(c, a.t("inspector.rating")).FontSize(11).TextColor(p.faint).Width(104).Shrink(0)
+			a.ratingStars(c, "rate", a.ratingDraft, func(rating int) {
+				a.ratingDraft = rating
+				a.saveDetails(item.ID)
+			})
+		})
+
+		// Native audio preview for audio items.
+		if categoryOf(item) == "audio" && a.nativeFeature("official.audio-player") {
+			a.inspectorAudio(c, item)
+		}
+	})
+}
+
+func (a *App) saveDetails(id string) {
+	if a.svc == nil {
+		return
+	}
+	note, url, prompt, rating := a.noteDraft, a.urlDraft, a.promptDraft, a.ratingDraft
+	go func() {
+		item, err := a.svc.UpdateItemDetails(id, note, url, rating, prompt)
+		a.post(func() {
+			if err != nil {
+				a.showToast(err.Error())
+				return
+			}
+			if item != nil {
+				a.activeItem = item
+			}
+			a.refreshAll()
+		})
+	}()
+}
+
+func (a *App) addTagToActive() {
+	tag := strings.TrimSpace(a.dialogValue)
+	if tag == "" || a.activeItemID == "" {
+		a.dialog = dialogNone
+		return
+	}
+	id := a.activeItemID
+	a.dialogValue = ""
+	a.dialog = dialogNone
+	go func() {
+		err := a.svc.AddTagToItem(id, tag)
+		a.post(func() {
+			if err != nil {
+				a.showToast(err.Error())
+			}
+			a.refreshAll()
+		})
+	}()
+}
+
+func (a *App) inspectorDivider(c *ui.Context) {
+	p := a.palette(c)
+	ui.Box(c).FillWidth().Height(1).Background(p.hairline).MarginY(4)
+}
+
+func (a *App) metaRow(c *ui.Context, label, value string) {
+	a.metaRowCopy(c, label, value, false)
+}
+
+func (a *App) metaRowCopy(c *ui.Context, label, value string, copyable bool) {
+	p := a.palette(c)
+	if value == "" {
+		return
+	}
+	ui.Row(c).FillWidth().Height(24).AlignItems(ui.Center).Gap(6).Children(func() {
+		ui.Text(c, label).FontSize(11).TextColor(p.faint).Width(104).Shrink(0)
+		ui.Text(c, value).FontSize(11).TextColor(p.muted).Grow(1).Shrink(1).MinWidth(0).SingleLine()
+		if copyable {
+			if ui.ButtonBase(c.Key("copy-"+label+value)).Size(18, 18).Radius(4).FocusRing(false).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+				ui.Icon(c, iconCopy).Size(11, 11).TextColor(p.faint)
+			}).Clicked() {
+				_ = a.svc.WriteClipboardText(value)
+				a.showToast(a.t("common.copied"))
+			}
+		}
+	})
+}
+
+// inspectorFolders shows the folders the items live in, plus the plus that
+// opens the folder picker. The rows are chips like the tags above them, and
+// are read only: the picker adds, the context menu removes.
+func (a *App) inspectorFolders(c *ui.Context, items []core.Item, folderIDs []string, label string) {
+	p := a.palette(c)
+	index := a.folderIndex()
+	a.sectionLabel(c, label)
+	ui.Row(c).FillWidth().Wrap().Gap(5).Children(func() {
+		for _, id := range folderIDs {
+			folder, ok := index.byID[id]
+			if !ok {
+				continue
+			}
+			chip := ui.Row(c).Height(22).PaddingX(7).Radius(999).Background(p.surface2).Border(1, p.hairline).AlignItems(ui.Center).Gap(4)
+			chip.Tooltip(index.pathOf(id))
+			chip.Children(func() {
+				ui.Icon(c, iconFolder).Size(10, 10).TextColor(p.muted)
+				ui.Text(c, folder.Name).FontSize(10.5).TextColor(p.text).SingleLine()
+			})
+		}
+		a.folderAddButton(c, items, len(folderIDs) == 0)
+	})
+}
+
+// folderAddButton is the plus that opens the folder picker, with its label
+// when there is no folder chip beside it to explain it.
+func (a *App) folderAddButton(c *ui.Context, items []core.Item, withLabel bool) {
+	p := a.palette(c)
+	b := ui.ButtonBase(c.Key("folder-add")).Height(22).PaddingX(7).Radius(999).Background(p.hover).FocusRing(false).AlignItems(ui.Center).Gap(3)
+	b.Tooltip(a.t("inspector.addToFolder"))
+	b.Children(func() {
+		ui.Icon(c, iconPlus).Size(10, 10).TextColor(p.muted)
+		if withLabel {
+			ui.Text(c, a.t("inspector.addToFolder")).FontSize(10.5).TextColor(p.muted)
+		}
+	})
+	if b.Clicked() {
+		a.openFolderPicker(items)
+	}
+}
+
+func (a *App) viewMultiInspector(c *ui.Context) {
+	p := a.palette(c)
+	stacked, selectedCount, totalSize := a.selectionSummary()
+	stacked = a.stackWorkspaceCards(stacked)
+	// The folders a selection can name are the ones every item is already in.
+	items := a.selectedItems()
+	ui.Column(c).FillWidth().Gap(14).Children(func() {
+		// 堆叠层叠效果: 固定容器宽高并在水平/垂直中心对齐
+		const areaH = float32(160)
+		areaW := a.inspectorWidth - 28 // 扣除 Scroll padding (14*2)
+		ui.Box(c).Size(areaW, areaH).Children(func() {
+			stackPresets := []struct {
+				rotate float32
+				dx, dy float32
+			}{
+				{rotate: 0, dx: 0, dy: 0},
+				{rotate: -5, dx: -8, dy: 4},
+				{rotate: 6, dx: 7, dy: 6},
+				{rotate: -8, dx: -12, dy: 9},
+				{rotate: 8, dx: 11, dy: 12},
+			}
+			// 从底到顶绘制 (idx: 0 是最底层, 最后一张是顶层)
+			for idx, it := range stacked {
+				offsetFromTop := len(stacked) - 1 - idx
+				preset := stackPresets[offsetFromTop%len(stackPresets)]
+
+				const stackH = float32(120)
+				ratio := float32(1.33)
+				if it.Width > 0 && it.Height > 0 {
+					ratio = float32(it.Width) / float32(it.Height)
+					if ratio < 0.6 {
+						ratio = 0.6
+					} else if ratio > 2.0 {
+						ratio = 2.0
+					}
+				}
+				stackW := stackH * ratio
+
+				cardLeft := (areaW-stackW)*0.5 + preset.dx
+				cardTop := (areaH-stackH)*0.5 + preset.dy
+
+				cardBox := ui.Box(c.Key(fmt.Sprintf("stack-%s", it.ID))).
+					Absolute().
+					Left(cardLeft).
+					Top(cardTop).
+					Width(stackW).
+					Height(stackH).
+					Radius(6).
+					Background(p.surface2).
+					Border(1, p.hairline).
+					Shadow(0, 4, 10, 0, p.cardShade).
+					Clip().
+					Rotate(preset.rotate)
+				path := ""
+				if it.HasThumbnail {
+					path = filepath.Join(it.ItemPath, "thumbnail.jpg")
+				} else if categoryOf(it) == "image" {
+					path = it.FilePath
+				}
+				if bmp := a.thumbs.get(path, 240); bmp != nil {
+					cardBox.Children(func() {
+						ui.Image(c, bmp).Fill().Fit(ui.Cover)
+					})
+				}
+			}
+		})
+
+		// 选中文本与容量汇总
+		ui.Column(c).FillWidth().Center().Gap(2).Children(func() {
+			ui.Text(c, a.tf("inspector.selectedCount", map[string]any{"count": selectedCount})).
+				FontSize(14).FontWeight(650).TextColor(p.text).TextAlign(ui.Center)
+			ui.Text(c, formatBytes(totalSize)).
+				FontSize(11).TextColor(p.muted).FontFeatures("tnum").TextAlign(ui.Center)
+		})
+		a.sectionLabel(c, a.t("inspector.rating"))
+		a.ratingStars(c, "batch-rate", sharedRating(items), func(rating int) {
+			if a.svc == nil {
+				return
+			}
+			ids := a.selectedIDs()
+			go func() {
+				for _, id := range ids {
+					item, err := a.svc.GetItem(id)
+					if err == nil && item != nil {
+						_, _ = a.svc.UpdateItemDetails(id, item.Note, item.URL, rating, item.Prompt)
+					}
+				}
+				a.post(func() { a.refreshAll() })
+			}()
+		})
+		// Tags are added from the picker: it lists the library's tags, where
+		// the section label alone would only repeat the button.
+		ui.Row(c).Gap(6).Children(func() {
+			a.tagAddButton(c, items, true)
+		})
+		a.inspectorFolders(c, items, sharedFolders(items), a.t("multiInspector.folders"))
+		a.inspectorDivider(c)
+		ui.Row(c).Gap(8).Children(func() {
+			if ui.Button(c, a.deleteActionLabel()).Clicked() {
+				a.deleteSelection()
+			}
+			if ui.Button(c, a.t("common.deselect")).Clicked() {
+				a.clearSelection()
+			}
+		})
+	})
+}
+
+func (a *App) inspectorAudio(c *ui.Context, item core.Item) {
+	p := a.palette(c)
+	a.inspectorDivider(c)
+	a.sectionLabel(c, a.t("inspector.audio"))
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		if ui.Button(c.Key("audio-toggle"), map[bool]string{true: "❚❚", false: "▶"}[a.player != nil && a.player.Playing()]).Size(34, 34).Radius(999).Clicked() {
+			if a.player == nil {
+				go func() {
+					pl, err := player.Open(item.FilePath)
+					a.post(func() {
+						if err != nil {
+							a.showToast(err.Error())
+							return
+						}
+						a.player = pl
+						pl.Play()
+					})
+				}()
+			} else {
+				a.player.Toggle()
+			}
+		}
+		ui.Column(c).Grow(1).Gap(4).Children(func() {
+			if a.player != nil {
+				dur := a.player.Duration().Seconds()
+				pos := a.player.Position().Seconds()
+				ui.Text(c, formatDuration(pos)+" / "+formatDuration(dur)).FontSize(10.5).TextColor(p.muted).FontFeatures("tnum")
+			} else {
+				ui.Text(c, a.t("inspector.pressPlay")).FontSize(10.5).TextColor(p.faint)
+			}
+		})
+	})
+}

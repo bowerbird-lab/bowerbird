@@ -255,6 +255,7 @@ func (m *LibraryManager) CreateLibrary(parentDir string, libName string) (*Libra
 		ID        string `json:"id"`
 		Name      string `json:"name"`
 		Version   string `json:"version"`
+		Icon      string `json:"icon,omitempty"`
 		CreatedAt int64  `json:"createdAt"`
 	}{
 		ID:        libID,
@@ -325,6 +326,7 @@ func (m *LibraryManager) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 	var meta struct {
 		ID        string `json:"id"`
 		Name      string `json:"name"`
+		Icon      string `json:"icon"`
 		CreatedAt int64  `json:"createdAt"`
 	}
 	if err := json.Unmarshal(data, &meta); err != nil {
@@ -359,16 +361,12 @@ func (m *LibraryManager) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 		ID:        meta.ID,
 		Name:      meta.Name,
 		Path:      libraryPath,
+		Icon:      meta.Icon,
 		CreatedAt: meta.CreatedAt,
 		ItemCount: count,
 	}
 	m.invalidateCache()
 	m.mu.Unlock()
-	go func() {
-		_ = m.ensureCacheLoaded()
-		m.backfillImageMetadata(libraryPath)
-	}()
-
 	// Persist to user data store so next launch reloads automatically
 	if m.userData != nil {
 		_ = m.userData.SetActiveLibraryPath(libraryPath)
@@ -385,6 +383,136 @@ func (m *LibraryManager) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 
 	RecordLog("info", "core", "Opened library", fmt.Sprintf("name=%s items=%d path=%s", meta.Name, count, libraryPath), time.Since(start).Milliseconds())
 	return m.activeLib, nil
+}
+
+// UpdateLibraryDetails rewrites the active library's editable identity: its
+// display name and its icon. The icon is "" for the default, a built-in icon
+// name, or LibraryIconCustom for the picture SaveLibraryIcon writes. Icon names
+// are opaque to core so the UI can add pictures without a core change.
+func (m *LibraryManager) UpdateLibraryDetails(name, icon string) (*LibraryInfo, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errors.New("library name is required")
+	}
+	icon = strings.TrimSpace(icon)
+	if icon == LibraryIconCustom {
+		if _, err := os.Stat(m.LibraryIconPath()); err != nil {
+			return nil, errors.New("library has no custom icon picture")
+		}
+	}
+	return m.updateLibrary(func(lib *LibraryInfo) {
+		lib.Name = name
+		lib.Icon = icon
+	})
+}
+
+// SaveLibraryIcon stores png as the active library's custom icon, points the
+// library at it, and returns the refreshed info.
+func (m *LibraryManager) SaveLibraryIcon(png []byte) (*LibraryInfo, error) {
+	if len(png) == 0 {
+		return nil, errors.New("icon picture is empty")
+	}
+	// Hold the lock across the write and the manifest so switching libraries
+	// mid-save cannot point one library at another's picture.
+	m.mu.Lock()
+	if m.activeLib == nil {
+		m.mu.Unlock()
+		return nil, ErrNoActiveLibrary
+	}
+	updated := *m.activeLib
+	if err := os.WriteFile(filepath.Join(updated.Path, LibraryIconFile), png, 0644); err != nil {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("failed to save library icon: %w", err)
+	}
+	updated.Icon = LibraryIconCustom
+	if err := writeLibraryManifest(&updated); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	m.activeLib = &updated
+	m.mu.Unlock()
+
+	m.broadcastLibrary(&updated)
+	return &updated, nil
+}
+
+// LibraryIconPath returns where the active library's custom icon picture lives,
+// or "" when no library is mounted.
+func (m *LibraryManager) LibraryIconPath() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.activeLib == nil {
+		return ""
+	}
+	return filepath.Join(m.activeLib.Path, LibraryIconFile)
+}
+
+// updateLibrary applies mutate to a copy of the active library, rewrites its
+// manifest, and publishes the copy: the UI may still hold the old pointer.
+func (m *LibraryManager) updateLibrary(mutate func(*LibraryInfo)) (*LibraryInfo, error) {
+	m.mu.Lock()
+	if m.activeLib == nil {
+		m.mu.Unlock()
+		return nil, ErrNoActiveLibrary
+	}
+	updated := *m.activeLib
+	mutate(&updated)
+	if err := writeLibraryManifest(&updated); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	m.activeLib = &updated
+	m.mu.Unlock()
+
+	m.broadcastLibrary(&updated)
+	return &updated, nil
+}
+
+// writeLibraryManifest rewrites the editable fields of library.json, keeping
+// the version and any field another build wrote for the library.
+func writeLibraryManifest(lib *LibraryInfo) error {
+	if lib == nil || lib.Path == "" {
+		return errors.New("library path is required")
+	}
+	manifestPath := filepath.Join(lib.Path, libraryManifestName)
+	raw := map[string]any{}
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return fmt.Errorf("corrupted library.json: %w", err)
+		}
+	}
+	raw["id"] = lib.ID
+	raw["name"] = lib.Name
+	if _, ok := raw["createdAt"]; !ok {
+		raw["createdAt"] = lib.CreatedAt
+	}
+	if lib.Icon == "" {
+		delete(raw, "icon")
+	} else {
+		raw["icon"] = lib.Icon
+	}
+	data, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(manifestPath, append(data, '\n'), 0644); err != nil {
+		return fmt.Errorf("failed to write library.json: %w", err)
+	}
+	return nil
+}
+
+// broadcastLibrary tells LAN clients the library changed identity.
+func (m *LibraryManager) broadcastLibrary(lib *LibraryInfo) {
+	if m.mobileServer == nil || lib == nil {
+		return
+	}
+	m.mobileServer.Broadcast("library_changed", map[string]any{
+		"id":        lib.ID,
+		"name":      lib.Name,
+		"path":      lib.Path,
+		"icon":      lib.Icon,
+		"itemCount": lib.ItemCount,
+	})
 }
 
 // CloseLibrary unmounts the active library and updates user data.
@@ -874,8 +1002,11 @@ func (m *LibraryManager) GetItems(query string, sortOrder string) ([]Item, error
 		return []Item{}, nil
 	}
 
-	if err := m.ensureCacheLoaded(); err != nil {
-		return nil, err
+	m.cacheMu.RLock()
+	loaded := m.cacheLoaded
+	m.cacheMu.RUnlock()
+	if !loaded {
+		return m.diskAllItems(query, sortOrder, false)
 	}
 
 	m.cacheMu.RLock()
@@ -983,6 +1114,7 @@ func (m *LibraryManager) GetItem(id string) (*Item, error) {
 		item.UpdatedAt = item.ImportedAt
 	}
 	item.InTrash = inTrashInt == 1
+	item.HasThumbnail = hasThumbInt == 1
 	if paletteStr != "" {
 		item.Palette = strings.Split(paletteStr, ",")
 	} else {
@@ -1059,9 +1191,16 @@ func (m *LibraryManager) importFilesWithProgress(sourcePaths []string, onProgres
 
 	_ = m.ensureCacheLoaded()
 
-	// 1. Flatten directories to count total files for accurate progress
+	// 1. Flatten directories to count total files for accurate progress.
+	// Files already inside the active library are never imported again: they
+	// are the library's own payload, not a new source. This check runs before
+	// hashing/copying so a self-drop costs no I/O at all.
+	activePath := filepath.Clean(active.Path)
 	var allFiles []string
 	for _, srcPath := range sourcePaths {
+		if pathIsWithin(activePath, srcPath) {
+			continue
+		}
 		info, err := os.Stat(srcPath)
 		if err != nil {
 			continue
@@ -1073,6 +1212,9 @@ func (m *LibraryManager) importFilesWithProgress(sourcePaths []string, onProgres
 					return nil
 				}
 				if d.IsDir() {
+					if pathIsWithin(activePath, path) {
+						return filepath.SkipDir
+					}
 					if path != srcPath && strings.HasPrefix(d.Name(), ".") {
 						return filepath.SkipDir
 					}
@@ -1086,14 +1228,14 @@ func (m *LibraryManager) importFilesWithProgress(sourcePaths []string, onProgres
 				// re-import every items/<HEX>/metadata.json as a new asset, which
 				// then generated another metadata.json — a self-feeding loop that
 				// filled libraries with empty "metadata" items.
-				if isLibraryBookkeeping(path) {
+				if isLibraryBookkeeping(path) || pathIsWithin(activePath, path) {
 					return nil
 				}
 				allFiles = append(allFiles, path)
 				return nil
 			})
 		} else {
-			if isLibraryBookkeeping(srcPath) {
+			if isLibraryBookkeeping(srcPath) || pathIsWithin(activePath, srcPath) {
 				continue
 			}
 			allFiles = append(allFiles, srcPath)
@@ -1367,23 +1509,42 @@ const (
 	itemMetadataName    = "metadata.json"
 )
 
-// isLibraryBookkeeping reports whether path is one of the library's own
-// management files or sits inside a .library container's structural folders
-// (items/<HEX>/...), so it must never be imported as an asset.
+// LibraryIconCustom is the LibraryInfo.Icon value naming the picture saved in
+// LibraryIconFile instead of a built-in icon.
+const LibraryIconCustom = "custom"
+
+// LibraryIconFile is the picture a custom library icon lives in, inside the
+// library container beside library.json.
+const LibraryIconFile = "library-icon.png"
+
+// pathIsWithin reports whether target is base itself or below it, using
+// path components rather than a raw string prefix, so /lib does not match
+// /library.
+func pathIsWithin(base, target string) bool {
+	if base == "" || target == "" {
+		return false
+	}
+	base = filepath.Clean(base)
+	target = filepath.Clean(target)
+	if runtime.GOOS == "windows" {
+		base = strings.ToLower(base)
+		target = strings.ToLower(target)
+	}
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// isLibraryBookkeeping reports whether path is one of a library's management
+// files. Paths belonging to the active library itself are excluded separately
+// with pathIsWithin; files from other libraries stay importable.
 func isLibraryBookkeeping(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
 	switch base {
-	case libraryManifestName, libraryDBName, libraryDBName + "-wal", libraryDBName + "-shm", itemMetadataName:
+	case libraryManifestName, libraryDBName, libraryDBName + "-wal", libraryDBName + "-shm", itemMetadataName, LibraryIconFile:
 		return true
-	}
-
-	// Anything nested under a .library container on disk belongs to that
-	// library, including thumbnails and the per-item directories.
-	slashed := filepath.ToSlash(path)
-	for _, segment := range strings.Split(slashed, "/") {
-		if strings.HasSuffix(strings.ToLower(segment), ".library") {
-			return true
-		}
 	}
 	return false
 }
@@ -1461,6 +1622,12 @@ func (m *LibraryManager) prepareSingleFileImport(job importJob) preparedImportRe
 
 	if active == nil || db == nil {
 		return preparedImportResult{index: job.index, srcPath: srcPath, err: errors.New("no active library")}
+	}
+	// The single-file fast path and direct import calls bypass the bulk
+	// filter above; never re-import a file that is already the active
+	// library's own payload.
+	if pathIsWithin(active.Path, srcPath) {
+		return preparedImportResult{index: job.index, srcPath: srcPath}
 	}
 
 	stat, err := os.Stat(srcPath)
@@ -1940,6 +2107,11 @@ func (m *LibraryManager) ImportFromURL(rawURL string) (*Item, error) {
 }
 
 // ImportFromURLWithOptions downloads a remote resource with custom headers and item metadata options.
+//
+// The URL is downloaded as-is: no page scraping or second-level URL parsing
+// happens here. A caller that knows the real media URL (a plugin resolver or
+// the drop target's HTML fragment) passes it directly, so an unmatched image
+// URL is always a single direct download.
 func (m *LibraryManager) ImportFromURLWithOptions(rawURL string, opts ImportItemOptions) (*Item, error) {
 	trimmed := strings.TrimSpace(rawURL)
 	if trimmed == "" {
@@ -1978,6 +2150,29 @@ func (m *LibraryManager) ImportFromURLWithOptions(rawURL string, opts ImportItem
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch network resource: %w", err)
 	}
+	// A CDN with hotlink protection answers 401/403 for a bare image request.
+	// Retrying once with the media origin as Referer is harmless and fixes the
+	// common "drag an image out of a page" case where the page URL is unknown.
+	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) &&
+		!hasHeaderFold(opts.Headers, "Referer") {
+		if referer := originReferer(trimmed); referer != "" {
+			retry, retryErr := http.NewRequest("GET", trimmed, nil)
+			if retryErr == nil {
+				retry.Header.Set("User-Agent", req.Header.Get("User-Agent"))
+				retry.Header.Set("Accept", req.Header.Get("Accept"))
+				for k, v := range opts.Headers {
+					if strings.TrimSpace(k) != "" && strings.TrimSpace(v) != "" {
+						retry.Header.Set(k, v)
+					}
+				}
+				retry.Header.Set("Referer", referer)
+				if retryResp, retryErr := client.Do(retry); retryErr == nil {
+					resp.Body.Close()
+					resp = retryResp
+				}
+			}
+		}
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -1992,12 +2187,20 @@ func (m *LibraryManager) ImportFromURLWithOptions(rawURL string, opts ImportItem
 		return nil, errors.New("empty network resource")
 	}
 
+	// A page URL (common when a browser puts the link target on the drag
+	// payload) must not be stored as if it were media. There is no page scraping
+	// fallback: the caller is expected to hand over the image URL directly (see
+	// the drop handler, which reads the drag's HTML <img> fragment).
+	if isHTMLPayload(resp.Header.Get("Content-Type"), data) {
+		return nil, fmt.Errorf("URL is a web page, not a media file: %s", trimmed)
+	}
+
 	// 3. Determine accurate filename, extension, and MIME type using Go's deep sniffing & headers
 	finalFilename, _, _ := ResolveMediaInfo(trimmed, resp.Header, data, opts.Name)
 	if opts.Name == "" {
 		opts.Name = strings.TrimSuffix(finalFilename, filepath.Ext(finalFilename))
 	}
-	if opts.URL == "" {
+	if opts.URL == "" && !opts.SkipURL {
 		opts.URL = trimmed
 	}
 
@@ -2107,10 +2310,30 @@ func (m *LibraryManager) processImageThumbnail(mediaPath string, itemDir string,
 	return 0, 0, false, "", []string{}, nil
 }
 
-// SaveItemThumbnail decodes a base64-encoded image (e.g., extracted video cover or first frame from a preview plugin),
-// saves it as thumbnail.jpg, runs perceptual color palette & metadata extraction, updates SQLite and metadata.json,
-// and returns the updated Item.
+// SaveItemThumbnail decodes a base64-encoded image (e.g. extracted video cover
+// or first frame from a preview plugin), then saves it through
+// SaveItemThumbnailImage.
 func (m *LibraryManager) SaveItemThumbnail(itemID string, base64Data string, videoWidth int, videoHeight int) (*Item, error) {
+	pureData := strings.TrimSpace(base64Data)
+	if idx := strings.Index(pureData, ","); idx != -1 {
+		pureData = pureData[idx+1:]
+	}
+	rawBytes, err := base64.StdEncoding.DecodeString(pureData)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base64 image data: %w", err)
+	}
+	img, _, err := image.Decode(bytes.NewReader(rawBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode thumbnail image: %w", err)
+	}
+	return m.SaveItemThumbnailImage(itemID, img, videoWidth, videoHeight)
+}
+
+// SaveItemThumbnailImage writes an already-decoded cover image, extracts the
+// dominant palette, updates SQLite/metadata.json and emits the usual item
+// upsert event. Native lifecycle workers use this directly to avoid a base64
+// round trip.
+func (m *LibraryManager) SaveItemThumbnailImage(itemID string, img image.Image, videoWidth int, videoHeight int) (*Item, error) {
 	m.mu.RLock()
 	active := m.activeLib
 	db := m.db
@@ -2120,24 +2343,13 @@ func (m *LibraryManager) SaveItemThumbnail(itemID string, base64Data string, vid
 	if active == nil || db == nil {
 		return nil, errors.New("no active library")
 	}
+	if img == nil {
+		return nil, errors.New("no thumbnail image")
+	}
 
 	item, err := m.GetItem(itemID)
 	if err != nil || item == nil {
 		return nil, errors.New("item not found")
-	}
-
-	pureData := strings.TrimSpace(base64Data)
-	if idx := strings.Index(pureData, ","); idx != -1 {
-		pureData = pureData[idx+1:]
-	}
-	rawBytes, err := base64.StdEncoding.DecodeString(pureData)
-	if err != nil {
-		return nil, fmt.Errorf("invalid base64 image data: %w", err)
-	}
-
-	img, _, err := image.Decode(bytes.NewReader(rawBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode thumbnail image: %w", err)
 	}
 
 	itemDir := filepath.Join(active.Path, "items", item.ID)
@@ -2732,12 +2944,23 @@ func (m *LibraryManager) CreateFolder(name string, parentID string) (*Folder, er
 	if cleanName == "" {
 		cleanName = "New Folder"
 	}
+	parentID = strings.TrimSpace(parentID)
+
+	// Ordering restarts under each parent. New folders append to their level
+	// instead of jumping in front of folders the user already reordered.
+	var sortOrder int
+	if err := db.QueryRow(
+		"SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE COALESCE(parent_id, '') = ?",
+		parentID,
+	).Scan(&sortOrder); err != nil {
+		return nil, fmt.Errorf("failed to determine folder order: %w", err)
+	}
 
 	folderID := fmt.Sprintf("folder_%d_%04d", time.Now().UnixNano(), time.Now().Nanosecond()%10000)
 	now := time.Now().Unix()
 
 	_, err := db.Exec("INSERT INTO folders (id, name, parent_id, created_at, sort_order) VALUES (?, ?, ?, ?, ?)",
-		folderID, cleanName, strings.TrimSpace(parentID), now, 0,
+		folderID, cleanName, parentID, now, sortOrder,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create folder: %w", err)
@@ -2746,12 +2969,200 @@ func (m *LibraryManager) CreateFolder(name string, parentID string) (*Folder, er
 	return &Folder{
 		ID:        folderID,
 		Name:      cleanName,
-		ParentID:  strings.TrimSpace(parentID),
+		ParentID:  parentID,
 		CreatedAt: now,
-		SortOrder: 0,
+		SortOrder: sortOrder,
 		Children:  []Folder{},
 		ItemCount: 0,
 	}, nil
+}
+
+// SetFolderOrder persists the order of one parent's folders. The caller must
+// list every sibling exactly once; sort_order restarts at zero under each
+// parent, so moving a folder never changes the order inside another branch.
+func (m *LibraryManager) SetFolderOrder(parentID string, orderedIDs []string) error {
+	m.mu.RLock()
+	db := m.db
+	m.mu.RUnlock()
+
+	if db == nil {
+		return errors.New("no active library")
+	}
+	parentID = strings.TrimSpace(parentID)
+
+	rows, err := db.Query("SELECT id FROM folders WHERE COALESCE(parent_id, '') = ?", parentID)
+	if err != nil {
+		return fmt.Errorf("failed to read folder order: %w", err)
+	}
+	siblings := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("failed to read folder order: %w", err)
+		}
+		siblings[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("failed to read folder order: %w", err)
+	}
+	rows.Close()
+
+	if len(orderedIDs) != len(siblings) {
+		return fmt.Errorf("folder order must list all %d folders under %q", len(siblings), parentID)
+	}
+	seen := make(map[string]bool, len(orderedIDs))
+	for _, id := range orderedIDs {
+		if !siblings[id] {
+			return fmt.Errorf("folder %q is not under %q", id, parentID)
+		}
+		if seen[id] {
+			return fmt.Errorf("folder order repeats %q", id)
+		}
+		seen[id] = true
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare("UPDATE folders SET sort_order = ? WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for i, id := range orderedIDs {
+		if _, err := stmt.Exec(i, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// MoveFolder moves folderID under parentID, appending it to that level.
+// Moving a folder into itself or one of its descendants is rejected.
+func (m *LibraryManager) MoveFolder(folderID string, parentID string) error {
+	m.mu.RLock()
+	db := m.db
+	m.mu.RUnlock()
+
+	if db == nil {
+		return errors.New("no active library")
+	}
+	folderID = strings.TrimSpace(folderID)
+	parentID = strings.TrimSpace(parentID)
+	if folderID == "" {
+		return errors.New("folder id is required")
+	}
+	if folderID == parentID {
+		return errors.New("folder cannot be moved under itself")
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var oldParent string
+	if err := tx.QueryRow(
+		"SELECT COALESCE(parent_id, '') FROM folders WHERE id = ?",
+		folderID,
+	).Scan(&oldParent); err != nil {
+		if err == sql.ErrNoRows {
+			return errors.New("folder not found")
+		}
+		return err
+	}
+	if oldParent == parentID {
+		return nil
+	}
+
+	if parentID != "" {
+		var exists int
+		if err := tx.QueryRow("SELECT 1 FROM folders WHERE id = ?", parentID).Scan(&exists); err != nil {
+			if err == sql.ErrNoRows {
+				return errors.New("target folder not found")
+			}
+			return err
+		}
+		var descendant int
+		err := tx.QueryRow(`
+			WITH RECURSIVE descendants(id) AS (
+				SELECT id FROM folders WHERE COALESCE(parent_id, '') = ?
+				UNION
+				SELECT f.id FROM folders f JOIN descendants d ON f.parent_id = d.id
+			)
+			SELECT 1 FROM descendants WHERE id = ? LIMIT 1`,
+			folderID, parentID,
+		).Scan(&descendant)
+		if err == nil {
+			return errors.New("cannot move a folder into its own descendant")
+		}
+		if err != sql.ErrNoRows {
+			return err
+		}
+	}
+
+	var sortOrder int
+	if err := tx.QueryRow(
+		"SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders WHERE COALESCE(parent_id, '') = ? AND id <> ?",
+		parentID, folderID,
+	).Scan(&sortOrder); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE folders SET parent_id = ?, sort_order = ? WHERE id = ?", parentID, sortOrder, folderID); err != nil {
+		return err
+	}
+	if err := normalizeFolderOrder(tx, oldParent); err != nil {
+		return err
+	}
+	if err := normalizeFolderOrder(tx, parentID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// normalizeFolderOrder rewrites one level's sort_order as a dense 0..n-1
+// sequence while preserving the visible order.
+func normalizeFolderOrder(tx *sql.Tx, parentID string) error {
+	rows, err := tx.Query(
+		"SELECT id FROM folders WHERE COALESCE(parent_id, '') = ? ORDER BY sort_order ASC, created_at ASC",
+		parentID,
+	)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return nil
+	}
+	stmt, err := tx.Prepare("UPDATE folders SET sort_order = ? WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for i, id := range ids {
+		if _, err := stmt.Exec(i, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RenameFolder updates a folder's display name.
@@ -2884,6 +3295,70 @@ func (m *LibraryManager) RemoveItemFromFolder(itemID string, folderID string) er
 		m.notifyItemsUpdated()
 	}
 	return err
+}
+
+// BatchRemoveItemsFromFolders unlinks many items from many folders in one
+// transaction so deleting a large selection from a folder does not refresh the
+// library once per item. Folder ids that do not apply to an item are ignored.
+func (m *LibraryManager) BatchRemoveItemsFromFolders(itemIDs []string, folderIDs []string) error {
+	if len(itemIDs) == 0 || len(folderIDs) == 0 {
+		return nil
+	}
+
+	m.mu.RLock()
+	db := m.db
+	m.mu.RUnlock()
+	if db == nil {
+		return errors.New("no active library")
+	}
+
+	folderSet := make(map[string]bool, len(folderIDs))
+	for _, folderID := range folderIDs {
+		if folderID != "" {
+			folderSet[folderID] = true
+		}
+	}
+	if len(folderSet) == 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("DELETE FROM item_folders WHERE item_id = ? AND folder_id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, itemID := range itemIDs {
+		for folderID := range folderSet {
+			if _, err := stmt.Exec(itemID, folderID); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	for _, itemID := range itemIDs {
+		m.mutateCachedItem(itemID, func(it *Item) {
+			next := make([]string, 0, len(it.Folders))
+			for _, folderID := range it.Folders {
+				if !folderSet[folderID] {
+					next = append(next, folderID)
+				}
+			}
+			it.Folders = next
+		})
+	}
+	m.notifyItemsUpdated()
+	return nil
 }
 
 // SetItemFolders sets the complete list of folders for an item.
@@ -3310,8 +3785,11 @@ func (m *LibraryManager) GetTrashItems(query string, sortOrder string) ([]Item, 
 		return []Item{}, nil
 	}
 
-	if err := m.ensureCacheLoaded(); err != nil {
-		return nil, err
+	m.cacheMu.RLock()
+	loaded := m.cacheLoaded
+	m.cacheMu.RUnlock()
+	if !loaded {
+		return m.diskAllItems(query, sortOrder, true)
 	}
 
 	m.cacheMu.RLock()
@@ -3527,11 +4005,15 @@ func (m *LibraryManager) ImportFoldersRecursivelyWithProgress(dirPaths []string,
 
 	_ = m.ensureCacheLoaded()
 
+	activePath := filepath.Clean(active.Path)
 	var created []Folder
 	var jobs []importJob
 
 	var walkDir func(currentPath string, currentFolderID string)
 	walkDir = func(currentPath string, currentFolderID string) {
+		if pathIsWithin(activePath, currentPath) {
+			return
+		}
 		entries, err := os.ReadDir(currentPath)
 		if err != nil {
 			return
@@ -3542,6 +4024,9 @@ func (m *LibraryManager) ImportFoldersRecursivelyWithProgress(dirPaths []string,
 				continue
 			}
 			fullPath := filepath.Join(currentPath, entryName)
+			if pathIsWithin(activePath, fullPath) {
+				continue
+			}
 			if entry.IsDir() {
 				subFolder, err := m.CreateFolder(entryName, currentFolderID)
 				if err == nil && subFolder != nil {
@@ -3558,6 +4043,9 @@ func (m *LibraryManager) ImportFoldersRecursivelyWithProgress(dirPaths []string,
 	}
 
 	for _, p := range dirPaths {
+		if pathIsWithin(activePath, p) {
+			continue
+		}
 		stat, err := os.Stat(p)
 		if err != nil || !stat.IsDir() {
 			continue

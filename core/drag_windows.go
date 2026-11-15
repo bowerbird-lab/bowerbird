@@ -39,7 +39,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/wailsapp/wails/v3/pkg/w32"
+	w32 "bowerbird/internal/win32"
 )
 
 // HRESULT / DROPEFFECT / DRAGDROP_* values returned by or passed to OLE.
@@ -261,7 +261,7 @@ func newWindowsDrag(paths []string) (*windowsDrag, error) {
 // runWindowsFileDrag publishes the paths as CF_HDROP and runs the OLE drag loop
 // until the user releases the button or cancels. It blocks, so it must run on
 // the thread that owns the window.
-func runWindowsFileDrag(hwnd unsafe.Pointer, paths []string) (uint32, error) {
+func runWindowsFileDrag(paths []string) (uint32, error) {
 	// OLE has to be initialized on the thread running the drag loop. 0 = S_OK,
 	// 1 = S_FALSE (already initialized), anything else (notably 0x80010106
 	// RPC_E_CHANGED_MODE, i.e. the thread is MTA) is recorded and the drag is
@@ -305,8 +305,7 @@ func (m *LibraryManager) StartDragItems(ids []string) error {
 	if host == nil {
 		return errors.New("no desktop host available")
 	}
-	hwnd := unsafe.Pointer(host.NativeWindowHandle())
-	if hwnd == nil {
+	if host.NativeWindowHandle() == 0 {
 		return errors.New("native window is nil")
 	}
 
@@ -341,7 +340,7 @@ func (m *LibraryManager) StartDragItems(ids []string) error {
 		err    error
 	)
 	host.RunOnMain(func() {
-		effect, err = runWindowsFileDrag(hwnd, paths)
+		effect, err = runWindowsFileDrag(paths)
 	})
 	if err != nil {
 		LogDragTrace("drag-out-finished", fmt.Sprintf("error=%v", err))
@@ -379,6 +378,9 @@ func (m *LibraryManager) CopyItemsToClipboard(ids []string) error {
 	host := m.Host()
 	if host == nil {
 		return errors.New("no desktop host available")
+	}
+	if err := host.WriteFilesToClipboard(paths); err == nil {
+		return nil
 	}
 	var copyErr error
 	host.RunOnMain(func() {

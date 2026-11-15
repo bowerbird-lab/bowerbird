@@ -1,11 +1,14 @@
 package core
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,6 +96,42 @@ func (s *Service) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 	return info, nil
 }
 
+// UpdateLibraryDetails renames the active library or gives it another icon.
+// The icon is empty for the default, a built-in icon name, or
+// core.LibraryIconCustom once SaveLibraryIcon wrote its picture.
+func (s *Service) UpdateLibraryDetails(name string, icon string) (*LibraryInfo, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	info, err := s.mgr.UpdateLibraryDetails(name, icon)
+	if err != nil {
+		return nil, WrapAppError(ErrCodeUpdateLibraryFailed, err)
+	}
+	s.emit(LibraryOpenedEvent, info)
+	return info, nil
+}
+
+// SaveLibraryIcon stores a cropped picture as the active library's custom icon.
+func (s *Service) SaveLibraryIcon(png []byte) (*LibraryInfo, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	info, err := s.mgr.SaveLibraryIcon(png)
+	if err != nil {
+		return nil, WrapAppError(ErrCodeUpdateLibraryFailed, err)
+	}
+	s.emit(LibraryOpenedEvent, info)
+	return info, nil
+}
+
+// GetLibraryIconPath returns where the active library's custom icon lives.
+func (s *Service) GetLibraryIconPath() string {
+	if s.mgr == nil {
+		return ""
+	}
+	return s.mgr.LibraryIconPath()
+}
+
 func (s *Service) CloseLibrary() error {
 	if s.mgr == nil {
 		return nil
@@ -141,6 +180,36 @@ func (s *Service) QueryWorkspace(query string, sortOrder string, offset int, lim
 		return nil, err
 	}
 	return &page, nil
+}
+
+func (s *Service) QueryWorkspaceIndex(query, sortOrder string, folderScope []string, onlyUnrated, trash bool) (*QueryPage, error) {
+	return s.QueryWorkspaceIndexContext(context.Background(), query, sortOrder, folderScope, onlyUnrated, trash)
+}
+
+func (s *Service) QueryWorkspaceIndexContext(ctx context.Context, query, sortOrder string, folderScope []string, onlyUnrated, trash bool) (*QueryPage, error) {
+	if s.mgr == nil {
+		return &QueryPage{}, nil
+	}
+	spec, err := ParseQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	page, err := s.mgr.WorkspaceIndexContext(ctx, spec, sortOrder, folderScope, onlyUnrated, trash)
+	return &page, err
+}
+
+func (s *Service) GetWorkspaceItems(ids []string) ([]Item, error) {
+	if s.mgr == nil {
+		return []Item{}, nil
+	}
+	return s.mgr.WorkspaceItems(ids)
+}
+
+func (s *Service) GetWorkspaceCards(ids []string) ([]Item, error) {
+	if s.mgr == nil {
+		return []Item{}, nil
+	}
+	return s.mgr.workspaceItems(ids, true)
 }
 
 func (s *Service) GetWorkspaceStats(sortOrder string) (*WorkspaceStats, error) {
@@ -303,6 +372,10 @@ func (s *Service) GetRecentLibraries() []string {
 type LibraryRef struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
+	// Name and Icon are the library's own display identity, so the switcher can
+	// show both without opening every library in the list.
+	Name string `json:"name,omitempty"`
+	Icon string `json:"icon,omitempty"`
 }
 
 // GetRecentLibraryRefs returns the recent libraries with their stable IDs.
@@ -320,12 +393,14 @@ func (s *Service) GetRecentLibraryRefs() []LibraryRef {
 			continue
 		}
 		var meta struct {
-			ID string `json:"id"`
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			Icon string `json:"icon"`
 		}
 		if err := json.Unmarshal(data, &meta); err != nil || meta.ID == "" {
 			continue
 		}
-		refs = append(refs, LibraryRef{ID: meta.ID, Path: p})
+		refs = append(refs, LibraryRef{ID: meta.ID, Path: p, Name: meta.Name, Icon: meta.Icon})
 	}
 	return refs
 }
@@ -342,6 +417,22 @@ func (s *Service) CreateFolder(name string, parentID string) (*Folder, error) {
 		return nil, ErrCoreNotInitialized
 	}
 	return s.mgr.CreateFolder(name, parentID)
+}
+
+// SetFolderOrder updates the sibling order under one parent folder.
+func (s *Service) SetFolderOrder(parentID string, orderedIDs []string) error {
+	if s.mgr == nil {
+		return ErrCoreNotInitialized
+	}
+	return s.mgr.SetFolderOrder(parentID, orderedIDs)
+}
+
+// MoveFolder reparents a folder, appending it under the target folder.
+func (s *Service) MoveFolder(folderID string, parentID string) error {
+	if s.mgr == nil {
+		return ErrCoreNotInitialized
+	}
+	return s.mgr.MoveFolder(folderID, parentID)
 }
 
 func (s *Service) RenameFolder(id string, name string) error {
@@ -370,6 +461,13 @@ func (s *Service) RemoveItemFromFolder(itemID string, folderID string) error {
 		return ErrCoreNotInitialized
 	}
 	return s.mgr.RemoveItemFromFolder(itemID, folderID)
+}
+
+func (s *Service) BatchRemoveItemsFromFolders(itemIDs []string, folderIDs []string) error {
+	if s.mgr == nil {
+		return ErrCoreNotInitialized
+	}
+	return s.mgr.BatchRemoveItemsFromFolders(itemIDs, folderIDs)
 }
 
 func (s *Service) SetItemFolders(itemID string, folderIDs []string) error {
@@ -554,6 +652,14 @@ func (s *Service) SaveItemThumbnail(itemID string, base64Data string, videoWidth
 	return s.mgr.SaveItemThumbnail(itemID, base64Data, videoWidth, videoHeight)
 }
 
+// SaveItemThumbnailImage persists an already-decoded native cover image.
+func (s *Service) SaveItemThumbnailImage(itemID string, img image.Image, width, height int) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.SaveItemThumbnailImage(itemID, img, width, height)
+}
+
 func (s *Service) UpdateItemDetails(id string, note string, rawURL string, rating int, prompt string) (*Item, error) {
 	if s.mgr == nil {
 		return nil, ErrCoreNotInitialized
@@ -652,13 +758,29 @@ func (s *Service) UpgradePlugin(id string) (*InstalledPlugin, error) {
 // server instead of the deployed Worker.
 const defaultMarketplaceURL = "https://bowerbird-marketplace.owocc.workers.dev"
 
-// OpenMarketplace opens the Bowerbird Plugin Marketplace in the default browser.
-func (s *Service) OpenMarketplace() error {
+func marketplaceBaseURL() string {
 	targetURL := strings.TrimSpace(os.Getenv("BOWERBIRD_MARKETPLACE_URL"))
 	if targetURL == "" {
 		targetURL = defaultMarketplaceURL
 	}
-	return OpenExternalURL(targetURL)
+	return strings.TrimRight(targetURL, "/")
+}
+
+// OpenMarketplace opens the Bowerbird Plugin Marketplace in the default browser.
+func (s *Service) OpenMarketplace() error {
+	return OpenExternalURL(marketplaceBaseURL())
+}
+
+// OpenPluginMarketplace opens the store page for one plugin. It keeps the
+// plugin list useful after installation: users can jump back to the listing to
+// read changelogs, check updates, or reinstall a removed plugin.
+func (s *Service) OpenPluginMarketplace(id string) error {
+	base := marketplaceBaseURL()
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return OpenExternalURL(base)
+	}
+	return OpenExternalURL(base + "/plugins/" + url.PathEscape(id))
 }
 
 // GetUserDataDir returns the absolute path of the Bowerbird user data directory.
@@ -813,6 +935,46 @@ func (s *Service) SetMobileServerEnabled(enabled bool) error {
 		} else if !enabled && server.IsRunning() {
 			return server.Stop()
 		}
+	}
+	return nil
+}
+
+// SetMobileServerPort changes the LAN listener port and restarts the server
+// when it is running. A busy port is reported instead of silently binding a
+// random one, and the previous port is restored when the switch fails.
+func (s *Service) SetMobileServerPort(port int) error {
+	if s.mgr == nil {
+		return ErrCoreNotInitialized
+	}
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("invalid mobile server port %d", port)
+	}
+	ms := s.mgr.userData.GetMobileSettings()
+	if ms.Port == port {
+		return nil
+	}
+	oldPort := ms.Port
+	ms.Port = port
+	if err := s.mgr.userData.SetMobileSettings(ms); err != nil {
+		return err
+	}
+
+	server := s.mgr.GetMobileServer()
+	if server == nil || !server.IsRunning() {
+		return nil
+	}
+	if err := server.Stop(); err != nil {
+		return err
+	}
+	if err := server.Start(); err != nil || server.GetPort() != port {
+		_ = server.Stop()
+		ms.Port = oldPort
+		_ = s.mgr.userData.SetMobileSettings(ms)
+		_ = server.Start()
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("mobile server port %d is unavailable", port)
 	}
 	return nil
 }

@@ -17,7 +17,7 @@
 
 把 BowerBird 指向一个装着图片和视频的文件夹，它就会变成一个素材库：每个文件当场计算哈希、生成缩略图、提取配色并建立索引。不需要上传，不需要注册，也不经过任何云端——得到的只是一个可以随手搬走、备份或自行同步的 `.library` 包。
 
-BowerBird 是一个跨平台桌面应用，使用 **mygo（Go）** 的 webview 模式与 **React 19 + TypeScript + Tailwind CSS v4** 构建。桌面外壳基于 [mygo](https://github.com/egoist/mygo)；实验性的原生渲染版本位于 `cmd/bowerbird-native/`。
+BowerBird 是一个跨平台桌面应用，使用 **mygo（Go）的 GPU 原生 UI（`mygo/ui`）** 构建，不再包含 WebView、React 或 Vite 前端工程。所有界面由 Go 在 `internal/app/` 中声明式绘制，插件采用免构建的 `plugin.json + index.js` 沙箱格式；浏览器扩展与插件市场仍独立维护。
 
 ## 功能
 
@@ -31,7 +31,7 @@ BowerBird 是一个跨平台桌面应用，使用 **mygo（Go）** 的 webview �
 
 - **自动提取配色。** 导入时会（并会对已有素材库在后台补做）提取主色、6 色感知调色板、颜色模型、是否含 Alpha 通道、宽高比、方向（`landscape` / `portrait` / `square`）、以百万像素计的尺寸，以及 JPEG 的 EXIF 拍摄信息。
 - **多维度筛选。** 一个筛选栏涵盖 **文件类型**、**颜色**、**标签**、**虚拟文件夹** 与 **方向**；颜色筛选基于感知 ΔE 匹配，所以"大概是这个蓝"真的能筛出那个蓝——既对预设色板生效，也对素材库里已有的颜色生效。
-- **虚拟文件夹与标签。** 同一个素材可以同时被多种方式组织；删除会先进回收站，而不是直接从磁盘抹掉。
+- **虚拟文件夹与标签。** 同一个素材可以同时被多种方式组织；从文件夹删除只解除该关联，最后一个文件夹也移除时会先提醒并移入回收站。在全部、未打标签、未分类中删除时会先列出所属文件夹，再选择解除关联或移入回收站。
 
 ### 不离开素材库就能预览一切
 
@@ -57,7 +57,7 @@ BowerBird 是一个跨平台桌面应用，使用 **mygo（Go）** 的 webview �
 
 ### 可扩展
 
-- **预览插件是一等公民。** 为任意扩展名注册一个查看器，它就会同时出现在弹窗与检查器中——见 [注册自定义预览插件](#注册自定义预览插件)。
+- **预览插件是一等公民。** 为任意扩展名声明原生渲染器，它就会同时出现在弹窗与检查器中——见 [原生插件架构](#原生插件架构)。
 - **插件商店与双通道分发**（`owocc/bowerbird-plugins`）：`main` 分支存放精简的元数据索引，GitHub Releases 存放打包好的 zip，由市场端直接解析，中间不经过任何代理。
 - **内置插件同样列在插件商店里并可禁用**（与已安装的插件同列），只有内部兜底插件始终启用。
 
@@ -86,62 +86,61 @@ macOS（arm64 + amd64 通用包）、Windows（免安装可执行文件与带 We
 │   ├── service.go                    # 通过 mygo.Bind 暴露给前端的应用服务
 │   ├── host.go                       # 桌面运行时抽象（事件、对话框、拖拽、主线程）
 │   └── drag_*.go                     # 各平台的系统级拖拽导出与调试追踪
-└── frontend/                         # React 19 + Vite + Tailwind v4 前端
-    └── src/
-        ├── plugins/preview/          # 可插拔的文件预览系统
-        │   ├── types.ts              # PreviewPlugin、PreviewViewportProps、PreviewInspectorProps
-        │   ├── registry.ts           # PreviewPluginRegistry 单例与插件解析
-        │   └── builtin/              # 内置插件（图片、视频、兜底）
-        ├── components/
-        │   ├── LibraryWorkspace.tsx  # 主三栏可调整工作区
-        │   ├── FilterBar.tsx         # 多维度筛选下拉（类型、颜色、标签、文件夹、方向）
-        │   ├── JustifiedGallery.tsx  # 像素级等比布局与全画布框选
-        │   ├── ItemDetailPanel.tsx   # 无边框自适应预览、色板与手风琴元数据
-        │   ├── MultiItemInspector.tsx# 最后 6 项 FIFO 堆叠预览与批量整理
-        │   ├── UnifiedPreviewModal.tsx # 由插件驱动的内联与全窗口预览宿主
-        │   └── ui/accordion.tsx      # 可折叠的检查器手风琴基础组件
-        ├── hooks/
-        │   ├── useTrackpadZoom.ts    # 主画廊的触控板捏合缩放 hook
-        │   ├── useFileDrop.ts        # 拖放导入状态与进度事件
-        │   └── useHistoryNavigation.ts # 基于路由的前进/后退导航
-        └── lib/
-            ├── host-runtime.ts       # 桌面运行时适配层（事件以 {data} 信封传递）
-            ├── workspace-search.ts   # 导航与筛选状态的 URL search schema
+├── internal/
+│   ├── app/                          # mygo/ui 原生视图与主线程状态机
+│   │   ├── ui_main.go                # 工作区外壳、路由与快捷键
+│   │   ├── ui_gallery.go             # 等比画廊、选择与系统级拖拽
+│   │   ├── ui_inspector.go           # 原生检查器与插件扩展区块
+│   │   ├── ui_preview.go             # 图片、Markdown、音频、视频与 PSD 预览
+│   │   └── ui_settings.go            # 设置、插件管理与数据目录
+│   ├── plugin/                       # 原生插件宿主（清单、沙箱、内置插件）
+│   ├── player/                       # Go 音频播放内核
+│   └── i18n/                         # 中英文词典
+├── plugins/                          # 免构建官方插件
+│   ├── markdown-preview/             # plugin.json + inspect 钩子
+│   ├── audio-player/
+│   ├── psd-preview/
+│   ├── prompt-metadata/
+│   └── pinterest/                    # 沙箱 URL 解析器
+├── packages/plugin-sdk/              # 原生插件 TypeScript 类型定义
+└── packages/ui/                      # 浏览器扩展共用的 React 组件库
 ```
 
 ---
 
-## 预览插件架构
+## 原生插件架构
 
-所有文件预览——无论是主界面/全屏弹窗（`UnifiedPreviewModal`）还是右侧检查器（`ItemDetailPanel`）——都通过 `previewRegistry`（`frontend/src/plugins/preview/registry.ts`）解析。
+桌面端由 `mygo/ui`（Go + GPU）原生渲染，不再包含 WebView、React 运行时或插件 CSS。插件只返回**纯 JSON**，由宿主用原生视图绘制。
 
-### 内置插件
+### 官方插件
 
-| 插件 ID | 优先级 | 状态 | 支持格式 | 能力 |
-| :--- | :--- | :--- | :--- | :--- |
-| `builtin.image` | `100` | 内置（可禁用） | `png, jpg, jpeg, webp, gif, bmp, svg, ico, tiff, tif, avif` | 带阻尼的触控板缩放（`25%`–`800%`）、放大后的双指平移、交互式小地图（`>125%`）、无边框检查器预览 |
-| `builtin.video` | `90` | 内置（可禁用） | `mp4, mov, qt, webm, mkv, avi, m4v, flv, f4v, ts, mts, m2ts, m3u8, m3u, mpd, ogv, ogm, 3gp, 3g2, wmv, asf, mpg, mpeg, m2v, vob, rmvb, rm` | 多引擎播放器（**hls.js** + **mpegts.js** + **dash.js** + HTML5 原生）、独立的 shadcn 底部控制栏（`0.25x`–`8x` 倍速菜单、悬停音量滑杆、±5 秒跳转、循环、全屏）、封面/首帧配色提取、检查器内仅显示封面 |
-| `builtin.fallback` | `0` | 内部兜底 | `*`（捕获全部） | 通过 `/asset/icon/<ext>` 渲染系统原生文件图标 |
+| 插件 ID | 版本 | 类型 | 原生渲染器 / 能力 |
+| :--- | :--- | :--- | :--- |
+| `official.markdown-preview` | `2.0.0` | preview | `markdown` — GFM 渲染、Frontmatter 与大纲检视 |
+| `official.audio-player` | `2.0.0` | preview | `audio` — 播放、频谱、进度条与音频元数据 |
+| `official.psd-preview` | `2.0.0` | preview | `psd` — 合成图解码、缩放与图层树 |
+| `official.prompt-metadata` | `2.0.0` | metadata | `prompt` — AI 提示词字段、复制与全文编辑 |
+| `builtin.video` | `2.0.0` | preview | `video` — ffmpeg 解码帧 + `ui.Video`，mygo 音频输出 |
+| `official.pinterest` | `2.2.0` | resolver | moejs 嵌入式运行时中的 `resolveUrl` |
 
-### 注册自定义预览插件
+源码位于 `plugins/<plugin-id>/`（`plugin.json`，仅 resolver 插件保留 `index.js`），无需任何构建步骤。打包版本会把相同清单注册为编译进二进制的内置插件；本地目录可覆盖内置副本。
 
-```tsx
-import { previewRegistry } from "@/plugins/preview/registry";
+### 插件清单
 
-previewRegistry.register({
-  id: "custom.model3d",
-  name: "3D Model Viewer",
-  priority: 95,
-  extensions: ["glb", "gltf", "obj"],
-  supportsZoom: false,
-  Viewport: ({ item }) => <My3DCanvas src={item.originalUrl} />,
-  InspectorPreview: ({ item, onOpenPreview }) => (
-    <div onDoubleClick={onOpenPreview}>3D Preview: {item.filename}</div>
-  ),
-});
+```json
+{
+  "id": "official.markdown-preview",
+  "name": "Markdown Preview",
+  "version": "2.0.0",
+  "kind": "preview",
+  "native": "markdown",
+  "extensions": ["md", "markdown"],
+  "mimePrefixes": ["text/markdown"],
+  "priority": 50
+}
 ```
 
----
+原生预览插件可以省略 `main`。`resolveUrl`、`inspect`、`actions`、`runAction`、`thumbnail` 等 JS 钩子均为可选，但必须在 `hooks` 中显式注册；宿主不会调用未声明的钩子。它们运行在 **moejs** 嵌入式运行时中，并受明确的网络/进程/外链权限、内存上限和超时限制。每次 hook 开始/结束、返回值、异常以及宿主 API 调用都会写入原生插件日志；插件可通过 `host.log()` 或 `console.*` 输出自己的日志。TypeScript 类型定义位于 `packages/plugin-sdk`，完整指南见 `plugins/README.md`。
 
 ## 拖拽导出到窗口之外
 
@@ -189,18 +188,18 @@ BowerBird 在 **用户素材库** 与 **应用状态数据** 之间执行严格�
 
 ### 插件生态与分发规范
 
-1. **源码隔离**：
-   - 官方插件的源码位于 `plugins/<plugin-id>/`（`src/index.tsx`、`manifest.json`、`package.json`）。
-   - 构建产物严格输出到 `dist/plugins/`（已被 git 忽略）。禁止把构建后的 JavaScript 提交进 `plugins/`。
+1. **原生源码布局**：
+   - 官方插件位于 `plugins/<plugin-id>/`，由 `plugin.json` 和可选的免构建 `index.js` 组成。
+   - 预览插件声明宿主渲染器（如 `"native": "markdown"`），不再包含 React 组件，也不需要 Vite/Rollup 构建产物。
 2. **双通道分发仓库**：
-   - 分发元数据发布到专用仓库（`owocc/bowerbird-plugins`）。
-   - **`main` 分支**：存放精简的索引元数据（`index.min.json`、`registry.json`、`repo/<id>/manifest.json`、`repo/<id>/index.js`）。
-   - **GitHub Releases**：存放打包好的发布 zip（`<plugin-id>-v<version>.zip`）。
+   - 分发元数据发布到专用仓库 `owocc/bowerbird-plugins`。
+   - **`main` 分支**：精简索引元数据与 `repo/<id>/plugin.json`。
+   - **GitHub Releases**：打包好的发布 zip（`<plugin-id>-v<version>.zip`）。
 3. **市场与边缘解析**：
-   - 插件商店（`apps/marketplace/`）从 `PLUGIN_REPO_INDEX_URL` 读取元数据。
-   - 发布包直接从 `PLUGIN_RELEASE_BASE_URL` 下载，中间不经过代理。
-4. **应用内数据管理**：
-   - 设置面板包含专门的 **数据与存储** 分区，可一键在原生文件管理器（Finder / Explorer）中打开 **插件目录** 与 **应用数据目录**。
+   - 插件商店读取 `PLUGIN_REPO_INDEX_URL`，发布包直接从 `PLUGIN_RELEASE_BASE_URL` 下载，不经过代理。
+4. **运行时状态**：
+   - `<UserDataDir>/plugins/installed.json` 为旧 WebView 插件注册表；原生宿主使用 `native-plugins.json` 保存启停与设置。
+   - 设置 → 数据与存储可直接打开插件目录与应用数据目录。
 
 ---
 
@@ -219,8 +218,7 @@ BowerBird 在 **用户素材库** 与 **应用状态数据** 之间执行严格�
 > `scripts/mygo.mjs` 路由，会在所有平台上强制 `CGO_ENABLED=1`。
 
 ```bash
-pnpm dev                 # mygo 开发模式（Go 后端 + Vite HMR，经由 mygo devCommand）
-pnpm dev:frontend        # 仅启动 Vite 开发服务器（前端）
+pnpm dev                 # mygo 原生窗口开发模式（纯 Go，无 WebView）
 pnpm dev:marketplace     # 插件市场（apps/marketplace）开发服务器
 pnpm dev:docs            # 文档站点（apps/docs）开发服务器
 pnpm dev:extension       # 浏览器扩展开发（Chrome）；另有 :firefox 变体
@@ -229,16 +227,13 @@ pnpm dev:extension       # 浏览器扩展开发（Chrome）；另有 :firefox �
 ### 构建
 
 ```bash
-pnpm build               # 插件 + 前端打包（mygo build 消费的产物）
-pnpm build:release       # 插件 + 前端 + mygo 构建
+pnpm build               # mygo 原生应用构建
 pnpm build:app           # mygo 构建（当前平台）
 pnpm build:app:macos     # macOS 通用包（arm64 + amd64）
 pnpm build:app:windows   # Windows amd64（便携 exe + NSIS 安装包）
 pnpm build:app:linux     # Linux amd64
 
-pnpm build:packages      # 工作区包（@bowerbird/plugin-sdk、@workspace/ui）
-pnpm build:plugins       # scripts/build-plugins.mjs -> dist/plugins/*.zip + index.min.json
-pnpm build:frontend      # 类型检查 + 生产环境前端打包
+pnpm build:packages      # 市场/扩展共用的 TypeScript 类型包
 pnpm build:extension     # 浏览器扩展（Chrome）；另有 :firefox / :edge / :safari 变体
 pnpm build:marketplace   # 插件市场应用
 pnpm build:docs          # 文档站点
@@ -251,7 +246,7 @@ pnpm build:all           # 所有 JS/TS 工作区目标
 pnpm test                # go test ./...
 pnpm test:watch          # go test -count=1 -v ./...
 pnpm typecheck           # 在所有定义了类型检查的包中执行 tsc / astro check
-pnpm clean               # 清理构建产物（frontend/dist、dist、build/mygo 等）
+pnpm clean               # 清理构建产物（dist、build/mygo 等）
 ```
 
 等价的原始命令，供参考：

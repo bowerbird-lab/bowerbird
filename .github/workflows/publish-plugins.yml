@@ -7,9 +7,7 @@ on:
     paths:
       - "plugins/**"
       - "!plugins/**/README.md"
-      - "packages/plugin-sdk/**"
-      - "!packages/plugin-sdk/README.md"
-      - "scripts/build-plugins.mjs"
+      - "scripts/package-plugins.py"
       - ".github/workflows/publish-plugins.yml"
   workflow_dispatch:
     inputs:
@@ -25,6 +23,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: publish-plugins-${{ inputs.target_repo || vars.PLUGINS_DIST_REPO || 'owocc/bowerbird-plugins' }}
+  cancel-in-progress: false
+
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
@@ -32,50 +34,39 @@ jobs:
       - name: Checkout Source Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: 22
+          python-version: "3.12"
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Package Native Plugins
+        run: python scripts/package-plugins.py
 
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
+      - name: Upload Plugin Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Plugin SDK
-        run: pnpm run build:sdk
-
-      - name: Build Plugins & Zip Packages
-        run: pnpm run build:plugins
+          name: native-plugins
+          path: dist/plugins/
+          if-no-files-found: error
 
       - name: Determine Target Distribution Repo
         id: target
+        env:
+          INPUT_REPO: ${{ inputs.target_repo }}
+          DEFAULT_REPO: ${{ vars.PLUGINS_DIST_REPO }}
+          RELEASE_TAG: ${{ inputs.release_tag || 'plugins-latest' }}
         shell: bash
         run: |
-          TARGET="${{ inputs.target_repo }}"
+          set -euo pipefail
+          TARGET="$INPUT_REPO"
           if [ -z "$TARGET" ]; then
-            TARGET="${{ vars.PLUGINS_DIST_REPO }}"
+            TARGET="$DEFAULT_REPO"
           fi
           if [ -z "$TARGET" ]; then
             TARGET="owocc/bowerbird-plugins"
           fi
           echo "repo=$TARGET" >> $GITHUB_OUTPUT
-          echo "tag=${{ inputs.release_tag || 'plugins-latest' }}" >> $GITHUB_OUTPUT
+          echo "tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
 
       - name: Publish Release Zip Bundles to Distribution Repo
         env:
@@ -84,6 +75,7 @@ jobs:
           TAG: ${{ steps.target.outputs.tag }}
         shell: bash
         run: |
+          set -euo pipefail
           echo "Publishing plugin artifacts to GitHub Releases on $TARGET_REPO ($TAG)..."
           
           # Check if release exists, create if missing
@@ -92,7 +84,7 @@ jobs:
             gh release create "$TAG" dist/plugins/releases/*.zip \
               --repo "$TARGET_REPO" \
               --title "Official Plugins (Latest)" \
-              --notes "Automated distribution build from commit ${{ github.sha }} (${{ github.ref_name }})"
+              --notes "Automated distribution build from commit $GITHUB_SHA ($GITHUB_REF_NAME)"
           else
             echo "Release $TAG exists. Uploading/clobbering assets..."
             gh release upload "$TAG" dist/plugins/releases/*.zip --repo "$TARGET_REPO" --clobber
@@ -104,6 +96,7 @@ jobs:
           TARGET_REPO: ${{ steps.target.outputs.repo }}
         shell: bash
         run: |
+          set -euo pipefail
           echo "Updating metadata index on branch 'main' of $TARGET_REPO..."
           WORK_DIR=$(mktemp -d)
           cd "$WORK_DIR"
@@ -131,11 +124,10 @@ jobs:
           for d in "$GITHUB_WORKSPACE/dist/plugins"/*/; do
             if [ -d "$d" ] && [ "$(basename "$d")" != "releases" ]; then
               plugin_id=$(basename "$d")
-              mkdir -p "repo/$plugin_id"
-              cp "$d/manifest.json" "repo/$plugin_id/manifest.json"
-              if [ -f "$d/index.js" ]; then
-                cp "$d/index.js" "repo/$plugin_id/index.js"
-              fi
+              # Replace the complete package so removed hooks/resources do not
+              # survive in the distribution repository.
+              rm -rf "repo/$plugin_id"
+              cp -R "$d" "repo/$plugin_id"
             fi
           done
           # Create/update README.md
@@ -148,8 +140,8 @@ jobs:
 
           - **`index.min.json`**: Compact JSON index of all available plugins and release download URLs.
           - **`registry.json`**: Formatted JSON registry for debugging and documentation.
-          - **`repo/<id>/manifest.json`**: Individual plugin manifests.
-          - **Releases**: Pre-built `.zip` bundles containing `manifest.json` and bundled `index.js`.
+          - **`repo/<id>/plugin.json`**: Native plugin manifests (`manifest.json` is a compatibility copy).
+          - **Releases**: Zero-build `.zip` packages containing `plugin.json`, optional JavaScript hooks and resources.
           EOF
 
           git add .

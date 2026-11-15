@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -19,6 +20,8 @@ const (
 	appLogFileName   = "app.log"
 	appLogMaxBytes   = 4 << 20 // 4 MiB cap before truncating on startup
 	maxBufferedLogs  = 1000
+	maxLogTextBytes  = 4 << 10
+	maxLogLabelBytes = 64
 	LogEntryEvent    = "app-log-entry"
 	LogsClearedEvent = "app-logs-cleared"
 )
@@ -105,19 +108,33 @@ func writeAppLogLineLocked(line string) {
 	_, _ = f.WriteString(line + "\n")
 }
 
+// boundedLogText owns its storage so trimming or truncating a large input cannot
+// leave the original allocation retained by a short log field.
+func boundedLogText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) > limit {
+		end := limit - len("…")
+		for end > 0 && !utf8.RuneStart(value[end]) {
+			end--
+		}
+		return value[:end] + "…"
+	}
+	return strings.Clone(value)
+}
+
 // RecordLog records a structured log entry in memory, writes it to app.log,
 // prints to standard logger, and emits a Wails event for live inspection.
 func RecordLog(level, category, message, detail string, durationMs int64) LogEntry {
-	lvl := strings.ToLower(strings.TrimSpace(level))
+	lvl := strings.ToLower(boundedLogText(level, maxLogLabelBytes))
 	if lvl == "" {
 		lvl = "info"
 	}
-	cat := strings.ToLower(strings.TrimSpace(category))
+	cat := strings.ToLower(boundedLogText(category, maxLogLabelBytes))
 	if cat == "" {
 		cat = "core"
 	}
-	msg := strings.TrimSpace(message)
-	det := strings.TrimSpace(detail)
+	msg := boundedLogText(message, maxLogTextBytes)
+	det := boundedLogText(detail, maxLogTextBytes)
 
 	id := atomic.AddInt64(&logSeq, 1)
 	ts := time.Now().Format("2006-01-02 15:04:05.000")
@@ -152,8 +169,9 @@ func RecordLog(level, category, message, detail string, durationMs int64) LogEnt
 		if dropCount < 1 {
 			dropCount = 1
 		}
-		copy(logEntries, logEntries[dropCount:])
-		logEntries = logEntries[:len(logEntries)-dropCount]
+		kept := copy(logEntries, logEntries[dropCount:])
+		clear(logEntries[kept:])
+		logEntries = logEntries[:kept]
 	}
 	logEntries = append(logEntries, entry)
 	writeAppLogLineLocked(formatted)
@@ -176,6 +194,7 @@ func GetLogsSnapshot() []LogEntry {
 // ClearLogsBuffer clears in-memory logs and truncates app.log on disk.
 func ClearLogsBuffer() {
 	logMu.Lock()
+	clear(logEntries[:cap(logEntries)])
 	logEntries = logEntries[:0]
 	path := appLogFileLocked()
 	_ = os.Truncate(path, 0)
@@ -247,5 +266,6 @@ func (s *Service) OpenLogsWindow() error {
 		MinWidth:       680,
 		MinHeight:      440,
 		TitleBarHidden: true,
+		TitleBarHeight: 40,
 	})
 }

@@ -24,6 +24,7 @@ const (
 	ErrCodeOpenDBFailed               = "ERR_OPEN_DB_FAILED"
 	ErrCodeMigrationFailed            = "ERR_MIGRATION_FAILED"
 	ErrCodeCloseLibraryFailed         = "ERR_CLOSE_LIBRARY_FAILED"
+	ErrCodeUpdateLibraryFailed        = "ERR_UPDATE_LIBRARY_FAILED"
 
 	ErrCodeItemNotFound               = "ERR_ITEM_NOT_FOUND"
 	ErrCodeItemAlreadyTrashed         = "ERR_ITEM_ALREADY_TRASHED"

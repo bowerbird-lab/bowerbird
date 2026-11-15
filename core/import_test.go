@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -178,4 +179,217 @@ func TestConcurrentFolderImportAndMillisecondSearch(t *testing.T) {
 		t.Errorf("expected millisecond-level search latency, got %v", searchElapsed)
 	}
 	t.Logf("Imported %d files across %d folders in %v; GetItems=%v; Search=%v", totalFiles, subFolders, importElapsed, queryElapsed, searchElapsed)
+}
+
+// Importing a file that is already the active library's own payload is a
+// no-op: no hashing, no copy, and no duplicate row.
+func TestImportSkipsActiveLibraryPayload(t *testing.T) {
+	mgr := newRaceLibrary(t, "SelfDrop")
+
+	src := filepath.Join(t.TempDir(), "asset.txt")
+	if err := os.WriteFile(src, []byte("unique-self-drop-payload"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	imported, err := mgr.ImportFiles([]string{src})
+	if err != nil || len(imported) != 1 {
+		t.Fatalf("ImportFiles = %d items, err=%v", len(imported), err)
+	}
+
+	again, err := mgr.ImportFiles([]string{imported[0].FilePath})
+	if err != nil {
+		t.Fatalf("re-import own payload: %v", err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("own payload imported again: %d items", len(again))
+	}
+	items, err := mgr.GetItems("", "desc")
+	if err != nil {
+		t.Fatalf("GetItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("got %d items after self-drop, want 1", len(items))
+	}
+}
+
+// A native drop of an item path inside the app routes as an internal item
+// (or skips it), never as an external import that shows another import pass.
+func TestNativeDropSkipsCurrentLibraryItem(t *testing.T) {
+	mgr := newRaceLibrary(t, "NativeSelfDrop")
+	svc := core.NewService(mgr)
+
+	src := filepath.Join(t.TempDir(), "asset.txt")
+	if err := os.WriteFile(src, []byte("native-self-drop-payload"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	imported, err := mgr.ImportFiles([]string{src})
+	if err != nil || len(imported) != 1 {
+		t.Fatalf("ImportFiles = %d items, err=%v", len(imported), err)
+	}
+
+	for _, dropped := range []string{imported[0].FilePath, imported[0].FileURL} {
+		result, err := svc.HandleNativeDropWithResult([]string{dropped}, "", "")
+		if err != nil {
+			t.Fatalf("HandleNativeDrop(%q): %v", dropped, err)
+		}
+		if result.Importing || result.External != 0 {
+			t.Fatalf("self-drop %q started an import: %+v", dropped, result)
+		}
+	}
+	items, err := mgr.GetItems("", "desc")
+	if err != nil {
+		t.Fatalf("GetItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("got %d items after native self-drop, want 1", len(items))
+	}
+}
+
+// Items from another library are external files for the active library. They
+// must be routed through the import pipeline and deduplicated against the
+// active library only.
+func TestNativeDropImportsItemFromAnotherLibrary(t *testing.T) {
+	mgr := newRaceLibrary(t, "CrossLibraryDrop")
+	svc := core.NewService(mgr)
+
+	otherItemDir := filepath.Join(t.TempDir(), "Other.library", "items", strings.Repeat("a", 64))
+	if err := os.MkdirAll(otherItemDir, 0o755); err != nil {
+		t.Fatalf("mkdir other library item: %v", err)
+	}
+	src := filepath.Join(otherItemDir, "asset.txt")
+	if err := os.WriteFile(src, []byte("item from another library"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	result, err := svc.HandleNativeDropWithResult([]string{src}, "", "")
+	if err != nil {
+		t.Fatalf("HandleNativeDrop: %v", err)
+	}
+	if result.Internal != 0 || result.External != 1 || !result.Importing {
+		t.Fatalf("cross-library drop was not treated as external: %+v", result)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		items, err := mgr.GetItems("", "desc")
+		if err != nil {
+			t.Fatalf("GetItems: %v", err)
+		}
+		if len(items) == 1 {
+			if items[0].Name != "asset" {
+				t.Fatalf("imported item name = %q, want asset", items[0].Name)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cross-library import produced %d items, want 1", len(items))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Loose files inside the active library are also its own data and are skipped
+// before the import pipeline starts.
+func TestNativeDropSkipsLooseFileInActiveLibrary(t *testing.T) {
+	mgr := newRaceLibrary(t, "LooseSelfDrop")
+	svc := core.NewService(mgr)
+	lib := mgr.GetActiveLibrary()
+	if lib == nil {
+		t.Fatal("GetActiveLibrary: no active library")
+	}
+
+	loose := filepath.Join(lib.Path, "notes.txt")
+	if err := os.WriteFile(loose, []byte("library bookkeeping"), 0o644); err != nil {
+		t.Fatalf("write loose file: %v", err)
+	}
+	result, err := svc.HandleNativeDropWithResult([]string{loose}, "", "")
+	if err != nil {
+		t.Fatalf("HandleNativeDrop: %v", err)
+	}
+	if result.External != 0 || result.Importing || result.Skipped != 1 {
+		t.Fatalf("loose library file was not skipped: %+v", result)
+	}
+}
+
+type dropImportHost struct {
+	core.Host
+	finished chan error
+}
+
+func (h *dropImportHost) Emit(name string, payload any) {
+	switch name {
+	case "import-completed":
+		h.finished <- nil
+	case "import-error":
+		h.finished <- fmt.Errorf("%v", payload)
+	}
+}
+
+func TestNativeDropImportsIntoFolder(t *testing.T) {
+	mgr := newRaceLibrary(t, "FolderDrop")
+	svc := core.NewService(mgr)
+	target, err := mgr.CreateFolder("Target", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &dropImportHost{finished: make(chan error, 1)}
+	core.AttachHost(svc, host)
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "asset.txt")
+	subdir := filepath.Join(dir, "Nested")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		file:                                "file dropped into the open folder",
+		filepath.Join(subdir, "nested.txt"): "file inside a dropped directory",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := svc.HandleNativeDropWithResult([]string{file, subdir}, "subfolder", target.ID)
+	if err != nil || !result.Importing {
+		t.Fatalf("drop = %+v, err=%v", result, err)
+	}
+	select {
+	case err := <-host.finished:
+		if err != nil {
+			t.Fatalf("import failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("folder import did not finish")
+	}
+
+	items, err := mgr.GetItems("", "desc")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items = %v, err=%v", items, err)
+	}
+	folders, err := mgr.GetFolders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nestedID string
+	for _, folder := range folders {
+		if folder.ID == target.ID {
+			for _, child := range folder.Children {
+				if child.Name == "Nested" {
+					nestedID = child.ID
+				}
+			}
+		}
+	}
+	if nestedID == "" {
+		t.Fatal("dropped directory was not created under the target folder")
+	}
+	for _, item := range items {
+		want := target.ID
+		if item.Name == "nested" {
+			want = nestedID
+		}
+		if len(item.Folders) != 1 || item.Folders[0] != want {
+			t.Fatalf("item %q folders = %v, want [%s]", item.Name, item.Folders, want)
+		}
+	}
 }

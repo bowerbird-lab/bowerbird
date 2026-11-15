@@ -17,7 +17,7 @@
 
 Point Bowerbird at a folder of images and video and it becomes a library: every file is hashed, thumbnailed, palette-extracted and indexed on the spot. No upload, no account, no cloud — just a portable `.library` package you can move between machines, back up, or sync however you like.
 
-Bowerbird is a cross-platform desktop app built with **mygo (Go)** in webview mode and **React 19 + TypeScript + Tailwind CSS v4**. The desktop shell is built on [mygo](https://github.com/egoist/mygo); an experimental native-rendering build lives in `cmd/bowerbird-native/`.
+Bowerbird is a cross-platform desktop app built entirely with **mygo's GPU-native UI (`mygo/ui`)**. It contains no WebView, React or Vite frontend: every screen is declared in Go under `internal/app/`, and plugins use a zero-build `plugin.json + index.js` sandbox. The browser extension and marketplace are maintained separately.
 
 ## Features
 
@@ -31,7 +31,7 @@ Bowerbird is a cross-platform desktop app built with **mygo (Go)** in webview mo
 
 - **Automatic palette extraction.** On import — and in the background for existing libraries — Bowerbird extracts the dominant color, a 6-color perceptual palette, the color model, alpha-channel presence, aspect ratio, orientation (`landscape` / `portrait` / `square`), resolution in megapixels, and JPEG EXIF camera/capture metadata.
 - **Multi-dimensional filtering.** One filter bar with dropdowns for **File Type**, **Color**, **Tags**, **Virtual Folders** and **Orientation** — and color filtering is done with perceptual ΔE matching, so "roughly this blue" actually returns roughly that blue, against both preset swatches and colors already present in your library.
-- **Virtual folders and tags.** Organize the same asset several ways at once; deleting goes through a trash flow rather than straight off the disk.
+- **Virtual folders and tags.** Organize the same asset several ways at once; removing it from a folder only drops that link, and the asset reaches the trash when its last folder is removed after a warning. Deleting from All, Untagged or Uncategorized first lists the folders it lives in and offers to detach it or move it to the trash.
 
 ### Preview everything without leaving the library
 
@@ -57,7 +57,7 @@ Dragging a file from a webview normally only publishes text formats, so Bowerbir
 
 ### Extend it
 
-- **Preview plugins are first-class.** Register a new viewer for any extension and it shows up in both the modal and the inspector — see [Registering a Custom Preview Plugin](#registering-a-custom-preview-plugin).
+- **Preview plugins are first-class.** Declare a native renderer for any extension and it shows up in both the modal and the inspector — see [Native Plugin Architecture](#native-plugin-architecture).
 - **A plugin store with a dual-channel repository** (`owocc/bowerbird-plugins`): a compact metadata index on `main`, release zips on GitHub Releases, resolved by the marketplace without a proxy in between.
 - **Built-in plugins are listed and disableable** from Settings, next to installed ones; only the internal fallback plugin is always on.
 
@@ -86,61 +86,73 @@ macOS (universal arm64 + amd64), Windows (portable executable and NSIS installer
 │   ├── service.go                    # Application service exposed to the frontend via mygo.Bind
 │   ├── host.go                       # Host abstraction over the desktop runtime (events, dialogs, drag, main thread)
 │   └── drag_*.go                     # Platform-specific native OS drag-out & debug tracing
-└── frontend/                         # React 19 + Vite + Tailwind v4 frontend
-    └── src/
-        ├── plugins/preview/          # Pluggable file preview system
-        │   ├── types.ts              # PreviewPlugin, PreviewViewportProps, PreviewInspectorProps
-        │   ├── registry.ts           # PreviewPluginRegistry singleton & plugin resolution
-        │   └── builtin/              # Built-in plugins (image, video, fallback)
-        ├── components/
-        │   ├── LibraryWorkspace.tsx  # Main 3-column resizable workspace
-        │   ├── FilterBar.tsx         # Multi-dimensional filter dropdowns (Type, Color, Tag, Folder, Orientation)
-        │   ├── JustifiedGallery.tsx  # Pixel-perfect justified layout & full-canvas marquee selection
-        │   ├── ItemDetailPanel.tsx   # Borderless adaptive preview, color swatches & Accordion metadata
-        │   ├── MultiItemInspector.tsx# Last-6 FIFO stacked preview & batch organization
-        │   ├── UnifiedPreviewModal.tsx # Plugin-driven inline & full-window preview host
-        │   └── ui/accordion.tsx      # Collapsible inspector accordion primitive
-        ├── hooks/
-        │   ├── useTrackpadZoom.ts    # Trackpad pinch-to-zoom hook for the main gallery
-        │   ├── useFileDrop.ts        # Drag-and-drop import state & progress events
-        │   └── useHistoryNavigation.ts # Router-backed Back/Forward navigation
-        └── lib/
-            ├── host-runtime.ts       # Desktop runtime adapter (typed events delivered with a {data} envelope)
-            ├── workspace-search.ts   # URL search schema for navigation & filter state
+├── internal/
+│   ├── app/                          # Native mygo/ui views & main-thread state machine
+│   │   ├── ui_main.go                # Workspace shell, routing, shortcuts
+│   │   ├── ui_gallery.go             # Justified gallery, selection, native drag
+│   │   ├── ui_inspector.go           # Native item inspector & plugin sections
+│   │   ├── ui_preview.go             # Image, markdown, audio, video & PSD previews
+│   │   └── ui_settings.go            # Settings, plugin manager and data locations
+│   ├── plugin/                       # Native plugin host (manifest, sandbox, built-ins)
+│   ├── player/                       # Go audio playback kernel
+│   └── i18n/                         # zh-CN / en dictionaries
+├── plugins/                          # Zero-build official plugins
+│   ├── markdown-preview/             # plugin.json + inspect hook
+│   ├── audio-player/
+│   ├── psd-preview/
+│   ├── prompt-metadata/
+│   └── pinterest/                    # Sandboxed URL resolver
+├── packages/plugin-sdk/              # TypeScript definitions for native plugins
+└── packages/ui/                      # Shared React component kit used by the browser extension
 ```
 
 ---
 
-## Preview Plugin Architecture
+## Native Plugin Architecture
 
-All file previews—both in the main/fullscreen modal (`UnifiedPreviewModal`) and the right inspector (`ItemDetailPanel`)—are resolved through `previewRegistry` (`frontend/src/plugins/preview/registry.ts`).
+The desktop app is rendered by `mygo/ui` (Go + GPU). There is no WebView, React
+runtime or plugin CSS: plugins return **plain JSON**, and the host paints the
+result with native views.
 
-### Built-in Plugins
+### Official plugins
 
-| Plugin ID | Priority | Status | Handled Formats | Capabilities |
-| :--- | :--- | :--- | :--- | :--- |
-| `builtin.image` | `100` | Built-in (disableable) | `png, jpg, jpeg, webp, gif, bmp, svg, ico, tiff, tif, avif` | Damped trackpad zoom (`25%`–`800%`), 2-finger pan when zoomed in, interactive MiniMap (`>125%`), borderless inspector preview |
-| `builtin.video` | `90` | Built-in (disableable) | `mp4, mov, qt, webm, mkv, avi, m4v, flv, f4v, ts, mts, m2ts, m3u8, m3u, mpd, ogv, ogm, 3gp, 3g2, wmv, asf, mpg, mpeg, m2v, vob, rmvb, rm` | Multi-engine player (**hls.js** + **mpegts.js** + **dash.js** + HTML5 Native), standalone shadcn UI bottom control bar (`0.25x`–`8x` speed menu, hover volume slider, ±5s seek, loop, fullscreen), cover/first-frame color palette extraction, and cover-only inspector preview |
-| `builtin.fallback` | `0` | Internal Fallback | `*` (catch-all fallback) | Native OS file icon rendering via `/asset/icon/<ext>` |
-### Registering a Custom Preview Plugin
+| Plugin ID | Version | Kind | Native renderer / capability |
+| :--- | :--- | :--- | :--- |
+| `official.markdown-preview` | `2.0.0` | preview | `markdown` — GFM rendering, frontmatter and outline inspection |
+| `official.audio-player` | `2.0.0` | preview | `audio` — playback, spectrum bars, scrubber, metadata |
+| `official.psd-preview` | `2.0.0` | preview | `psd` — composite decode, zoom, layer tree |
+| `official.prompt-metadata` | `2.0.0` | metadata | `prompt` — AI prompt field, copy action, full-text editor |
+| `builtin.video` | `2.0.0` | preview | `video` — ffmpeg frame decode + `ui.Video`, mygo audio output |
+| `official.pinterest` | `2.2.0` | resolver | `resolveUrl` in the embedded moejs runtime |
 
-```tsx
-import { previewRegistry } from "@/plugins/preview/registry";
+Sources live in `plugins/<plugin-id>/` (`plugin.json`, plus `index.js` only for
+resolver plugins). There is no build step. Packaged builds register the same
+manifests as compiled-in built-ins, and a local folder overrides the bundled copy.
 
-previewRegistry.register({
-  id: "custom.model3d",
-  name: "3D Model Viewer",
-  priority: 95,
-  extensions: ["glb", "gltf", "obj"],
-  supportsZoom: false,
-  Viewport: ({ item }) => <My3DCanvas src={item.originalUrl} />,
-  InspectorPreview: ({ item, onOpenPreview }) => (
-    <div onDoubleClick={onOpenPreview}>3D Preview: {item.filename}</div>
-  ),
-});
+### Manifest
+
+```json
+{
+  "id": "official.markdown-preview",
+  "name": "Markdown Preview",
+  "version": "2.0.0",
+  "kind": "preview",
+  "native": "markdown",
+  "extensions": ["md", "markdown"],
+  "mimePrefixes": ["text/markdown"],
+  "priority": 50
+}
 ```
 
----
+Native preview plugins may omit `main`. JavaScript hooks (`resolveUrl`,
+`inspect`, `actions`, `runAction`, `thumbnail`) are optional but must be
+explicitly listed in `hooks`; the host never invokes an undeclared hook. They
+execute in an embedded **moejs** runtime with explicit network/process/link
+permissions, a memory limit and a timeout. No Node
+process is involved. Every hook start/end, result, error and host API call is
+written to the native plugin log; plugins can add their own entries with
+`host.log()` or `console.*`. TypeScript definitions live in
+`packages/plugin-sdk`; see `plugins/README.md` for the complete guide.
 
 ## Native Drag & Drop Out of the Window
 
@@ -188,18 +200,18 @@ Bowerbird enforces a strict physical separation between **User Libraries** and *
 
 ### Plugin Ecosystem & Distribution Specification
 
-1. **Source Isolation**:
-   - Source code for official plugins resides in `plugins/<plugin-id>/` (`src/index.tsx`, `manifest.json`, `package.json`).
-   - Built assets are strictly output to `dist/plugins/` (git-ignored). Committing pre-built JavaScript into `plugins/` is forbidden.
-2. **Dual-Channel Distribution Repository**:
-   - Distribution metadata is published to the dedicated repository (`owocc/bowerbird-plugins`).
-   - **`main` Branch**: Contains compact index metadata (`index.min.json`, `registry.json`, `repo/<id>/manifest.json`, `repo/<id>/index.js`).
-   - **GitHub Releases**: Contains pre-packaged release zip bundles (`<plugin-id>-v<version>.zip`).
-3. **Marketplace & Edge Resolution**:
-   - The plugin store (`apps/marketplace/`) reads metadata from `PLUGIN_REPO_INDEX_URL`.
-   - Release downloads directly route to `PLUGIN_RELEASE_BASE_URL` without intermediate proxying.
-4. **In-App Data Management**:
-   - The Settings panel includes a dedicated **Data & Storage** section with one-click shortcuts to reveal the **Plugins Directory** and **Application Data Directory** in the native OS file manager (Finder / Explorer).
+1. **Native source layout**:
+   - Official plugins live in `plugins/<plugin-id>/` as `plugin.json` plus an optional zero-build `index.js`.
+   - Preview plugins declare a host renderer (`"native": "markdown"`); they ship no React components and need no Vite/Rollup output.
+2. **Dual-channel distribution**:
+   - Metadata is published to `owocc/bowerbird-plugins`.
+   - **`main` branch**: compact index metadata and `repo/<id>/plugin.json`.
+   - **GitHub Releases**: packaged zip bundles (`<plugin-id>-v<version>.zip`).
+3. **Marketplace & edge resolution**:
+   - The marketplace reads `PLUGIN_REPO_INDEX_URL` and downloads releases from `PLUGIN_RELEASE_BASE_URL` without proxying.
+4. **Runtime state**:
+   - `<UserDataDir>/plugins/installed.json` is the legacy WebView registry; the native host keeps enable/settings state in `native-plugins.json`.
+   - Settings → Data & Storage reveals both the plugin directory and the application data directory.
 
 ---
 
@@ -218,8 +230,7 @@ All dev/build commands live in the root `package.json` `scripts` block — run t
 > through `scripts/mygo.mjs`, which forces `CGO_ENABLED=1` on every platform.
 
 ```bash
-pnpm dev                 # mygo dev mode (Go backend + Vite HMR via mygo devCommand)
-pnpm dev:frontend        # Vite dev server only (frontend)
+pnpm dev                 # native mygo window (pure Go, no WebView)
 pnpm dev:marketplace     # Marketplace (apps/marketplace) dev server
 pnpm dev:docs            # Docs site (apps/docs) dev server
 pnpm dev:extension       # Web extension dev (Chrome); :firefox variant available
@@ -228,16 +239,13 @@ pnpm dev:extension       # Web extension dev (Chrome); :firefox variant availabl
 ### Build
 
 ```bash
-pnpm build               # plugins + frontend bundle (what mygo build consumes)
-pnpm build:release       # plugins + frontend + mygo build
+pnpm build               # native mygo application build
 pnpm build:app           # mygo build (current platform)
 pnpm build:app:macos     # macOS universal (arm64 + amd64)
 pnpm build:app:windows   # Windows amd64 (portable exe + NSIS installer)
 pnpm build:app:linux     # Linux amd64
 
-pnpm build:packages      # workspace packages (@bowerbird/plugin-sdk, @workspace/ui)
-pnpm build:plugins       # scripts/build-plugins.mjs -> dist/plugins/*.zip + index.min.json
-pnpm build:frontend      # typecheck + production frontend bundle
+pnpm build:packages      # shared TypeScript types for the marketplace/extension
 pnpm build:extension     # web extension (Chrome); :firefox / :edge / :safari variants
 pnpm build:marketplace   # marketplace app
 pnpm build:docs          # docs site
@@ -250,7 +258,7 @@ pnpm build:all           # every JS/TS workspace target
 pnpm test                # go test ./...
 pnpm test:watch          # go test -count=1 -v ./...
 pnpm typecheck           # tsc / astro check across every package that defines one
-pnpm clean               # remove build outputs (frontend/dist, dist, build/mygo, ...)
+pnpm clean               # remove build outputs (dist, build/mygo, ...)
 ```
 
 Equivalent raw commands, for reference:

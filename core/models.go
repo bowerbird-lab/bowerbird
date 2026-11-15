@@ -2,9 +2,13 @@ package core
 
 // LibraryInfo represents metadata about an opened library.
 type LibraryInfo struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Path      string `json:"path"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// Icon names the built-in icon the library picked, or LibraryIconCustom
+	// when LibraryIconFile beside the manifest holds its picture. Empty means
+	// the default icon.
+	Icon      string `json:"icon,omitempty"`
 	CreatedAt int64  `json:"createdAt"`
 	ItemCount int64  `json:"itemCount"`
 }
@@ -45,7 +49,7 @@ type ImageMeta struct {
 // Item represents a single managed asset in the library.
 type Item struct {
 	ID            string     `json:"id"`
-	Hex           string     `json:"hex"`          // uppercase content hash (SHA-256)
+	Hex           string     `json:"hex"` // uppercase content hash (SHA-256)
 	Name          string     `json:"name"`
 	Extension     string     `json:"extension"`
 	Filename      string     `json:"filename"`
@@ -116,6 +120,9 @@ type ImportItemOptions struct {
 	Tags      []string          `json:"tags,omitempty"`
 	FolderIDs []string          `json:"folderIds,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
+	// SkipURL disables the automatic source-URL backfill for callers that
+	// intentionally do not want to record where a download came from.
+	SkipURL bool `json:"skipUrl,omitempty"`
 }
 
 // NetworkInterfaceInfo describes an available network interface for mobile discovery.

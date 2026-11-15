@@ -275,8 +275,11 @@ func (m *LibraryManager) QueryPage(spec QuerySpec, sortOrder string, offset int,
 	if db == nil || active == nil {
 		return page, nil
 	}
-	if err := m.ensureCacheLoaded(); err != nil {
-		return page, err
+	m.cacheMu.RLock()
+	loaded := m.cacheLoaded
+	m.cacheMu.RUnlock()
+	if !loaded {
+		return m.diskQueryPage(spec, sortOrder, offset, limit, folderScope, onlyUnrated)
 	}
 
 	var scope map[string]struct{}
@@ -345,8 +348,11 @@ func (m *LibraryManager) WorkspaceStats(sortOrder string) (WorkspaceStats, error
 	if db == nil || active == nil {
 		return stats, nil
 	}
-	if err := m.ensureCacheLoaded(); err != nil {
-		return stats, err
+	m.cacheMu.RLock()
+	loaded := m.cacheLoaded
+	m.cacheMu.RUnlock()
+	if !loaded {
+		return m.diskWorkspaceStats(sortOrder)
 	}
 
 	isAsc := strings.ToLower(sortOrder) == "asc"
@@ -419,8 +425,11 @@ func (m *LibraryManager) FolderPreviews(folderGroups [][]string, sortOrder strin
 	if db == nil || active == nil {
 		return previews, nil
 	}
-	if err := m.ensureCacheLoaded(); err != nil {
-		return previews, err
+	m.cacheMu.RLock()
+	loaded := m.cacheLoaded
+	m.cacheMu.RUnlock()
+	if !loaded {
+		return m.diskFolderPreviews(folderGroups, sortOrder)
 	}
 
 	isAsc := strings.ToLower(sortOrder) == "asc"

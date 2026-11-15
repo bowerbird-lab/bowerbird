@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"bowerbird/core"
+	"bowerbird/internal/app"
 
 	"github.com/egoist/mygo"
 	xdraw "golang.org/x/image/draw"
@@ -23,6 +24,14 @@ import (
 
 //go:embed assets/branding/app-icon.png
 var appIcon []byte
+
+// appIconRounded is the Windows/Linux icon: those platforms draw the icon
+// verbatim and do not round its corners themselves. macOS keeps the square
+// source because the system applies its own mask (see macos.icon in
+// mygo.json).
+//
+//go:embed assets/branding/app-icon-rounded.png
+var appIconRounded []byte
 
 // trayIconTemplate is the macOS menu bar icon: black shapes on transparent,
 // 18pt (36px @2x), so the system can tint it for light and dark menu bars.
@@ -43,6 +52,7 @@ type appHost struct {
 	tray        *mygo.Tray
 
 	svc      *core.Service
+	views    *app.App
 	quitting atomic.Bool
 
 	idleMu     sync.Mutex
@@ -57,6 +67,7 @@ func newAppHost(svc *core.Service) *appHost {
 		windows: map[string]*mygo.Window{},
 		events:  map[string]*mygo.Event[any]{},
 		svc:     svc,
+		views:   app.New(svc),
 	}
 }
 
@@ -75,6 +86,14 @@ func (h *appHost) event(name string) *mygo.Event[any] {
 }
 
 func (h *appHost) Emit(name string, payload any) {
+	if h.views != nil {
+		h.views.HandleEvent(name, payload)
+	}
+	// Diagnostics belong to the native log viewer. Broadcasting every entry
+	// would also serialize it and enqueue it for unrelated embedded web pages.
+	if name == core.LogEntryEvent || name == core.LogsClearedEvent {
+		return
+	}
 	if name == core.LanguageChangedEvent || name == core.ShortcutsChangedEvent {
 		h.rebuildTrayMenu()
 		if runtime.GOOS == "darwin" {
@@ -110,8 +129,18 @@ func (h *appHost) window(name string) *mygo.Window {
 // host lock.
 func (h *appHost) newWindow(spec core.WindowSpec) *mygo.Window {
 	w := mygo.NewWindow(h.windowOptions(spec))
-	keepWindowTitle(w)
+	h.applyWindowVibrancy(w)
 	h.attachDrop(w)
+	switch spec.Name {
+	case "main":
+		h.views.SetMainWindow(w)
+	case "settings":
+		h.views.SetSettingsWindow(w)
+	case "logs":
+		h.views.SetLogsWindow(w)
+	case "setup":
+		h.views.SetSetupWindow(w)
+	}
 	return w
 }
 
@@ -217,6 +246,7 @@ func (h *appHost) CloseMainWindow() {
 func (h *appHost) OpenMainWindow() {
 	h.CancelLightweightIdle()
 	h.liteActive.Store(false)
+	h.views.Notify(true)
 	h.mu.Lock()
 	if h.main != nil {
 		h.mu.Unlock()
@@ -255,9 +285,11 @@ func (h *appHost) createMainWindow() *mygo.Window {
 		MinWidth:       900,
 		MinHeight:      600,
 		TitleBarHidden: true,
+		TitleBarHeight: 52,
 	}))
-	keepWindowTitle(w)
+	h.applyWindowVibrancy(w)
 	h.attachDrop(w)
+	h.views.SetMainWindow(w)
 	w.OnClose(func(e *mygo.CloseEvent) {
 		if h.quitting.Load() {
 			return
@@ -364,38 +396,62 @@ func (h *appHost) WriteTextToClipboard(text string) error {
 	return nil
 }
 
-// windowBackgroundColor follows the light/dark appearance so chrome and the
-// first paint stay in sync with the page theme.
-const windowBackgroundColor = "light-dark(#ffffff, #06070f)"
-
-// windowVibrancyMaterial is the translucent material shown behind the page
-// when the user turns on window blur. macOS shows the sidebar material; Windows
-// 11 falls back to Acrylic for it. Windows keeps the material in the window it
-// was created with, so slim windows are always created with one.
+// windowVibrancyMaterial is the translucent material shown behind the native
+// header and sidebars when the user turns on the blur switch. macOS shows the
+// sidebar material; Windows 11 falls back to Acrylic for it. Windows keeps the
+// material in the window it was created with, so every window is always created
+// with one.
 const windowVibrancyMaterial = mygo.VibrancySidebar
 
 // windowOptions returns the options for one of the app's windows, following the
 // current theme and vibrancy preference.
 func (h *appHost) windowOptions(spec core.WindowSpec) mygo.WindowOptions {
-	svc := h.svc
-	vibrant := svc != nil && svc.GetVibrancyEnabled()
 	opts := mygo.WindowOptions{
 		Title:           spec.Title,
-		URL:             spec.URL,
 		Width:           spec.Width,
 		Height:          spec.Height,
 		MinWidth:        spec.MinWidth,
 		MinHeight:       spec.MinHeight,
-		Transparent:     vibrant,
-		BackgroundColor: windowBackgroundColor,
+		Transparent:     true,
+		BackgroundColor: h.views.WindowBackgroundColor(),
+		// Every window is created with the material, even while the switch is
+		// off: macOS changes the material of an existing window, and Windows
+		// only changes one it was created with. applyWindowVibrancy removes it
+		// when the setting is off, so the switch works later for every window.
+		Vibrancy: windowVibrancyMaterial,
+	}
+	switch spec.Name {
+	case "settings":
+		opts.Content = h.views.SettingsContent()
+	case "logs":
+		opts.Content = h.views.LogsContent()
+	case "setup":
+		opts.Content = h.views.SetupContent()
+	default:
+		opts.Content = h.views.MainContent()
 	}
 	if spec.TitleBarHidden {
-		opts.TitleBarStyle = mygo.TitleBarHiddenInset
-	}
-	if vibrant {
-		opts.Vibrancy = windowVibrancyMaterial
+		opts.TitleBarStyle = mygo.TitleBarHidden
+		if runtime.GOOS == "darwin" {
+			opts.TrafficLightPosition = &mygo.Point{X: 20, Y: 20}
+		}
+		if spec.TitleBarHeight > 0 {
+			opts.TitleBarHeight = spec.TitleBarHeight
+		} else {
+			opts.TitleBarHeight = 52
+		}
 	}
 	return opts
+}
+
+// applyWindowVibrancy reconciles a newly created window with the current
+// setting. Every window is created with a material so the switch can add it
+// back later on Windows; when the setting is off, remove it now.
+func (h *appHost) applyWindowVibrancy(w *mygo.Window) {
+	if w == nil || h.svc == nil || h.svc.GetVibrancyEnabled() {
+		return
+	}
+	w.SetVibrancy(mygo.VibrancyNone)
 }
 
 func nativeThemeSource(theme string) mygo.ThemeSource {
@@ -409,9 +465,9 @@ func nativeThemeSource(theme string) mygo.ThemeSource {
 	}
 }
 
-// ApplyVibrancy turns the blurred material behind every window on or off. The
-// page is what has to become transparent, so this only touches the native side;
-// the frontend does the same over the vibrancy-changed event.
+// ApplyVibrancy turns the native material behind every window on or off. Native
+// views decide where it shows by leaving a surface transparent, so this only
+// touches the window side; the vibrancy-changed event makes the views repaint.
 func (h *appHost) ApplyVibrancy(enabled bool) {
 	material := mygo.VibrancyNone
 	if enabled {
@@ -461,37 +517,27 @@ func (h *appHost) ApplyTheme(theme string) {
 			continue
 		}
 		seen[w] = struct{}{}
-		_ = w.SetBackgroundColor(windowBackgroundColor)
+		if h.views != nil {
+			_ = w.SetBackgroundColor(h.views.WindowBackgroundColor())
+		}
 	}
-}
-
-// dropTarget is the DOM target resolved under a native drop.
-type dropTarget struct {
-	Target   string `json:"target"`
-	FolderID string `json:"folderId"`
 }
 
 func (h *appHost) attachDrop(w *mygo.Window) {
 	w.OnFileDrop(func(e *mygo.FileDropEvent) {
-		// This callback runs in the WebView2 WebMessageReceived handler on the
-		// UI thread. Calling EvalAs here would deadlock: Eval waits (pumping
-		// messages in a nested loop) for the page's answer, but WebView2 only
-		// delivers that answer after this callback returns. Every RPC then
-		// stalls with it — drops, imports, settings windows.
 		paths := append([]string(nil), e.Paths...)
-		x, y := e.X, e.Y
-		go func() {
-			target := dropTarget{}
-			js := fmt.Sprintf(`const el = document.elementFromPoint(%d, %d);
-const t = el && el.closest ? el.closest("[data-file-drop-target]") : null;
-return {target: t && t.dataset ? (t.dataset.fileDropTarget || "") : "", folderId: t && t.dataset ? (t.dataset.folderId || "") : ""};`, x, y)
-			if got, err := mygo.EvalAs[dropTarget](w.Page(), js); err == nil {
-				target = got
-			}
-			if h.svc != nil {
-				_ = h.svc.HandleNativeDrop(paths, target.Target, target.FolderID)
-			}
-		}()
+		if h.views != nil {
+			h.views.HandleDrop(paths)
+			return
+		}
+		if h.svc != nil {
+			go func() { _ = h.svc.HandleNativeDrop(paths, "", "") }()
+		}
+	})
+	w.OnHide(func() {
+		if h.views != nil {
+			h.views.Notify(false)
+		}
 	})
 }
 
@@ -503,7 +549,7 @@ func (h *appHost) rebuildTrayMenu() {
 	if tray == nil || h.svc == nil {
 		return
 	}
-	isZh := h.svc.GetLanguage() == "zh"
+	isZh := h.views != nil && h.views.Translator().Language() == "zh"
 	tray.SetMenu(h.buildTrayMenu(isZh, h.svc.GetShortcutSettings()))
 }
 
@@ -615,12 +661,6 @@ func (h *appHost) registerGlobalShortcuts() {
 	}
 }
 
-// keepWindowTitle keeps the native title the app set, instead of following
-// the page's <title> (all routes share the same document title).
-func keepWindowTitle(w *mygo.Window) {
-	w.Page().OnPageTitleUpdated(func(e *mygo.TitleEvent) { e.PreventDefault() })
-}
-
 // trayIcon returns the menu bar / notification area icon. macOS treats it as a
 // template image, so it must stay black-on-transparent to follow the menu bar's
 // appearance. Windows and Linux draw the icon verbatim and have no template
@@ -632,17 +672,17 @@ func trayIcon() []byte {
 	return trayIconPNG()
 }
 
-// trayIconPNG downsizes the 1024px app icon to a 32px tray icon.
+// trayIconPNG downsizes the rounded 1024px app icon to a 32px tray icon.
 func trayIconPNG() []byte {
-	src, _, err := image.Decode(bytes.NewReader(appIcon))
+	src, _, err := image.Decode(bytes.NewReader(appIconRounded))
 	if err != nil {
-		return appIcon
+		return appIconRounded
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, 32, 32))
 	xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Over, nil)
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, dst); err != nil {
-		return appIcon
+		return appIconRounded
 	}
 	return buf.Bytes()
 }
@@ -686,8 +726,6 @@ func main() {
 	coreService := core.NewService(nil)
 	host := newAppHost(coreService)
 	core.AttachHost(coreService, host)
-	mygo.Bind(&GreetService{})
-	mygo.Bind(coreService)
 
 	var (
 		coreMgr    *core.LibraryManager
@@ -769,6 +807,11 @@ func main() {
 		coreMgr = core.NewLibraryManager()
 		coreMgr.SetHost(host)
 		core.AttachManager(coreService, coreMgr)
+		// The views were built before the manager existed, so they could not read
+		// the stored language yet. Apply it before any window, menu or tray is
+		// created so the first frame starts in the user's language.
+		host.views.SyncLanguage()
+		log.Printf("[I18n] stored language=%q active=%q", coreService.GetLanguage(), host.views.Translator().Language())
 		host.ApplyTheme(coreService.GetTheme())
 		host.ApplyVibrancy(coreService.GetVibrancyEnabled())
 		// The manager restores the last library before it has a host, so tell
@@ -803,7 +846,7 @@ func main() {
 			Icon:           trayIcon(),
 			IconIsTemplate: runtime.GOOS == "darwin",
 			ToolTip:        "Bowerbird",
-			Menu:           host.buildTrayMenu(coreService.GetLanguage() == "zh", coreService.GetShortcutSettings()),
+			Menu:           host.buildTrayMenu(host.views.Translator().Language() == "zh", coreService.GetShortcutSettings()),
 		})
 		if err != nil {
 			log.Printf("[Tray] %v", err)
