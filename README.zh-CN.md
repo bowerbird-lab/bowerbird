@@ -69,7 +69,7 @@ BowerBird 是一个跨平台桌面应用，使用 **mygo（Go）的 GPU 原生 U
 
 ### 你用什么平台，它就在哪
 
-macOS（arm64 + amd64 通用包）、Windows（免安装可执行文件与带 WebView2 引导的 NSIS 安装包）与 Linux——同一套工作区里还包含移动端应用、用于从网页采集素材的浏览器扩展、插件市场应用与文档站点。
+macOS（arm64 + amd64 通用包）、Windows（免安装可执行文件与 NSIS 安装包）与 Linux——同一套工作区里还包含 Android 应用、用于从网页采集素材的浏览器扩展、插件市场应用与文档站点。每个版本的变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 

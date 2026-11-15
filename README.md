@@ -69,7 +69,7 @@ Dragging a file from a webview normally only publishes text formats, so Bowerbir
 
 ### Runs where you do
 
-macOS (universal arm64 + amd64), Windows (portable executable and NSIS installer with WebView2 bootstrapping) and Linux — plus a mobile app, a browser extension for capturing assets from the web, a marketplace app and a docs site in the same workspace.
+macOS (universal arm64 + amd64), Windows (portable executable and NSIS installer) and Linux — plus an Android app, a browser extension for capturing assets from the web, a marketplace app and a docs site in the same workspace. Every release is listed in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
