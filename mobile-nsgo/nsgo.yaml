@@ -1,0 +1,16 @@
+name: Bowerbird
+id: com.bowerbird.mobile
+version: 1.1.0
+build_number: 3
+icon:
+  png: assets/Icon.png
+
+dev:
+  target: native
+
+build:
+  output: dist
+  targets: [android_arm64, android_x64]
+
+android:
+  permissions: [INTERNET, ACCESS_NETWORK_STATE, CAMERA, POST_NOTIFICATIONS]
