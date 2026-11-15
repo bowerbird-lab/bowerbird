@@ -325,15 +325,14 @@ func (a *App) settingsThemeCard(c *ui.Context) {
 			if !changed {
 				return
 			}
-			go func() {
-				err := a.svc.SetTheme(mode)
-				a.postSettings(func() {
-					if err != nil {
-						a.showToast(err.Error())
-					}
-					a.themeValue = mode
-				})
-			}()
+			// Persist synchronously: the write is a few hundred bytes, and the
+			// user may quit right after picking a mode. Leaving it to a goroutine
+			// can drop the selection before the process exits.
+			if err := a.svc.SetTheme(mode); err != nil {
+				a.showToast(err.Error())
+				return
+			}
+			a.themeValue = mode
 		})
 	})
 }

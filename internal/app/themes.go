@@ -38,7 +38,42 @@ func (a *App) loadThemes() {
 	for _, t := range themes {
 		a.themeIndex[t.ID] = t
 	}
+	// A selected theme can disappear between launches (deleted file, failed
+	// user theme, renamed custom theme). The palette already falls back in
+	// themeByID; persisting the repair keeps the pickers and the next launch in
+	// sync with the default that is actually painted.
+	if a.normalizeThemeSelection() {
+		a.savePrefs()
+	}
 	a.rebuildThemePalettes()
+}
+
+// themeExists reports whether id names a loaded theme of the given appearance.
+func (a *App) themeExists(id string, appearance theme.Appearance) bool {
+	t := a.themeIndex[id]
+	return t != nil && t.Appearance == appearance
+}
+
+// normalizeThemeSelection replaces a stored theme ID that no longer resolves
+// with the embedded default of the same appearance. It reports whether a real
+// selection was lost, so callers can persist the repaired value.
+func (a *App) normalizeThemeSelection() bool {
+	stale := ""
+	if !a.themeExists(a.prefs.LightTheme, theme.Light) {
+		stale = a.prefs.LightTheme
+		a.prefs.LightTheme = "default-light"
+	}
+	if !a.themeExists(a.prefs.DarkTheme, theme.Dark) {
+		if stale == "" {
+			stale = a.prefs.DarkTheme
+		}
+		a.prefs.DarkTheme = "default-dark"
+	}
+	if stale == "" {
+		return false
+	}
+	log.Printf("[Theme] selected theme %q is unavailable; using the built-in default", stale)
+	return true
 }
 
 // rebuildThemePalettes resolves the selected light and dark themes into the

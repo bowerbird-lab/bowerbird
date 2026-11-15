@@ -1186,10 +1186,26 @@ func (a *App) savePrefs() {
 	path := filepath.Join(core.UserDataDir(), "native-ui.json")
 	data, err := json.MarshalIndent(a.prefs, "", "  ")
 	if err != nil {
+		log.Printf("[Prefs] encode: %v", err)
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	_ = os.WriteFile(path, data, 0o644)
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		log.Printf("[Prefs] create %s: %v", filepath.Dir(path), err)
+		return
+	}
+	// Write to a sibling temp file and rename it into place: a crash or a
+	// force-quit halfway through a write must never truncate the preferences
+	// (which would silently reset the selected theme on the next launch).
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		log.Printf("[Prefs] write %s: %v", tmp, err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		log.Printf("[Prefs] replace %s: %v", path, err)
+		_ = os.Remove(tmp)
+	}
 }
 
 // invalidateWindows repaints every open window after an appearance-only
@@ -1206,12 +1222,18 @@ func (a *App) loadPrefs() {
 	path := filepath.Join(core.UserDataDir(), "native-ui.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("[Prefs] read %s: %v", path, err)
+		}
 		return
 	}
 	// Start from defaults so newly added fields (such as recordImportUrl) keep
 	// their intended default when older native-ui.json files lack them.
 	p := defaultPrefs()
 	if err := json.Unmarshal(data, &p); err != nil {
+		// A corrupt file falls back to the defaults rather than taking the app
+		// down or leaving a half-populated Prefs behind.
+		log.Printf("[Prefs] %s is unreadable, using defaults: %v", path, err)
 		return
 	}
 	if p.SortOrder == "" {

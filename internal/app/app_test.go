@@ -1312,6 +1312,74 @@ func TestDuplicateBuiltinThemeCreatesEditableCopy(t *testing.T) {
 	}
 }
 
+func TestThemeSelectionPersistsAcrossRestart(t *testing.T) {
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
+	a := New(nil)
+	base := *a.themeIndex["default-light"]
+	custom := &theme.Theme{ID: "mine-light", Appearance: theme.Light, Colors: base.Colors, Material: base.Material}
+	custom.Colors.Accent = "#ff0000"
+	if err := a.writeThemeFile(custom); err != nil {
+		t.Fatal(err)
+	}
+	a.loadThemes()
+	a.prefs.LightTheme = "mine-light"
+	a.prefs.DarkTheme = "midnight-dark"
+	a.applyThemeSelection()
+
+	// Simulate a fresh process: the selection and the user theme both have to
+	// come back from disk.
+	b := New(nil)
+	if b.prefs.LightTheme != "mine-light" {
+		t.Fatalf("light theme after restart = %q, want mine-light", b.prefs.LightTheme)
+	}
+	if b.prefs.DarkTheme != "midnight-dark" {
+		t.Fatalf("dark theme after restart = %q, want midnight-dark", b.prefs.DarkTheme)
+	}
+	if got := b.themeByID("mine-light", theme.Light); got.Colors.Accent != "#ff0000" {
+		t.Fatalf("restored theme accent = %q, want #ff0000", got.Colors.Accent)
+	}
+}
+
+func TestMissingThemeSelectionFallsBackToDefault(t *testing.T) {
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
+	a := New(nil)
+	base := *a.themeIndex["default-light"]
+	custom := &theme.Theme{ID: "mine-light", Appearance: theme.Light, Colors: base.Colors, Material: base.Material}
+	if err := a.writeThemeFile(custom); err != nil {
+		t.Fatal(err)
+	}
+	a.loadThemes()
+	a.prefs.LightTheme = "mine-light"
+	a.applyThemeSelection()
+
+	// The theme file is deleted (or becomes invalid) between launches.
+	if err := os.Remove(filepath.Join(a.themesDir(), "mine-light.json")); err != nil {
+		t.Fatal(err)
+	}
+	b := New(nil)
+	if b.prefs.LightTheme != "default-light" {
+		t.Fatalf("light theme after losing the file = %q, want default-light", b.prefs.LightTheme)
+	}
+	if got := b.themeByID(b.prefs.LightTheme, theme.Light).ID; got != "default-light" {
+		t.Fatalf("painted theme = %q, want default-light", got)
+	}
+}
+
+func TestCorruptPrefsFallBackToDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "native-ui.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := New(nil)
+	if a.prefs.LightTheme != "default-light" || a.prefs.DarkTheme != "default-dark" {
+		t.Fatalf("themes after corrupt prefs = %q/%q, want the defaults", a.prefs.LightTheme, a.prefs.DarkTheme)
+	}
+	if mode := a.themeMode(); mode != core.ThemeSystem {
+		t.Fatalf("theme mode after corrupt prefs = %q, want system", mode)
+	}
+}
+
 func TestNormalizeDroppedURLs(t *testing.T) {
 	raw := []string{
 		"https://www.pinterest.com/pin/123/\r\nhttps://pin.it/AbCdEf",
