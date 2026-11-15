@@ -246,7 +246,11 @@ type App struct {
 	// means the library root. It is separate from folderID so opening the
 	// dialog from a folder's context menu does not change the current view.
 	newFolderParentID string
-	menuOpen          bool
+	// folderDialogID is the folder a rename or delete dialog acts on. It is
+	// separate from folderID so opening those dialogs from a folder's card or
+	// sidebar row does not change the current view either.
+	folderDialogID string
+	menuOpen       bool
 	// folderPickerItems are the items the "add to folder" dialog targets,
 	// folderPickerQuery is the text its tree filters by, and
 	// folderPickerExpanded is the picker's own expansion state: the sidebar's

@@ -58,12 +58,12 @@ func (a *App) createFolderFromDialog() {
 
 func (a *App) renameFolderFromDialog() {
 	name := strings.TrimSpace(a.dialogValue)
-	if name == "" || a.folderID == "" {
-		a.dialog = dialogNone
+	id := a.folderDialogID
+	a.folderDialogID = ""
+	a.dialog = dialogNone
+	if name == "" || id == "" {
 		return
 	}
-	id := a.folderID
-	a.dialog = dialogNone
 	go func() {
 		err := a.svc.RenameFolder(id, name)
 		a.post(func() {
@@ -76,7 +76,8 @@ func (a *App) renameFolderFromDialog() {
 }
 
 func (a *App) deleteFolderFromDialog() {
-	id := a.folderID
+	id := a.folderDialogID
+	a.folderDialogID = ""
 	a.dialog = dialogNone
 	if id == "" {
 		return

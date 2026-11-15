@@ -202,34 +202,40 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 		}
 	}
 	b.ContextMenu(func(m *ui.Menu) {
-		if m.Item(a.t("common.rename")).Chosen() {
-			a.dialog = dialogRenameFolder
-			a.dialogValue = f.Name
-			a.folderID = f.ID
-		}
-		if m.Item(a.t("sidebar.newSubfolderMenu")).Chosen() {
-			a.dialog = dialogNewFolder
-			a.dialogValue = ""
-			a.newFolderParentID = f.ID
-		}
-		if m.Item(a.t("contextMenu.includeSubfolders")).Checked(a.prefs.IncludeSubs).Chosen() {
-			a.prefs.IncludeSubs = !a.prefs.IncludeSubs
-			a.savePrefs()
-			if a.nav == NavFolder && a.folderID == f.ID {
-				a.refreshWorkspace()
-			}
-		}
-		m.Separator()
-		if m.Item(a.t("common.delete")).Chosen() {
-			a.dialog = dialogDeleteFolder
-			a.dialogValue = f.Name
-			a.folderID = f.ID
-		}
+		a.folderContextMenu(m, f)
 	})
 	if len(children) > 0 && open {
 		for i := range children {
 			a.folderRow(c, children[i], depth+1)
 		}
+	}
+}
+
+// folderContextMenu is the menu shared by a folder's sidebar row and its card
+// in the workspace, so both entry points offer the same actions.
+func (a *App) folderContextMenu(m *ui.Menu, f core.Folder) {
+	if m.Item(a.t("common.rename")).Chosen() {
+		a.dialog = dialogRenameFolder
+		a.dialogValue = f.Name
+		a.folderDialogID = f.ID
+	}
+	if m.Item(a.t("sidebar.newSubfolderMenu")).Chosen() {
+		a.dialog = dialogNewFolder
+		a.dialogValue = ""
+		a.newFolderParentID = f.ID
+	}
+	if m.Item(a.t("contextMenu.includeSubfolders")).Checked(a.prefs.IncludeSubs).Chosen() {
+		a.prefs.IncludeSubs = !a.prefs.IncludeSubs
+		a.savePrefs()
+		if a.nav == NavFolder && a.folderID == f.ID {
+			a.refreshWorkspace()
+		}
+	}
+	m.Separator()
+	if m.Item(a.t("common.delete")).Chosen() {
+		a.dialog = dialogDeleteFolder
+		a.dialogValue = f.Name
+		a.folderDialogID = f.ID
 	}
 }
 

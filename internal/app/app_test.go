@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -566,6 +567,81 @@ func TestGalleryContextMenuCreatesSubfolderOnlyInsideFolders(t *testing.T) {
 	}
 	if a.newFolderParentID != "f1" {
 		t.Fatalf("new folder parent = %q, want f1", a.newFolderParentID)
+	}
+}
+
+func TestGalleryFolderCardUsesTheSidebarFolderContextMenu(t *testing.T) {
+	a := seededApp(t)
+	a.prefs.SidebarOpen = false
+	a.folders = []core.Folder{
+		{ID: "root", Name: "Root"},
+		{ID: "child", Name: "Child", ParentID: "root"},
+	}
+	a.nav = NavFolder
+	a.folderID = "root"
+	a.rebuildRows()
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.Frame()
+
+	if err := tester.RightClick("Child"); err != nil {
+		t.Fatalf("right click folder card: %v", err)
+	}
+	tester.Frame()
+	want := []string{
+		a.t("common.rename"),
+		a.t("sidebar.newSubfolderMenu"),
+		a.t("contextMenu.includeSubfolders"),
+		"-",
+		a.t("common.delete"),
+	}
+	if got := tester.Menu(); !slices.Equal(got, want) {
+		t.Fatalf("folder card menu = %v, want the sidebar menu %v", got, want)
+	}
+	if err := tester.ChooseMenuItem(a.t("sidebar.newSubfolderMenu")); err != nil {
+		t.Fatalf("choose new subfolder: %v", err)
+	}
+	tester.Frame()
+	if a.dialog != dialogNewFolder {
+		t.Fatalf("dialog = %v, want new folder", a.dialog)
+	}
+	if a.newFolderParentID != "child" {
+		t.Fatalf("new folder parent = %q, want child", a.newFolderParentID)
+	}
+}
+
+func TestGalleryFolderCardRenameKeepsTheCurrentFolder(t *testing.T) {
+	a := seededApp(t)
+	a.prefs.SidebarOpen = false
+	a.folders = []core.Folder{
+		{ID: "root", Name: "Root"},
+		{ID: "child", Name: "Child", ParentID: "root"},
+	}
+	a.nav = NavFolder
+	a.folderID = "root"
+	a.rebuildRows()
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.Frame()
+
+	if err := tester.RightClick("Child"); err != nil {
+		t.Fatalf("right click folder card: %v", err)
+	}
+	tester.Frame()
+	if err := tester.ChooseMenuItem(a.t("common.rename")); err != nil {
+		t.Fatalf("choose rename: %v", err)
+	}
+	tester.Frame()
+
+	if a.dialog != dialogRenameFolder {
+		t.Fatalf("dialog = %v, want rename folder", a.dialog)
+	}
+	if a.nav != NavFolder || a.folderID != "root" {
+		t.Fatalf("rename moved the workspace to nav=%q folder=%q, want root", a.nav, a.folderID)
+	}
+	if a.folderDialogID != "child" {
+		t.Fatalf("rename target = %q, want child", a.folderDialogID)
+	}
+	if a.dialogValue != "Child" {
+		t.Fatalf("rename value = %q, want Child", a.dialogValue)
 	}
 }
 

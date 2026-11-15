@@ -530,6 +530,9 @@ func (a *App) viewDialog(c *ui.Context) {
 		if a.dialog == dialogNewFolder {
 			a.newFolderParentID = ""
 		}
+		if a.dialog == dialogRenameFolder || a.dialog == dialogDeleteFolder {
+			a.folderDialogID = ""
+		}
 		if a.dialog == dialogFolderPicker {
 			a.folderPickerItems = nil
 			a.folderPickerQuery = ""

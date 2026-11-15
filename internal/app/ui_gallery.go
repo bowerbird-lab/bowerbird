@@ -500,6 +500,9 @@ func (a *App) folderCard(c *ui.Context, folderID string, w, h float32) {
 	if card.Clicked() {
 		a.navigate(NavFolder, f.ID)
 	}
+	card.ContextMenu(func(m *ui.Menu) {
+		a.folderContextMenu(m, f)
+	})
 	if dropped, ok := ui.Drop[sidebarDrag](card); ok && len(dropped.ItemIDs) > 0 {
 		a.addItemsToFolder(dropped.ItemIDs, f.ID)
 	}
