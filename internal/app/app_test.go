@@ -590,7 +590,6 @@ func TestGalleryFolderCardUsesTheSidebarFolderContextMenu(t *testing.T) {
 	want := []string{
 		a.t("common.rename"),
 		a.t("sidebar.newSubfolderMenu"),
-		a.t("contextMenu.includeSubfolders"),
 		"-",
 		a.t("common.delete"),
 	}

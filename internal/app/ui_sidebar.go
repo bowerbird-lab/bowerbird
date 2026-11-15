@@ -224,13 +224,6 @@ func (a *App) folderContextMenu(m *ui.Menu, f core.Folder) {
 		a.dialogValue = ""
 		a.newFolderParentID = f.ID
 	}
-	if m.Item(a.t("contextMenu.includeSubfolders")).Checked(a.prefs.IncludeSubs).Chosen() {
-		a.prefs.IncludeSubs = !a.prefs.IncludeSubs
-		a.savePrefs()
-		if a.nav == NavFolder && a.folderID == f.ID {
-			a.refreshWorkspace()
-		}
-	}
 	m.Separator()
 	if m.Item(a.t("common.delete")).Chosen() {
 		a.dialog = dialogDeleteFolder
