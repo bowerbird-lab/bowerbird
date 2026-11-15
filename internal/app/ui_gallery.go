@@ -1226,6 +1226,17 @@ func (a *App) toggleSidebar() {
 // viewContextMenu appends the workspace view controls shared by the empty
 // gallery and item context menus.
 func (a *App) viewContextMenu(m *ui.Menu) {
+	// Creating a subfolder only makes sense inside a real folder: the fixed
+	// smart views (all, untagged, uncategorized, tags, trash) have no folder
+	// to nest it under.
+	if a.nav == NavFolder && a.folderID != "" {
+		if m.Item(a.t("contextMenu.newSubfolder")).Chosen() {
+			a.dialog = dialogNewFolder
+			a.dialogValue = ""
+			a.newFolderParentID = a.folderID
+		}
+		m.Separator()
+	}
 	if m.Item(a.t("contextMenu.showSidebar")).Checked(a.prefs.SidebarOpen).Chosen() {
 		a.toggleSidebar()
 	}

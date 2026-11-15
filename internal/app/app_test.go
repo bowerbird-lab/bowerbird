@@ -536,6 +536,39 @@ func TestGalleryContextMenuTogglesSidebarAndInspector(t *testing.T) {
 	}
 }
 
+func TestGalleryContextMenuCreatesSubfolderOnlyInsideFolders(t *testing.T) {
+	smart := seededApp(t)
+	smartTester := ui.NewTester(smart.viewMain, 1280, 800)
+	smartTester.Frame()
+	smartTester.RightClickAt(600, 700)
+	smartTester.Frame()
+	if contains(smartTester.Menu(), smart.t("contextMenu.newSubfolder")) {
+		t.Fatalf("smart view context menu must not offer a subfolder: %v", smartTester.Menu())
+	}
+
+	a := seededApp(t)
+	a.nav = NavFolder
+	a.folderID = "f1"
+	a.rebuildRows()
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.Frame()
+	tester.RightClickAt(600, 700)
+	tester.Frame()
+	if !contains(tester.Menu(), a.t("contextMenu.newSubfolder")) {
+		t.Fatalf("folder context menu is missing new subfolder: %v", tester.Menu())
+	}
+	if err := tester.ChooseMenuItem(a.t("contextMenu.newSubfolder")); err != nil {
+		t.Fatalf("choose new subfolder: %v", err)
+	}
+	tester.Frame()
+	if a.dialog != dialogNewFolder {
+		t.Fatalf("dialog = %v, want new folder", a.dialog)
+	}
+	if a.newFolderParentID != "f1" {
+		t.Fatalf("new folder parent = %q, want f1", a.newFolderParentID)
+	}
+}
+
 func TestEmptyGalleryKeepsDefaultContextMenu(t *testing.T) {
 	a := seededApp(t)
 	a.items = nil

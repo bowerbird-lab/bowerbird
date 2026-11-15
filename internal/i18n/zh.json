@@ -89,6 +89,7 @@
     "showInspector": "显示 inspector",
     "moveToTrash": "移至废纸篓",
     "newFolder": "新建文件夹…",
+    "newSubfolder": "新建子文件夹…",
     "noResults": "未找到匹配项",
     "openWithDefaultApp": "在默认程序中打开",
     "removeFromCurrentFolder": "从当前文件夹移除",

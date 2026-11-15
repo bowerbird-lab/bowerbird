@@ -89,6 +89,7 @@
     "showInspector": "Show inspector",
     "moveToTrash": "Move to trash",
     "newFolder": "New folder…",
+    "newSubfolder": "New subfolder…",
     "noResults": "No matching items",
     "openWithDefaultApp": "Open with default app",
     "removeFromCurrentFolder": "Remove from current folder",
