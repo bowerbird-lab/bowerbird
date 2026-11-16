@@ -19,8 +19,8 @@ func (a *App) inboxPage(cx *core.Scope) core.Node {
 	a.post(func() { a.reloadInbox() })
 	_ = a.rev.Get()
 	back := func() {
-		if a.inboxBackScreen == screenConnect && a.session.Current() == nil {
-			a.screen.Set(screenConnect)
+		if (a.inboxBackScreen == screenConnect || a.inboxBackScreen == screenWelcome || a.inboxBackScreen == screenDevices) && a.session.Current() == nil {
+			a.screen.Set(a.inboxBackScreen)
 		} else {
 			a.screen.Set(screenGallery)
 		}

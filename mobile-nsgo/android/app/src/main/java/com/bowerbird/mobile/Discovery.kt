@@ -6,11 +6,23 @@ import android.net.nsd.NsdServiceInfo
 import android.os.Handler
 import android.os.Looper
 import dev.oneo.nsgo.NsgoView
+import org.json.JSONObject
+import java.net.HttpURLConnection
 import java.net.Inet4Address
+import java.net.InetSocketAddress
+import java.net.NetworkInterface
+import java.net.Socket
+import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
-/** mDNS discovery for _bowerbird._tcp through Android's NSD service. */
+/**
+ * Combines mDNS (_bowerbird._tcp) with parallel /24 HTTP subnet probing across
+ * all active IPv4 interfaces (including Wi-Fi and virtual LAN / VPN tunnels).
+ */
 class Discovery(context: Context) {
-    private val nsd = context.getSystemService(Context.NSD_SERVICE) as NsdManager
+    private val nsd = context.getSystemService(Context.CAMERA_SERVICE.let { Context.NSD_SERVICE }) as NsdManager
     private val main = Handler(Looper.getMainLooper())
     private var listener: NsdManager.DiscoveryListener? = null
     private var activeReply: NsgoView.HostReply? = null
@@ -20,49 +32,134 @@ class Discovery(context: Context) {
         stop()
         val gen = ++generation
         activeReply = reply
-        val found = LinkedHashMap<String, NsdServiceInfo>()
+        val foundMdns = LinkedHashMap<String, NsdServiceInfo>()
+        val merged = ConcurrentHashMap<String, Map<String, Any?>>()
+
+        // 1. Parallel subnet scan across all active IPv4 interfaces (Wi-Fi + VPN/TUN virtual LANs)
+        val scanThread = Thread {
+            val subnets = activeIPv4Subnets()
+            if (subnets.isNotEmpty() && gen == generation) {
+                val pool = Executors.newFixedThreadPool(48)
+                for (prefix in subnets) {
+                    for (lastOctet in 1..254) {
+                        if (gen != generation) break
+                        val host = "$prefix.$lastOctet"
+                        pool.execute {
+                            if (gen != generation) return@execute
+                            probeHost(host, DEFAULT_PORT)?.let { svc ->
+                                merged["$host:$DEFAULT_PORT"] = svc
+                            }
+                        }
+                    }
+                }
+                pool.shutdown()
+                runCatching { pool.awaitTermination(2400, TimeUnit.MILLISECONDS) }
+            }
+        }
+        scanThread.start()
+
         val finish = Runnable {
             if (gen != generation) return@Runnable
-            val items = found.values.toList()
-            val resolved = mutableListOf<Map<String, Any?>>()
-            resolveAll(gen, items, 0, resolved) {
+            val items = foundMdns.values.toList()
+            val resolvedMdns = mutableListOf<Map<String, Any?>>()
+            resolveAll(gen, items, 0, resolvedMdns) {
+                if (gen != generation) return@resolveAll
+                for (svc in resolvedMdns) {
+                    val hosts = svc["hosts"] as? List<*>
+                    val h = hosts?.firstOrNull()?.toString().orEmpty()
+                    val p = (svc["port"] as? Number)?.toInt() ?: DEFAULT_PORT
+                    if (h.isNotEmpty()) {
+                        merged["$h:$p"] = svc
+                    }
+                }
+                // Wait briefly for subnet probe thread if still finishing
+                runCatching { scanThread.join(400) }
                 if (gen != generation) return@resolveAll
                 activeReply = null
-                reply.resolve(resolved)
+                reply.resolve(merged.values.toList())
                 stopListenerOnly()
             }
         }
+
         listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) {}
             override fun onServiceFound(service: NsdServiceInfo) {
                 if (gen != generation) return
                 if (service.serviceType.startsWith("_bowerbird._tcp")) {
                     val key = service.serviceName ?: return
-                    if (!found.containsKey(key)) {
-                        found[key] = service
+                    if (!foundMdns.containsKey(key)) {
+                        foundMdns[key] = service
                     }
                 }
             }
             override fun onServiceLost(service: NsdServiceInfo) {
-                found.remove(service.serviceName)
+                foundMdns.remove(service.serviceName)
             }
             override fun onDiscoveryStopped(serviceType: String) {}
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                if (gen != generation) return
-                activeReply = null
-                reply.reject("discovery failed: $errorCode")
-                stop()
+                // Even if mDNS fails (e.g. on VPN-only networks), let subnet probing finish!
             }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
         }
         try {
             nsd.discoverServices("_bowerbird._tcp", NsdManager.PROTOCOL_DNS_SD, listener)
-            main.postDelayed(finish, 2500)
-        } catch (e: Exception) {
-            activeReply = null
-            reply.reject(e.message ?: "discovery failed")
-            stop()
+        } catch (_: Exception) {
+            // Fall through to subnet probing result
         }
+        main.postDelayed(finish, 2600)
+    }
+
+    private fun activeIPv4Subnets(): List<String> {
+        val out = LinkedHashSet<String>()
+        runCatching {
+            val ifaces = NetworkInterface.getNetworkInterfaces() ?: return emptyList()
+            while (ifaces.hasMoreElements()) {
+                val iface = ifaces.nextElement()
+                if (!iface.isUp || iface.isLoopback) continue
+                val addrs = iface.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val addr = addrs.nextElement()
+                    if (addr is Inet4Address && !addr.isLoopbackAddress) {
+                        val ip = addr.hostAddress ?: continue
+                        val parts = ip.split('.')
+                        if (parts.size == 4) {
+                            out.add("${parts[0]}.${parts[1]}.${parts[2]}")
+                        }
+                    }
+                }
+            }
+        }
+        return out.toList()
+    }
+
+    private fun probeHost(host: String, port: Int): Map<String, Any?>? {
+        return runCatching {
+            Socket().use { sock ->
+                sock.connect(InetSocketAddress(host, port), 260)
+            }
+            val conn = (URL("http://$host:$port/api/v1/status").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 400
+                readTimeout = 500
+                requestMethod = "GET"
+            }
+            try {
+                if (conn.responseCode != 200) return null
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(body)
+                val name = json.optString("name").ifBlank { "Bowerbird" }
+                val version = json.optString("version")
+                val pairing = json.optBoolean("pairingRequired", true)
+                mapOf(
+                    "name" to name,
+                    "hosts" to listOf(host),
+                    "port" to port,
+                    "version" to version,
+                    "pairingRequired" to pairing
+                )
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrNull()
     }
 
     private fun resolveAll(
@@ -117,5 +214,9 @@ class Discovery(context: Context) {
         generation++
         activeReply = null
         stopListenerOnly()
+    }
+
+    companion object {
+        private const val DEFAULT_PORT = 17878
     }
 }

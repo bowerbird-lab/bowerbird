@@ -393,7 +393,7 @@ func (a *App) closeSettings() {
 		if a.session != nil && a.session.Current() != nil {
 			target = screenGallery
 		} else {
-			target = screenConnect
+			target = a.entryScreen()
 		}
 	}
 	a.screen.Set(target)

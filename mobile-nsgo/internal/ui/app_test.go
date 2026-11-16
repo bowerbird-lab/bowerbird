@@ -21,28 +21,153 @@ func isolatedRoot(t *testing.T) func(*core.Scope) core.Node {
 	return func(cx *core.Scope) core.Node { return rootWithDir(cx, dir) }
 }
 
+func TestWelcomeScreenRendersAndSwitchesToManualConnect(t *testing.T) {
+	app := nsgotest.Start(t, isolatedRoot(t), nsgotest.Size(420, 800))
+	if v := app.Find("id:screen.welcome"); v == nil {
+		t.Fatal("welcome screen is missing")
+	}
+	if v := app.Find("id:welcome.illustration"); v == nil {
+		t.Fatal("welcome illustration is missing")
+	}
+	if v := app.Find("id:welcome.scan"); v == nil {
+		t.Fatal("scan QR button is missing")
+	}
+	if v := app.Find("id:welcome.manual"); v == nil {
+		t.Fatal("manual input button is missing")
+	}
+	// Tapping scan on desktop test env (no camera scanner) shows a clear message.
+	app.Press("id:welcome.scan")
+	if v := app.Find("text:当前平台暂不支持相机扫码，请手动输入地址或使用发现功能"); v == nil {
+		t.Fatal("scan without camera should show fallback notice")
+	}
+	// Switch to in-place manual input mode on welcome screen.
+	app.Press("id:welcome.manual")
+	app.WaitFor("id:welcome.ip", 2*time.Second)
+	if v := app.Find("id:welcome.port"); v == nil {
+		t.Fatal("port input is missing")
+	}
+	if v := app.Find("id:welcome.connect"); v == nil {
+		t.Fatal("welcome connect button is missing")
+	}
+	// Verify auto-dot formatting on 3-digit octets AND manual '.' for short octets / double-dot prevention.
+	if got := formatAutoIP("", "192168001008"); got != "192.168.001.008" {
+		t.Fatalf("formatAutoIP = %q, want 192.168.001.008", got)
+	}
+	if got := formatAutoIP("192.", "192..168.1.1"); got != "192.168.1.1" {
+		t.Fatalf("formatAutoIP manual dot = %q, want 192.168.1.1", got)
+	}
+	if got := buildAddressFromIPPort("192.168.001.008", "17878"); got != "192.168.1.8:17878" {
+		t.Fatalf("buildAddressFromIPPort = %q, want 192.168.1.8:17878", got)
+	}
+	// Return to welcome choice buttons via the top bar back button outside the card.
+	app.Press("id:welcome.back")
+	app.WaitFor("id:welcome.scan", 2*time.Second)
+	if v := app.Find("id:welcome.discover"); v == nil {
+		t.Fatal("discover button is missing on welcome screen")
+	}
+}
+
+func TestDevicesScreenOpensDirectlyWhenHistoryExists(t *testing.T) {
+	dir := t.TempDir()
+	local := storage.NewLocal(dir)
+	if err := local.Remember(storage.Connection{
+		BaseURL:     "http://192.168.1.8:17878",
+		Name:        "Studio Mac",
+		LibraryName: "DesignLib",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return rootWithDir(cx, dir) }, nsgotest.Size(420, 800))
+	if v := app.Find("id:screen.devices"); v == nil {
+		t.Fatal("devices screen should open directly when saved connections exist")
+	}
+	if app.Exists("id:screen.welcome") {
+		t.Fatal("welcome screen should not show when saved connections exist")
+	}
+	if v := app.Find("id:devices.card.0"); v == nil {
+		t.Fatal("saved computer card is missing")
+	}
+	if v := app.Find("id:devices.add"); v == nil {
+		t.Fatal("add computer pill button is missing")
+	}
+	app.Press("id:devices.add")
+	app.WaitFor("id:screen.welcome", 2*time.Second)
+	app.Press("id:welcome.back")
+	app.WaitFor("id:screen.devices", 2*time.Second)
+
+	// Long press opens bottom edit sheet with IP, name input, and mascot styles.
+	app.LongPress("id:devices.card.0")
+	app.WaitFor("id:devices.edit.name", 2*time.Second)
+	if v := app.Find("text:IP 地址：192.168.1.8:17878"); v == nil {
+		t.Fatal("IP address should be visible inside edit sheet")
+	}
+	app.Type("id:devices.edit.name", "客厅电脑")
+	app.Press("id:devices.styleOption.4")
+	app.Press("id:devices.edit.save")
+	app.WaitForGone("id:devices.editSheet", 2*time.Second)
+	if v := app.Find("text:Studio Mac客厅电脑"); v == nil {
+		t.Fatal("updated computer name should appear on card")
+	}
+}
+
+func TestScannedDeviceAppearsImmediatelyAfterConfirm(t *testing.T) {
+	dir := t.TempDir()
+	var appState *App
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		node := rootWithDir(cx, dir)
+		appState = node.(*App)
+		return node
+	}, nsgotest.Size(420, 800))
+
+	appState.scope.Post(func() {
+		appState.onScannedConnected(appState.scope, &storage.Session{
+			BaseURL:     "http://192.168.5.81:17878",
+			Token:       "tok",
+			LibraryName: "Area",
+		})
+	})
+	app.WaitFor("id:devices.newDialog", 2*time.Second)
+	if v := app.Find("text:当前 Lab：Area"); v == nil {
+		t.Fatal("new device dialog should show current Lab name")
+	}
+	app.Press("id:devices.new.confirm")
+	app.WaitForGone("id:devices.newDialog", 2*time.Second)
+	app.Advance(500 * time.Millisecond)
+	card := app.Find("id:devices.card.0")
+	if card == nil {
+		t.Fatal("scanned computer card should be visible immediately after confirm")
+	}
+	if card.Style.Opacity < 0.99 {
+		t.Fatalf("scanned computer card opacity = %v, want 1", card.Style.Opacity)
+	}
+}
+
 func TestConnectScreenRendersAndValidatesEmptyAddress(t *testing.T) {
 	app := nsgotest.Start(t, isolatedRoot(t), nsgotest.Size(420, 800))
-	if v := app.Find("id:connect.address"); v == nil {
-		t.Fatal("address field is missing")
-	}
-	if v := app.Find("id:connect.submit"); v == nil {
+	app.Press("id:welcome.manual")
+	app.WaitFor("id:welcome.ip", 2*time.Second)
+	if v := app.Find("id:welcome.connect"); v == nil {
 		t.Fatal("connect button is missing")
 	}
-	if v := app.Find("id:connect.scan"); v == nil {
-		t.Fatal("scan button is missing")
-	}
-	app.Press("id:connect.submit")
-	if v := app.Find("text:请输入电脑地址"); v == nil {
+	app.Press("id:welcome.connect")
+	if v := app.Find("text:请输入电脑 IP 地址"); v == nil {
 		t.Fatal("empty address should show an error")
 	}
 }
 
 func TestAddressInputIsControlled(t *testing.T) {
 	app := nsgotest.Start(t, isolatedRoot(t), nsgotest.Size(420, 800))
-	app.Type("id:connect.address", "192.168.1.8:17878")
-	if v := app.Find("id:connect.address"); v.Text != "192.168.1.8:17878" {
-		t.Fatalf("address field = %q", v.Text)
+	app.Press("id:welcome.manual")
+	app.WaitFor("id:welcome.ip.0", 2*time.Second)
+	app.Type("id:welcome.ip.0", "192")
+	app.Type("id:welcome.ip.1", "168")
+	app.Type("id:welcome.ip.2", "1")
+	app.Type("id:welcome.ip.3", "8")
+	if v := app.Find("id:welcome.ip.0"); v.Text != "192" {
+		t.Fatalf("ip.0 = %q", v.Text)
+	}
+	if v := app.Find("id:welcome.ip.3"); v.Text != "8" {
+		t.Fatalf("ip.3 = %q", v.Text)
 	}
 }
 
@@ -115,12 +240,14 @@ func TestPairingToGalleryDrawerFilterAndDetailFlow(t *testing.T) {
 	defer srv.Close()
 
 	app := nsgotest.Start(t, isolatedRoot(t), nsgotest.Size(420, 800))
-	app.Type("id:connect.address", srv.URL)
-	app.Press("id:connect.submit")
-	app.WaitFor("id:connect.code", 2*time.Second)
+	app.Press("id:welcome.manual")
+	app.WaitFor("id:welcome.ip.0", 2*time.Second)
+	app.Type("id:welcome.ip.0", srv.URL)
+	app.Press("id:welcome.connect")
+	app.WaitFor("id:welcome.code", 2*time.Second)
 
-	app.Type("id:connect.code", "123456")
-	app.Press("id:connect.pair")
+	app.Type("id:welcome.code", "123456")
+	app.Press("id:welcome.pair")
 	app.WaitFor("id:gallery.drawer", 2*time.Second)
 
 	// Open drawer and check stats fallback shows 不可用 rather than 0.
@@ -199,8 +326,10 @@ func TestPreviewKeepsGalleryScrollOffset(t *testing.T) {
 	defer srv.Close()
 
 	app := nsgotest.Start(t, isolatedRoot(t), nsgotest.Size(420, 800))
-	app.Type("id:connect.address", srv.URL)
-	app.Press("id:connect.submit")
+	app.Press("id:welcome.manual")
+	app.WaitFor("id:welcome.ip.0", 2*time.Second)
+	app.Type("id:welcome.ip.0", srv.URL)
+	app.Press("id:welcome.connect")
 	app.WaitFor("id:gallery.list", 2*time.Second)
 
 	app.DragScroll("id:gallery.list", core.Point{Y: -900}, 0)
@@ -249,8 +378,10 @@ func TestFilterSheetAppliesSizeAndRatingQueries(t *testing.T) {
 	defer srv.Close()
 
 	app := nsgotest.Start(t, isolatedRoot(t), nsgotest.Size(420, 800))
-	app.Type("id:connect.address", srv.URL)
-	app.Press("id:connect.submit")
+	app.Press("id:welcome.manual")
+	app.WaitFor("id:welcome.ip.0", 2*time.Second)
+	app.Type("id:welcome.ip.0", srv.URL)
+	app.Press("id:welcome.connect")
 	app.WaitFor("id:gallery.more", 2*time.Second)
 
 	app.Press("id:gallery.more")
@@ -313,12 +444,12 @@ func TestFilterSheetAppliesSizeAndRatingQueries(t *testing.T) {
 func TestDarkModeAppearanceUpdatesCleanly(t *testing.T) {
 	app := nsgotest.Start(t, isolatedRoot(t), nsgotest.Size(420, 800),
 		nsgotest.Environment(core.Environment{Dark: true}))
-	if v := app.Find("text:Bowerbird"); v == nil {
-		t.Fatal("connect screen missing in dark mode")
+	if v := app.Find("text:bowerbird"); v == nil {
+		t.Fatal("welcome screen missing in dark mode")
 	}
 	app.SetEnvironment(core.Environment{Dark: false})
-	if v := app.Find("id:connect.address"); v == nil {
-		t.Fatal("connect address missing after toggling light mode")
+	if v := app.Find("id:welcome.manual"); v == nil {
+		t.Fatal("welcome manual button missing after toggling light mode")
 	}
 }
 
@@ -326,7 +457,7 @@ func TestSettingsScreenSelectsAndPersistsThemes(t *testing.T) {
 	dir := t.TempDir()
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return rootWithDir(cx, dir) }, nsgotest.Size(420, 900))
 
-	app.Press("id:connect.settings")
+	app.Press("id:welcome.settings")
 	app.WaitFor("id:settings.header", 2*time.Second)
 	if v := app.Find("text:颜色模式"); v == nil {
 		t.Fatal("appearance card is missing")
@@ -357,9 +488,9 @@ func TestSettingsScreenSelectsAndPersistsThemes(t *testing.T) {
 		t.Fatalf("persisted preferences = %+v", prefs)
 	}
 
-	// The settings screen returns to the connect screen it was opened from.
+	// The settings screen returns to the welcome screen it was opened from.
 	app.Press("id:settings.back")
-	app.WaitFor("id:connect.address", 2*time.Second)
+	app.WaitFor("id:screen.welcome", 2*time.Second)
 	if app.Exists("id:settings.header") {
 		t.Fatal("settings stayed open after back")
 	}
@@ -368,7 +499,7 @@ func TestSettingsScreenSelectsAndPersistsThemes(t *testing.T) {
 func TestThemeSettingsResetAndReloadKeepDefaults(t *testing.T) {
 	dir := t.TempDir()
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return rootWithDir(cx, dir) }, nsgotest.Size(420, 900))
-	app.Press("id:connect.settings")
+	app.Press("id:welcome.settings")
 	app.WaitFor("id:settings.themes.reset", 2*time.Second)
 	app.Press("id:settings.themes.reset")
 	app.Press("id:settings.themes.reload")
@@ -415,8 +546,10 @@ func TestPreviewMatchAnimatesAndCleansUp(t *testing.T) {
 		return node
 	}, nsgotest.Size(420, 800))
 
-	app.Type("id:connect.address", srv.URL)
-	app.Press("id:connect.submit")
+	app.Press("id:welcome.manual")
+	app.WaitFor("id:welcome.ip.0", 2*time.Second)
+	app.Type("id:welcome.ip.0", srv.URL)
+	app.Press("id:welcome.connect")
 	app.WaitFor("id:gallery.tile", 2*time.Second)
 
 	app.Press("id:gallery.tile >> nth=0")
@@ -540,7 +673,7 @@ func TestPreviewMatchAnimatesAndCleansUp(t *testing.T) {
 func TestGalleryLayoutModeSelectionAndColumnClamp(t *testing.T) {
 	dir := t.TempDir()
 	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return rootWithDir(cx, dir) }, nsgotest.Size(420, 900))
-	app.Press("id:connect.settings")
+	app.Press("id:welcome.settings")
 	app.WaitFor("id:settings.layoutMode", 2*time.Second)
 
 	// Start in auto at 3 cols -> increase to 5 cols.

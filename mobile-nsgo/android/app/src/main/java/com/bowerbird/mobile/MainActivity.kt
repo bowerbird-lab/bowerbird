@@ -1,7 +1,9 @@
 package com.bowerbird.mobile
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
@@ -27,6 +29,7 @@ class MainActivity : Activity() {
     private lateinit var intake: ShareIntake
     private val ioExecutor = Executors.newCachedThreadPool()
     private var scanReply: NsgoView.HostReply? = null
+    private var pendingQrComponent: QrScannerComponent? = null
     private var detailBackCallback: Any? = null
 
     override fun onCreate(state: Bundle?) {
@@ -48,6 +51,12 @@ class MainActivity : Activity() {
         ))
         app.setErrorListener { message -> android.util.Log.e("bowerbird", message) }
         app.registerComponent("gallery_grid") { ctx, events -> GalleryGridComponent(ctx, events) }
+        app.registerComponent("qr_scanner") { ctx, events ->
+            QrScannerComponent(ctx, events) { comp ->
+                pendingQrComponent = comp
+                requestPermissions(arrayOf(Manifest.permission.CAMERA), REQ_INLINE_QR_PERM)
+            }
+        }
         installHandlers()
         setContentView(app)
 
@@ -262,6 +271,12 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(request: Int, permissions: Array<String>, results: IntArray) {
         super.onRequestPermissionsResult(request, permissions, results)
+        if (request == REQ_INLINE_QR_PERM) {
+            val granted = results.isNotEmpty() && results[0] == PackageManager.PERMISSION_GRANTED
+            pendingQrComponent?.onPermissionResult(granted)
+            pendingQrComponent = null
+            return
+        }
         app.permissionResult(request, permissions, results)
     }
 
@@ -280,5 +295,6 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQ_QR_SCAN = 4091
+        private const val REQ_INLINE_QR_PERM = 4092
     }
 }

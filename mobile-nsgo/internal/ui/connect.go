@@ -32,6 +32,12 @@ func (a *App) connect(cx *core.Scope) core.Node {
 				Style: core.Style{Width: core.Pct(100), Gap: 14, Padding: core.Edges{Top: 32, Bottom: 24}},
 				Children: []core.Node{
 					core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{
+						nsui.IconButton{Icon: lucide.ChevronLeft, Label: "返回", Size: 38, IconSize: 20,
+							OnPress: func() {
+								a.formErr.Set("")
+								a.connectStatus.Set("")
+								a.screen.Set(a.entryScreen())
+							}, TestID: "connect.back"},
 						core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 4}, Children: []core.Node{
 							core.Text{Content: "Bowerbird", Style: nsui.TypeHeading, StyleFunc: nsui.Colored(colors.Text)},
 							core.Text{Content: "连接电脑上的素材库", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Muted)},
@@ -53,12 +59,28 @@ func (a *App) connect(cx *core.Scope) core.Node {
 						nsui.Input{Value: func() string { return a.address.Get() }, OnChange: a.address.Set,
 							Placeholder: "电脑地址，例如 192.168.1.8:17878", TestID: "connect.address"},
 						core.View{Style: core.Style{Direction: core.Row, Gap: 8}, Children: []core.Node{
-							nsui.Button{Text: "连接", Flex: 1, OnPress: func() { a.submitConnect(cx) },
-								Disabled: func() bool { return a.busy.Get() }, TestID: "connect.submit"},
-							nsui.Button{Text: "发现", Variant: nsui.ButtonSecondary, OnPress: func() { a.discover(cx) },
-								Disabled: func() bool { return a.discovering.Get() }, TestID: "connect.discover"},
-							nsui.Button{Text: "扫码", Variant: nsui.ButtonSecondary, OnPress: func() { a.scanQR(cx) },
-								Disabled: func() bool { return a.busy.Get() }, TestID: "connect.scan"},
+							mobileActionButton(colors, mobileBtnSpec{
+								TestID:   "connect.submit",
+								Text:     "连接",
+								Variant:  nsui.ButtonPrimary,
+								Flex:     1,
+								Disabled: func() bool { return a.busy.Get() },
+								OnPress:  func() { a.submitConnect(cx) },
+							}),
+							mobileActionButton(colors, mobileBtnSpec{
+								TestID:   "connect.discover",
+								Text:     "发现",
+								Variant:  nsui.ButtonSecondary,
+								Disabled: func() bool { return a.discovering.Get() },
+								OnPress:  func() { a.discover(cx) },
+							}),
+							mobileActionButton(colors, mobileBtnSpec{
+								TestID:   "connect.scan",
+								Text:     "扫码",
+								Variant:  nsui.ButtonSecondary,
+								Disabled: func() bool { return a.busy.Get() },
+								OnPress:  func() { a.scanQR(cx) },
+							}),
 						}},
 						core.Show{When: func() bool { return a.formErr.Get() != "" }, Then: func(cx *core.Scope) core.Node {
 							return core.Text{ContentFunc: a.formErr.Get, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Danger()})}
@@ -121,14 +143,23 @@ func (a *App) recentRow(cx *core.Scope, c storage.Connection) core.Node {
 				core.Text{Content: name, MaxLines: 1, Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
 				core.Text{Content: c.BaseURL, MaxLines: 1, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 			}},
-			nsui.Button{Text: "重连", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.busy.Get() },
-				OnPress: func() { a.reconnect(cx, c) }, TestID: "connect.reconnect"},
-			nsui.Button{Text: "删除", Variant: nsui.ButtonGhost, OnPress: func() {
-				if err := a.session.ForgetConnection(c.BaseURL); err != nil {
-					a.formErr.Set(err.Error())
-				}
-				a.bump()
-			}},
+			mobileActionButton(colors, mobileBtnSpec{
+				TestID:   "connect.reconnect",
+				Text:     "重连",
+				Variant:  nsui.ButtonSecondary,
+				Disabled: func() bool { return a.busy.Get() },
+				OnPress:  func() { a.reconnect(cx, c) },
+			}),
+			mobileActionButton(colors, mobileBtnSpec{
+				Text:    "删除",
+				Variant: nsui.ButtonGhost,
+				OnPress: func() {
+					if err := a.session.ForgetConnection(c.BaseURL); err != nil {
+						a.formErr.Set(err.Error())
+					}
+					a.bump()
+				},
+			}),
 		},
 	}
 }
@@ -188,8 +219,18 @@ func (a *App) pairDialog(cx *core.Scope) core.Node {
 			}},
 		},
 		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.pairOpen.Set(false) }},
-			nsui.Button{Text: "配对", OnPress: func() { a.submitConnect(cx) }, Disabled: func() bool { return a.busy.Get() }, TestID: "connect.pair"},
+			mobileActionButton(colors, mobileBtnSpec{
+				Text:    "取消",
+				Variant: nsui.ButtonGhost,
+				OnPress: func() { a.pairOpen.Set(false) },
+			}),
+			mobileActionButton(colors, mobileBtnSpec{
+				TestID:   "connect.pair",
+				Text:     "配对",
+				Variant:  nsui.ButtonPrimary,
+				Disabled: func() bool { return a.busy.Get() },
+				OnPress:  func() { a.submitConnect(cx) },
+			}),
 		},
 		TestID: "connect.dialog",
 	}
@@ -264,12 +305,20 @@ func (a *App) submitConnect(cx *core.Scope) {
 				return
 			}
 			if err == app.ErrPairingRequired {
-				a.pairOpen.Set(true)
+				if a.screen.Get() == screenWelcome && a.welcomeSheetMode.Get() == "manual" {
+					a.welcomeManualPair.Set(true)
+				} else {
+					a.pairOpen.Set(true)
+				}
 				a.formErr.Set("")
 				return
 			}
 			if transport.IsUnauthorized(err) {
-				a.pairOpen.Set(true)
+				if a.screen.Get() == screenWelcome && a.welcomeSheetMode.Get() == "manual" {
+					a.welcomeManualPair.Set(true)
+				} else {
+					a.pairOpen.Set(true)
+				}
 				a.formErr.Set("配对码错误或已过期，请核对后重试")
 				return
 			}
@@ -311,6 +360,8 @@ func (a *App) reconnect(cx *core.Scope, c storage.Connection) {
 func (a *App) onSessionConnected(cx *core.Scope, session *storage.Session) {
 	a.address.Set(session.BaseURL)
 	a.pairOpen.Set(false)
+	a.welcomeManualPair.Set(false)
+	a.welcomeSheetMode.Set("")
 	a.code.Set("")
 	a.legacyNotice.Set("")
 	a.sidebarView = SidebarAll
@@ -329,7 +380,7 @@ func (a *App) disconnect(cx *core.Scope) {
 	a.stopWS()
 	_ = a.session.Disconnect()
 	a.resetSessionState()
-	a.screen.Set(screenConnect)
+	a.screen.Set(a.entryScreen())
 	a.bump()
 }
 

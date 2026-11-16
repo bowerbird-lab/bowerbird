@@ -30,6 +30,8 @@ const maxClipboardFileBytes = 500_000_000
 
 // Screens.
 const (
+	screenWelcome  = "welcome"
+	screenDevices  = "devices"
 	screenConnect  = "connect"
 	screenGallery  = "gallery"
 	screenSearch   = "search"
@@ -157,6 +159,28 @@ type App struct {
 	themeIndex           map[string]*apptheme.Theme
 	systemAccent         core.Color
 
+	// Devices / computer selector
+	cardStyleIdx      map[string]int
+	cardStyleRev      *core.Signal[int]
+	newDeviceOpen     *core.Signal[bool]
+	deviceEditOpen    *core.Signal[bool]
+	deviceEditConn    storage.Connection
+	deviceEditName    *core.Signal[string]
+	deviceEditStyle   *core.Signal[int]
+	deviceEditIsNew   *core.Signal[bool]
+	dropAnimURL       string
+	dropAnimActive    *core.Signal[bool]
+
+	// Welcome screen sheet mode ("" | "manual" | "discover" | "scan")
+	welcomeSheetMode  *core.Signal[string]
+	welcomeManualPair *core.Signal[bool]
+	welcomeManualAnim *core.Signal[float64]
+	welcomeIP         *core.Signal[string]
+	welcomeOctets     [4]*core.Signal[string]
+	welcomeOctetRefs  [4]*core.Ref
+	welcomePort       *core.Signal[string]
+	welcomePortRef    *core.Ref
+
 	// Connect screen
 	screen        *core.Signal[string]
 	rev           *core.Signal[int]
@@ -240,6 +264,10 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 	if prefsErr != nil {
 		log.Printf("[Settings] preferences unavailable, using defaults: %v", prefsErr)
 	}
+	initialScreen := screenWelcome
+	if history, err := local.History(); err == nil && len(history) > 0 {
+		initialScreen = screenDevices
+	}
 	a := &App{
 		local:                local,
 		themes:               apptheme.Load(filepath.Join(dataDir, "themes")),
@@ -251,8 +279,29 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		settingsThemePick:    apptheme.Light,
 		detailCache:          map[string]model.ItemDetail{},
 		detailLoading:        map[string]bool{},
+		cardStyleIdx:         map[string]int{},
+		cardStyleRev:         core.NewSignal(cx, 0),
+		newDeviceOpen:        core.NewSignal(cx, false),
+		deviceEditOpen:       core.NewSignal(cx, false),
+		deviceEditName:       core.NewSignal(cx, ""),
+		deviceEditStyle:      core.NewSignal(cx, 0),
+		deviceEditIsNew:      core.NewSignal(cx, false),
+		dropAnimActive:       core.NewSignal(cx, false),
+		welcomeSheetMode:     core.NewSignal(cx, ""),
+		welcomeManualPair:    core.NewSignal(cx, false),
+		welcomeManualAnim:    core.NewSignal(cx, 0.0),
+		welcomeIP:            core.NewSignal(cx, ""),
+		welcomeOctets: [4]*core.Signal[string]{
+			core.NewSignal(cx, ""),
+			core.NewSignal(cx, ""),
+			core.NewSignal(cx, ""),
+			core.NewSignal(cx, ""),
+		},
+		welcomeOctetRefs: [4]*core.Ref{{}, {}, {}, {}},
+		welcomePort:      core.NewSignal(cx, "17878"),
+		welcomePortRef:   &core.Ref{},
 		lastLifecycle:        core.LifecycleActive,
-		screen:               core.NewSignal(cx, screenConnect),
+		screen:               core.NewSignal(cx, initialScreen),
 		rev:                  core.NewSignal(cx, 0),
 		address:              core.NewSignal(cx, ""),
 		code:                 core.NewSignal(cx, ""),
@@ -344,7 +393,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 	a.inbox = app.NewInbox(a.local)
 	a.detailFrom = screenGallery
 	a.inboxBackScreen = screenGallery
-	a.settingsBackScreen = screenConnect
+	a.settingsBackScreen = initialScreen
 
 	a.session.RestoreAsync(func(session *storage.Session, err error) {
 		a.post(func() {
@@ -453,7 +502,7 @@ func (a *App) Render(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
 	return core.View{
 		StyleFunc: func() core.Style {
-			if s := a.screen.Get(); s == screenGallery || s == screenSettings || s == screenSearch || s == screenDetail {
+			if s := a.screen.Get(); s == screenWelcome || s == screenDevices || s == screenGallery || s == screenSettings || s == screenSearch || s == screenDetail {
 				return core.Style{
 					Width: core.Pct(100), Height: core.Pct(100),
 					Background: colors.Background(), Color: colors.Text(),
@@ -467,6 +516,8 @@ func (a *App) Render(cx *core.Scope) core.Node {
 			}
 		},
 		Children: []core.Node{
+			core.Show{When: func() bool { return a.screen.Get() == screenWelcome }, Then: a.welcome},
+			core.Show{When: func() bool { return a.screen.Get() == screenDevices }, Then: a.devicesPage},
 			core.Show{When: func() bool { return a.screen.Get() == screenConnect }, Then: a.connect},
 			core.Show{When: func() bool {
 				s := a.screen.Get()
@@ -570,10 +621,10 @@ func (a *App) backGuard(cx *core.Scope) core.Node {
 	return core.Show{
 		When: func() bool {
 			switch a.screen.Get() {
-			case screenGallery:
-				return a.drawerOpen.Get() || a.multiSelect.Get()
-			case screenSettings, screenInbox:
+			case screenGallery, screenConnect, screenSettings, screenInbox:
 				return true
+			case screenWelcome:
+				return a.welcomeSheetMode.Get() != "" || a.entryScreen() == screenDevices
 			}
 			return false
 		},
@@ -591,13 +642,35 @@ func (a *App) backGuard(cx *core.Scope) core.Node {
 }
 
 func (a *App) handleBack(cx *core.Scope) {
+	if a.screen.Get() == screenWelcome && a.welcomeSheetMode.Get() == "manual" && a.welcomeManualPair.Get() {
+		a.welcomeManualPair.Set(false)
+		a.code.Set("")
+		a.formErr.Set("")
+		return
+	}
+	if a.screen.Get() == screenWelcome && a.welcomeSheetMode.Get() != "" {
+		a.setWelcomeSheetMode("")
+		return
+	}
+	if a.screen.Get() == screenWelcome && a.entryScreen() == screenDevices {
+		a.formErr.Set("")
+		a.connectStatus.Set("")
+		a.screen.Set(screenDevices)
+		return
+	}
+	if a.screen.Get() == screenConnect {
+		a.formErr.Set("")
+		a.connectStatus.Set("")
+		a.screen.Set(a.entryScreen())
+		return
+	}
 	if a.screen.Get() == screenSettings {
 		a.closeSettings()
 		return
 	}
 	if a.screen.Get() == screenInbox {
-		if a.inboxBackScreen == screenConnect && a.session.Current() == nil {
-			a.screen.Set(screenConnect)
+		if (a.inboxBackScreen == screenConnect || a.inboxBackScreen == screenWelcome || a.inboxBackScreen == screenDevices) && a.session.Current() == nil {
+			a.screen.Set(a.inboxBackScreen)
 		} else {
 			a.screen.Set(screenGallery)
 		}
@@ -609,6 +682,14 @@ func (a *App) handleBack(cx *core.Scope) {
 	}
 	if a.drawerOpen.Get() {
 		a.setDrawerOpen(cx, false)
+		return
+	}
+	if a.screen.Get() == screenGallery {
+		a.stopWS()
+		_ = a.session.Disconnect()
+		a.resetSessionState()
+		a.screen.Set(screenDevices)
+		a.bump()
 	}
 }
 
@@ -1029,7 +1110,7 @@ func (a *App) handleEvent(cx *core.Scope, ev model.WSEvent) {
 		a.resetSessionState()
 		a.cancelPreviewMatch()
 		a.showToast("授权已被桌面端撤销，请重新配对")
-		a.screen.Set(screenConnect)
+		a.screen.Set(a.entryScreen())
 	}
 }
 
@@ -1358,7 +1439,7 @@ func (a *App) handlePairURL(cx *core.Scope, raw string) {
 				}
 				return
 			}
-			a.onSessionConnected(cx, session)
+			a.onScannedConnected(cx, session)
 		})
 	}()
 }
