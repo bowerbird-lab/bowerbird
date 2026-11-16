@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/MoeForge/moejs v0.1.0-alpha.11
 	github.com/coder/websocket v1.8.14
-	github.com/egoist/mygo v0.7.4
+	github.com/egoist/mygo v0.9.2
 	github.com/grandcat/zeroconf v1.0.0
 	golang.org/x/image v0.46.0
 	golang.org/x/sys v0.48.0

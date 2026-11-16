@@ -296,6 +296,25 @@ type App struct {
 	video             *player.VideoPlayer
 	videoErr          string
 	videoScrub        float64
+	videoVolScrub     float64
+	videoMoreOpen     bool
+	videoLastSeek     time.Time
+	videoPendingSeek  bool
+	videoDragging     bool
+	videoHovering     bool
+	videoHoverPos     float64
+	videoVolHover     bool
+	videoVolLeaveAt   time.Time
+	videoVolRightPad  float32
+	videoRateOpen     bool
+	videoRateRightPad float32
+	videoTrackAnim    float32
+	videoTrackRect    ui.Rect
+	videoLastMove      time.Time
+	videoLastPtrX       float32
+	videoLastPtrY       float32
+	videoControlsHidden bool
+	videoResumeScrub    bool
 	videoSeq          uint64
 	previewSeq        uint64
 

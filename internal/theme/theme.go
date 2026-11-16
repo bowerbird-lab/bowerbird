@@ -58,6 +58,9 @@ type Material struct {
 	SidebarOpacity float32 `json:"sidebarOpacity"`
 	HeaderTint     string  `json:"headerTint"`
 	HeaderBlur     float32 `json:"headerBlurRadius"`
+	PillRadius     float32 `json:"pillRadius,omitempty"`
+	ButtonRadius   float32 `json:"buttonRadius,omitempty"`
+	MenuRadius     float32 `json:"menuRadius,omitempty"`
 }
 
 // Theme is one colour variant, loaded from one JSON file.

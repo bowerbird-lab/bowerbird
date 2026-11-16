@@ -145,7 +145,7 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 		// Film strip of the current page. It takes the width the window has
 		// and shows as many cells as fit in it, so a wide window offers more
 		// neighbours and a narrow one fewer, the current item staying centred.
-		if len(a.items) > 1 {
+		if len(a.items) > 1 && !a.isImmersiveFullscreen() {
 			ui.Box(c).FillWidth().Height(1).Background(p.hairline)
 			strip := ui.Row(c).FillWidth().Height(64).PaddingX(stripPaddingX).Gap(stripGap).AlignItems(ui.Center).Justify(ui.Center).Bind(&a.stripBox)
 			strip.Children(func() {
@@ -452,44 +452,87 @@ func (a *App) previewVideo(c *ui.Context, item core.Item) {
 		return
 	}
 
-	ui.Column(c).Fill().Grow(1).Children(func() {
-		ui.Box(c).FillWidth().Grow(1).Shrink(1).Background(p.preview).Clip().Children(func() {
-			ui.Video(c, a.video.Native()).Fill().Fit(ui.Contain)
+	stage := ui.Box(c.Key("video-stage")).Fill().Grow(1).Clip().DrawOver(func(pt *ui.Painter, r ui.Rect) {
+		if (!a.videoDragging && !a.videoHovering) || a.video == nil {
+			return
+		}
+		dur := a.video.Duration().Seconds()
+		if dur <= 0 {
+			return
+		}
+		previewSec := a.videoHoverPos
+		if a.videoDragging {
+			previewSec = a.videoScrub
+		}
+		thumb := a.video.FrameThumbnail(time.Duration(previewSec * float64(time.Second)))
+		if thumb == nil {
+			return
+		}
+		ratio := float32(previewSec / dur)
+		if ratio < 0 {
+			ratio = 0
+		}
+		if ratio > 1 {
+			ratio = 1
+		}
+		cardW := float32(104)
+		cardH := float32(62)
+		tb := a.videoTrackRect
+		if tb.W <= 0 {
+			tb = r
+		}
+		cx := tb.X + tb.W*ratio - cardW/2
+		if cx < r.X+8 {
+			cx = r.X + 8
+		}
+		if cx+cardW > r.X+r.W-8 {
+			cx = r.X + r.W - 8 - cardW
+		}
+		cy := r.Y + r.H - cardH - 76
+		if cy < r.Y+8 {
+			cy = r.Y + 8
+		}
+		thumbBg := p.surface
+		if a.vibrancyShows(c) {
+			thumbBg = p.surface.Alpha(0.85)
+		}
+		pt.Fill(ui.Rect{X: cx, Y: cy, W: cardW, H: cardH}, thumbBg, 8)
+		pt.Stroke(ui.Rect{X: cx, Y: cy, W: cardW, H: cardH}, p.hairline, 8, 1)
+		pt.Clip(ui.Rect{X: cx + 4, Y: cy + 4, W: 96, H: 54}, 5, func() {
+			pt.Image(thumb, ui.Rect{X: cx + 4, Y: cy + 4, W: 96, H: 54}, ui.Cover)
 		})
-		ui.Box(c).FillWidth().Height(1).Background(p.hairline)
-		ui.Row(c).FillWidth().Height(54).PaddingX(18).Gap(12).AlignItems(ui.Center).Children(func() {
-			playing := a.video.Playing()
-			label := "▶"
-			if playing {
-				label = "❚❚"
+	}).Children(func() {
+		ui.Video(c, a.video.Native()).Fill().Fit(ui.Contain)
+		showControls := !a.videoControlsHidden && (!a.video.Playing() || a.videoDragging || a.videoHovering || a.videoMoreOpen || a.videoVolHover || a.videoRateOpen || time.Since(a.videoLastMove) < 2*time.Second)
+		if showControls {
+			ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).ZIndex(10).Children(func() {
+				a.renderVideoControls(c, item, a.video)
+			})
+			if a.video.Playing() && !a.videoDragging && !a.videoHovering && !a.videoMoreOpen && !a.videoVolHover && !a.videoRateOpen {
+				c.After(250 * time.Millisecond)
 			}
-			if ui.Button(c.Key("video-play"), label).Size(36, 36).Radius(999).Clicked() {
-				a.video.Toggle()
-			}
-			if ui.Button(c.Key("video-back"), "−10s").Height(30).Radius(7).Clicked() {
-				_ = a.video.Seek(a.video.Position() - 10*time.Second)
-			}
-			if ui.Button(c.Key("video-forward"), "+10s").Height(30).Radius(7).Clicked() {
-				_ = a.video.Seek(a.video.Position() + 10*time.Second)
-			}
-			duration := a.video.Duration().Seconds()
-			position := a.video.Position().Seconds()
-			ui.Text(c, formatDuration(position)).FontSize(10.5).TextColor(p.faint).FontFeatures("tnum")
-			if duration > 0 {
-				a.videoScrub = position
-				seek := ui.Slider(c.Key("video-seek"), &a.videoScrub, 0, duration).Grow(1)
-				if seek.Changed() {
-					_ = a.video.Seek(time.Duration(a.videoScrub * float64(time.Second)))
-				}
-			} else {
-				ui.Box(c).Grow(1)
-			}
-			ui.Text(c, formatDuration(duration)).FontSize(10.5).TextColor(p.faint).FontFeatures("tnum")
-			if ui.Button(c.Key("video-open"), a.t("contextMenu.openWithDefaultApp")).Height(30).Radius(7).Clicked() {
-				_ = a.svc.OpenWithDefaultApp(item.ID)
-			}
-		})
+		}
 	})
+	if stage.Clicked() && !a.videoDragging {
+		a.videoControlsHidden = !a.videoControlsHidden
+		if !a.videoControlsHidden {
+			a.videoLastMove = time.Now()
+		}
+	}
+	if stage.Hovered() || a.videoDragging {
+		if px, py, ok := stage.PointerPosition(); ok {
+			if px != a.videoLastPtrX || py != a.videoLastPtrY {
+				a.videoLastPtrX = px
+				a.videoLastPtrY = py
+				a.videoLastMove = time.Now()
+				a.videoControlsHidden = false
+			}
+		}
+	}
+	if a.videoDragging || a.videoHovering || a.videoMoreOpen || a.videoVolHover || a.videoRateOpen {
+		a.videoLastMove = time.Now()
+		a.videoControlsHidden = false
+	}
 	if a.video.Playing() {
 		c.After(100 * time.Millisecond)
 	}

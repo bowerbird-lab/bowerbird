@@ -73,10 +73,25 @@ type palette struct {
 	headerTint     ui.Color
 	headerBlur     float32
 	sidebarOpacity float32
+	pillRadius     float32
+	buttonRadius   float32
+	menuRadius     float32
 }
 
 func paletteFor(t *theme.Theme) palette {
 	c := t.Colors
+	pillRadius := t.Material.PillRadius
+	if pillRadius <= 0 {
+		pillRadius = 999
+	}
+	buttonRadius := t.Material.ButtonRadius
+	if buttonRadius <= 0 {
+		buttonRadius = 8
+	}
+	menuRadius := t.Material.MenuRadius
+	if menuRadius <= 0 {
+		menuRadius = 12
+	}
 	return palette{
 		dark:           t.Appearance == theme.Dark,
 		bg:             themeColor(c.Background),
@@ -104,6 +119,9 @@ func paletteFor(t *theme.Theme) palette {
 		headerTint:     themeColor(t.Material.HeaderTint),
 		headerBlur:     t.Material.HeaderBlur,
 		sidebarOpacity: t.Material.SidebarOpacity,
+		pillRadius:     pillRadius,
+		buttonRadius:   buttonRadius,
+		menuRadius:     menuRadius,
 	}
 }
 
