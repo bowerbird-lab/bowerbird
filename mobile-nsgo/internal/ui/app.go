@@ -3,6 +3,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -117,33 +118,34 @@ type App struct {
 	uploadCancel context.CancelFunc
 
 	// Filter sheet
-	filterOpen        *core.Signal[bool]
-	filterTarget      string
-	filterDraftType   *core.Signal[string]
-	filterDraftOrient *core.Signal[string]
-	filterDraftSize   *core.Signal[string]
-	filterDraftRating *core.Signal[int]
-	filterDraftHasURL *core.Signal[string]
+	filterOpen         *core.Signal[bool]
+	filterTarget       string
+	filterDraftType    *core.Signal[string]
+	filterDraftOrient  *core.Signal[string]
+	filterDraftSize    *core.Signal[string]
+	filterDraftRating  *core.Signal[int]
+	filterDraftHasURL  *core.Signal[string]
 	filterDraftHasNote *core.Signal[string]
-	filterDraftTag    *core.Signal[string]
-	filterDraftColor  *core.Signal[string]
-	filterDraftFolder *core.Signal[string]
+	filterDraftTag     *core.Signal[string]
+	filterDraftColor   *core.Signal[string]
+	filterDraftFolder  *core.Signal[string]
 
 	// Share tags lookup
 	shareTagIDs   map[string]bool
 	shareTagHexes map[string]bool
 
 	// Connect screen
-	screen       *core.Signal[string]
-	rev          *core.Signal[int]
-	address      *core.Signal[string]
-	code         *core.Signal[string]
-	busy         *core.Signal[bool]
-	formErr      *core.Signal[string]
-	legacyNotice *core.Signal[string]
-	pairOpen     *core.Signal[bool]
-	discovering  *core.Signal[bool]
-	services     []platform.Service
+	screen        *core.Signal[string]
+	rev           *core.Signal[int]
+	address       *core.Signal[string]
+	code          *core.Signal[string]
+	busy          *core.Signal[bool]
+	formErr       *core.Signal[string]
+	connectStatus *core.Signal[string]
+	legacyNotice  *core.Signal[string]
+	pairOpen      *core.Signal[bool]
+	discovering   *core.Signal[bool]
+	services      []platform.Service
 
 	// Search screen
 	searchText   *core.Signal[string]
@@ -183,6 +185,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		code:               core.NewSignal(cx, ""),
 		busy:               core.NewSignal(cx, false),
 		formErr:            core.NewSignal(cx, ""),
+		connectStatus:      core.NewSignal(cx, ""),
 		legacyNotice:       core.NewSignal(cx, ""),
 		pairOpen:           core.NewSignal(cx, false),
 		discovering:        core.NewSignal(cx, false),
@@ -456,10 +459,10 @@ func (a *App) rootCtx() context.Context {
 	}
 	return context.Background()
 }
-func (a *App) post(fn func()) { a.scope.Post(fn) }
+func (a *App) post(fn func())                   { a.scope.Post(fn) }
 func (a *App) after(d time.Duration, fn func()) { a.scope.AfterFunc(d, fn) }
-func (a *App) bump()        { a.rev.Update(func(v int) int { return v + 1 }) }
-func (a *App) bumpGallery() { a.galleryRev.Update(func(v int) int { return v + 1 }) }
+func (a *App) bump()                            { a.rev.Update(func(v int) int { return v + 1 }) }
+func (a *App) bumpGallery()                     { a.galleryRev.Update(func(v int) int { return v + 1 }) }
 
 func (a *App) rebuildGalleryRows() {
 	snap := a.gallery.Snapshot()
@@ -1147,21 +1150,38 @@ func (a *App) handlePairURL(cx *core.Scope, raw string) {
 	}
 	a.busy.Set(true)
 	a.formErr.Set("")
+	a.connectStatus.Set(fmt.Sprintf("已识别 %d 个候选地址，正在检查可用性…", len(ips)))
 	go func() {
-		ctx, cancel := context.WithTimeout(a.rootCtx(), 25*time.Second)
-		defer cancel()
-		base, _, probeErr := app.ProbeCandidates(ctx, a.client, ips, port)
+		// Checking candidates and pairing are separate phases: a slow or
+		// unreachable address must not consume the pairing timeout.
+		probeCtx, probeCancel := context.WithTimeout(a.rootCtx(), 30*time.Second)
+		base, status, probeErr := app.ProbeCandidatesWithProgress(probeCtx, a.client, ips, port, func(update app.ProbeProgress) {
+			address := strings.TrimPrefix(strings.TrimPrefix(update.Address, "https://"), "http://")
+			if update.Responsive {
+				a.post(func() { a.connectStatus.Set("已找到可用地址 " + address + "，正在连接…") })
+				return
+			}
+			a.post(func() {
+				a.connectStatus.Set(fmt.Sprintf("正在检查 %d/%d：%s", update.Index+1, update.Total, address))
+			})
+		})
+		probeCancel()
 		if probeErr != nil {
 			a.post(func() {
 				a.busy.Set(false)
+				a.connectStatus.Set("")
 				a.formErr.Set(transport.DescribeFailure(probeErr))
 				a.screen.Set(screenConnect)
 			})
 			return
 		}
-		session, connectErr := a.session.Connect(ctx, base, code, a.env.Device.Name)
+		a.post(func() { a.connectStatus.Set("已连接 " + status.Name + "，正在配对…") })
+		connectCtx, connectCancel := context.WithTimeout(a.rootCtx(), 25*time.Second)
+		session, connectErr := a.session.Connect(connectCtx, base, code, a.env.Device.Name)
+		connectCancel()
 		a.post(func() {
 			a.busy.Set(false)
+			a.connectStatus.Set("")
 			if connectErr != nil {
 				a.address.Set(base)
 				a.code.Set(code)

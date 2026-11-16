@@ -169,11 +169,14 @@ func ValidatePairPayload(raw []byte) (ips []string, port int, code string, err e
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, 0, "", fmt.Errorf("invalid pairing payload: %w", err)
 	}
+	seen := make(map[string]bool, len(payload.IPs))
 	for _, ip := range payload.IPs {
 		ip = strings.TrimSpace(ip)
-		if ip != "" {
-			ips = append(ips, ip)
+		if ip == "" || seen[ip] {
+			continue
 		}
+		seen[ip] = true
+		ips = append(ips, ip)
 	}
 	if len(ips) == 0 {
 		return nil, 0, "", fmt.Errorf("pairing payload has no addresses")

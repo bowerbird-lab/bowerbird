@@ -147,6 +147,56 @@ func TestProbeCandidatesPicksFirstReachable(t *testing.T) {
 	}
 }
 
+func TestProbeCandidatesSkipsUnreachableAndReportsProgress(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(model.Status{Name: "Reachable"})
+	}))
+	defer good.Close()
+
+	var progress []ProbeProgress
+	client := transport.New(transport.Config{})
+	base, status, err := ProbeCandidatesWithProgress(context.Background(), client,
+		[]string{"127.0.0.1:1", bad.URL, good.URL, good.URL}, 17878,
+		func(update ProbeProgress) { progress = append(progress, update) })
+	if err != nil || base != good.URL || status.Name != "Reachable" {
+		t.Fatalf("probe = %q %+v %v", base, status, err)
+	}
+	if len(progress) < 4 {
+		t.Fatalf("progress = %+v, want attempts for unreachable and reachable candidates", progress)
+	}
+	if progress[len(progress)-1].Responsive != true {
+		t.Fatalf("last progress = %+v, want responsive", progress[len(progress)-1])
+	}
+}
+
+func TestCandidateBaseURLsNormalizeDedupeAndKeepOrder(t *testing.T) {
+	got := candidateBaseURLs([]string{
+		" 192.168.1.8 ",
+		"192.168.1.8:17878",
+		"192.168.1.8",
+		"[fd00::1]",
+		"http://example.com:1234",
+		"",
+	}, 17878)
+	want := []string{
+		"http://192.168.1.8:17878",
+		"http://[fd00::1]:17878",
+		"http://example.com:1234",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("candidateBaseURLs = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidateBaseURLs[%d] = %q, want %q (%#v)", i, got[i], want[i], got)
+		}
+	}
+}
+
 func atoi(s string) int {
 	n := 0
 	for _, r := range s {

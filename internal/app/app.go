@@ -316,7 +316,12 @@ type App struct {
 	mobilePort        string
 	mobilePairingURL  string
 	mobileQR          *ui.Bitmap
-	settingsDirty     bool
+	// Discovery-network toggles save asynchronously. Wanted holds the latest
+	// selection so quick consecutive toggles cannot let an earlier save
+	// overwrite a newer one.
+	mobileNetworkWanted []string
+	mobileNetworkSaving bool
+	settingsDirty       bool
 
 	// Settings.
 	settingsSection int

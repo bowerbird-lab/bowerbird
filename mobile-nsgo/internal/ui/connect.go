@@ -58,6 +58,9 @@ func (a *App) connect(cx *core.Scope) core.Node {
 						core.Show{When: func() bool { return a.formErr.Get() != "" }, Then: func(cx *core.Scope) core.Node {
 							return core.Text{ContentFunc: a.formErr.Get, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Danger()})}
 						}},
+						core.Show{When: func() bool { return a.connectStatus.Get() != "" }, Then: func(cx *core.Scope) core.Node {
+							return core.Text{ContentFunc: a.connectStatus.Get, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})}
+						}},
 					}},
 					core.Show{When: func() bool { a.rev.Get(); return len(a.services) > 0 }, Then: func(cx *core.Scope) core.Node {
 						rows := make([]core.Node, 0, len(a.services))

@@ -1009,7 +1009,7 @@ func (s *Service) SetMobileAllowedNetworks(networks []string) error {
 		return ErrCoreNotInitialized
 	}
 	ms := s.mgr.userData.GetMobileSettings()
-	ms.AllowedNetworks = networks
+	ms.AllowedNetworks = normalizeAllowedNetworks(networks)
 	if err := s.mgr.userData.SetMobileSettings(ms); err != nil {
 		return err
 	}

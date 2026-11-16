@@ -84,6 +84,27 @@ func TestStatusPairAndErrors(t *testing.T) {
 	}
 }
 
+func TestPairAcceptsDesktopSuccessEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/pair" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"code":   "OK",
+			"data":   map[string]any{"token": "enveloped-token", "name": "Lib"},
+		})
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL})
+	pr, err := c.Pair(context.Background(), "123456")
+	if err != nil || pr.Token != "enveloped-token" || pr.Name != "Lib" {
+		t.Fatalf("Pair envelope = %+v, %v", pr, err)
+	}
+}
+
 func TestListFallsBackOnlyWhenFiltersAreExpressible(t *testing.T) {
 	var queryCalls, itemCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +221,10 @@ func TestValidatePairPayload(t *testing.T) {
 	ips, port, code, err := ValidatePairPayload([]byte(`{"v":1,"ips":["192.168.1.2",""],"port":17878,"code":"493644"}`))
 	if err != nil || port != 17878 || code != "493644" || len(ips) != 1 {
 		t.Fatalf("payload = %v %d %q %v", ips, port, code, err)
+	}
+	ips, _, _, err = ValidatePairPayload([]byte(`{"ips":[" 192.168.1.2 ","192.168.1.2","100.64.0.2",""],"port":17878,"code":"493644"}`))
+	if err != nil || len(ips) != 2 || ips[0] != "192.168.1.2" || ips[1] != "100.64.0.2" {
+		t.Fatalf("deduped payload = %v, %v", ips, err)
 	}
 	if _, _, _, err := ValidatePairPayload([]byte(`{"ips":[]}`)); err == nil {
 		t.Fatal("empty payload should fail")

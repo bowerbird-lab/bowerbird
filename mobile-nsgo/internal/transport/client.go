@@ -134,10 +134,20 @@ func (c *Client) Status(ctx context.Context) (model.Status, error) {
 }
 
 // Pair exchanges a one-time code for a token. It does not save the token.
+// The desktop wraps this reply in its standard {"status":"success","data":…}
+// envelope, while older builds returned the fields at the top level. Accept
+// both shapes so the client works across desktop versions.
 func (c *Client) Pair(ctx context.Context, code string) (model.PairResult, error) {
 	body := model.PairRequest{Code: strings.TrimSpace(code), DeviceName: c.deviceName}
-	var out model.PairResult
-	err := c.doJSON(ctx, http.MethodPost, "/api/v1/pair", nil, body, &out)
+	var reply struct {
+		model.PairResult
+		Data *model.PairResult `json:"data"`
+	}
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/pair", nil, body, &reply)
+	out := reply.PairResult
+	if reply.Data != nil {
+		out = *reply.Data
+	}
 	if err != nil {
 		return out, err
 	}

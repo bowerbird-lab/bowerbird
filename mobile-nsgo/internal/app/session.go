@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -397,43 +399,113 @@ func (m *SessionManager) LegacyNameScope() string {
 	return "legacy:name:" + m.session.LibraryName
 }
 
+// ProbeProgress describes one candidate checked by ProbeCandidatesWithProgress.
+// Address is already normalized to host:port, so the connect screen can show
+// the address currently being tested.
+type ProbeProgress struct {
+	Index      int
+	Total      int
+	Address    string
+	Responsive bool
+	Err        error
+}
+
 // ProbeCandidates tries each address in order with a short status request and
 // returns the first that answers. It is used by QR pairing and discovery.
 func ProbeCandidates(ctx context.Context, client *transport.Client, hosts []string, port int) (string, model.Status, error) {
+	return ProbeCandidatesWithProgress(ctx, client, hosts, port, nil)
+}
+
+// ProbeCandidatesWithProgress is ProbeCandidates with a callback for the
+// connect screen. QR payloads can carry several LAN/Tailscale addresses; each
+// one is checked in payload order and the first reachable desktop wins.
+func ProbeCandidatesWithProgress(ctx context.Context, client *transport.Client, hosts []string, port int, progress func(ProbeProgress)) (string, model.Status, error) {
 	if port <= 0 {
 		port = 17878
 	}
+	candidates := candidateBaseURLs(hosts, port)
+	if len(candidates) == 0 {
+		return "", model.Status{}, errors.New("pairing payload has no usable addresses")
+	}
 	var lastErr error
-	for _, host := range hosts {
-		host = strings.TrimSpace(host)
-		if host == "" {
-			continue
+	for i, candidate := range candidates {
+		if progress != nil {
+			progress(ProbeProgress{Index: i, Total: len(candidates), Address: candidate})
 		}
-		base := host
-		if !strings.Contains(base, ":") {
-			base = fmt.Sprintf("%s:%d", host, port)
-		}
-		normalized, err := transport.NormalizeBaseURL(base)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		client.SetSession(normalized, "")
+		client.SetSession(candidate, "")
 		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		status, err := client.Status(probeCtx)
 		cancel()
 		if err == nil {
-			return normalized, status, nil
+			if progress != nil {
+				progress(ProbeProgress{Index: i, Total: len(candidates), Address: candidate, Responsive: true})
+			}
+			return candidate, status, nil
 		}
 		lastErr = err
+		if progress != nil {
+			progress(ProbeProgress{Index: i, Total: len(candidates), Address: candidate, Err: err})
+		}
 		if ctx.Err() != nil {
-			return "", model.Status{}, ctx.Err()
+			// A user/app cancellation should still stop immediately. A probe
+			// budget expiry, however, is reported as a candidate failure so the
+			// UI does not claim the user cancelled the scan.
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return "", model.Status{}, ctx.Err()
+			}
+			break
 		}
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no candidate address answered")
+	} else {
+		lastErr = fmt.Errorf("no candidate address answered: %w", lastErr)
 	}
 	return "", model.Status{}, lastErr
+}
+
+// candidateBaseURLs normalizes, de-duplicates and preserves the payload order
+// of QR candidate addresses. Entries may be bare hosts, host:port pairs or
+// full http(s) URLs.
+func candidateBaseURLs(hosts []string, port int) []string {
+	out := make([]string, 0, len(hosts))
+	seen := make(map[string]bool, len(hosts))
+	for _, raw := range hosts {
+		base, err := candidateBaseURL(raw, port)
+		if err != nil || base == "" || seen[base] {
+			continue
+		}
+		seen[base] = true
+		out = append(out, base)
+	}
+	return out
+}
+
+func candidateBaseURL(raw string, port int) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("empty address")
+	}
+	if strings.Contains(raw, "://") {
+		return transport.NormalizeBaseURL(raw)
+	}
+	host := raw
+	portText := ""
+	if h, p, err := net.SplitHostPort(raw); err == nil {
+		host, portText = h, p
+	} else if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
+		host = strings.Trim(raw, "[]")
+	} else if strings.Count(raw, ":") > 1 {
+		// Bare IPv6 literal without a port.
+		host = raw
+	}
+	if host == "" {
+		return "", errors.New("empty host")
+	}
+	if portText == "" {
+		portText = strconv.Itoa(port)
+	}
+	return transport.NormalizeBaseURL(net.JoinHostPort(host, portText))
 }
 
 // EventAction is what the app must do after a WebSocket event.

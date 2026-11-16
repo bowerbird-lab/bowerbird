@@ -1826,24 +1826,7 @@ func GetAvailableNetworkInterfaces(allowedNetworks []string) []NetworkInterfaceI
 			netType = "tailscale"
 		}
 
-		selected := false
-		if allowedNetworks == nil {
-			// Default: only LAN interfaces are selected
-			selected = (netType == "lan")
-		} else {
-			for _, allowed := range allowedNetworks {
-				if allowed == iface.Name || allowed == netType {
-					selected = true
-					break
-				}
-				for _, ipStr := range ips {
-					if allowed == ipStr {
-						selected = true
-						break
-					}
-				}
-			}
-		}
+		selected := networkInterfaceSelected(allowedNetworks, iface.Name, netType, ips)
 
 		displayName := fmt.Sprintf("%s (%s)", iface.Name, strings.Join(ips, ", "))
 		results = append(results, NetworkInterfaceInfo{
@@ -1856,6 +1839,50 @@ func GetAvailableNetworkInterfaces(allowedNetworks []string) []NetworkInterfaceI
 	}
 
 	return results
+}
+
+// networkInterfaceSelected reports whether an interface is exposed by the
+// persisted allowed-network list. A nil list is the untouched default: only
+// LAN interfaces are exposed. A non-nil empty list is an explicit "nothing is
+// exposed", which is why the settings JSON keeps it instead of omitting it.
+func networkInterfaceSelected(allowedNetworks []string, ifaceName, netType string, ips []string) bool {
+	if allowedNetworks == nil {
+		return netType == "lan"
+	}
+	for _, allowed := range allowedNetworks {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == "" {
+			continue
+		}
+		if allowed == ifaceName || allowed == netType {
+			return true
+		}
+		for _, ip := range ips {
+			if allowed == ip {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// normalizeAllowedNetworks drops blank and duplicate entries while keeping an
+// explicit empty selection non-nil.
+func normalizeAllowedNetworks(networks []string) []string {
+	if networks == nil {
+		return nil
+	}
+	out := make([]string, 0, len(networks))
+	seen := make(map[string]bool, len(networks))
+	for _, network := range networks {
+		network = strings.TrimSpace(network)
+		if network == "" || seen[network] {
+			continue
+		}
+		seen[network] = true
+		out = append(out, network)
+	}
+	return out
 }
 
 // GetFilteredLocalIPs returns candidate IPv4 addresses according to allowed networks configuration.
