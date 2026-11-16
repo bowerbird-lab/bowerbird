@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"math"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -522,7 +521,7 @@ func (a *App) folderPreviewImage(c *ui.Context, item core.Item, targetPx int) {
 func (a *App) itemThumbBitmap(item core.Item, targetPx int) *ui.Bitmap {
 	path := ""
 	if item.HasThumbnail && item.ItemPath != "" {
-		path = filepath.Join(item.ItemPath, "thumbnail.jpg")
+		path = core.ResolveThumbnailPath(item.ItemPath)
 	} else if categoryOf(item) == "image" && !a.canGenerateThumbnail(item) {
 		path = item.FilePath
 	}
@@ -567,7 +566,7 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 	// Resolve thumbnail or system file icon
 	path := ""
 	if item.HasThumbnail && item.ItemPath != "" {
-		path = filepath.Join(item.ItemPath, "thumbnail.jpg")
+		path = core.ResolveThumbnailPath(item.ItemPath)
 	} else if categoryOf(item) == "image" && !a.canGenerateThumbnail(item) {
 		path = item.FilePath
 	}
@@ -587,7 +586,10 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 			if thumbSize < 24 {
 				thumbSize = 24
 			}
-			thumbBox := ui.Box(c).Size(thumbSize, thumbSize).Radius(6).Background(p.surface2).Clip()
+			thumbBox := ui.Box(c).Size(thumbSize, thumbSize).Radius(6).Clip()
+			if bmp == nil {
+				thumbBox.Background(p.surface2)
+			}
 			thumbBox.Children(func() {
 				if bmp != nil {
 					ui.Image(c, bmp).Fill().Fit(ui.Cover)
@@ -641,7 +643,10 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 				imgH = h - 8
 				nameH = 0
 			}
-			thumbBox := ui.Box(c).FillWidth().Height(imgH).Radius(7).Background(p.surface2).Clip()
+			thumbBox := ui.Box(c).FillWidth().Height(imgH).Radius(7).Clip()
+			if bmp == nil {
+				thumbBox.Background(p.surface2)
+			}
 			if selected {
 				thumbBox.Border(2, p.accent)
 			}

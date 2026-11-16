@@ -1,7 +1,7 @@
 {
   "id": "official.audio-player",
   "name": "Audio Player",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "minAppVersion": "1.0.0",
   "kind": "preview",
   "native": "audio",
@@ -30,5 +30,9 @@
     "network": [],
     "process": []
   },
-  "settings": []
+  "settings": [],
+  "platforms": [
+    "desktop",
+    "mobile"
+  ]
 }

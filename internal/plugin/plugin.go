@@ -53,16 +53,19 @@ type Manifest struct {
 	Homepage      string              `json:"homepage,omitempty"`
 	License       string              `json:"license,omitempty"`
 	Builtin       bool                `json:"builtin,omitempty"`
+	Platforms     []string            `json:"platforms,omitempty"`
 	Extra         map[string]any      `json:"-,"`
 }
 
 // PreviewContribution is the structured form of a native preview declaration.
 type PreviewContribution struct {
 	Renderer     string   `json:"renderer,omitempty"`
+	Entry        string   `json:"entry,omitempty"`
 	Extensions   []string `json:"extensions,omitempty"`
 	MimePrefixes []string `json:"mimePrefixes,omitempty"`
 	SupportsZoom bool     `json:"supportsZoom,omitempty"`
 	Priority     int      `json:"priority,omitempty"`
+	Platforms    []string `json:"platforms,omitempty"`
 }
 
 // Permissions declares the capabilities a plugin may use.

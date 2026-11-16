@@ -8,14 +8,17 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/video"
 )
 
 // videoMaxDimension caps decoded frames so a 4K clip does not fill the GPU
@@ -39,6 +42,7 @@ type VideoPlayer struct {
 	path        string
 	info        VideoInfo
 	ui          *ui.VideoPlayer
+	nativeSys   bool
 	audio       *Player
 	audioPath   string
 	audioCancel context.CancelFunc
@@ -46,6 +50,14 @@ type VideoPlayer struct {
 	started     time.Time
 	playing     bool
 	closed      bool
+	volume        float64
+	muted         bool
+	rate          float64
+	rateBits      uint64
+	thumbCache    map[int]ui.ImageSource
+	thumbInflight map[int]bool
+	waveform      []float32
+	waveInflight  bool
 }
 
 // ProbeVideo reads stream dimensions, frame rate and duration with ffprobe.
@@ -138,7 +150,32 @@ func ExtractVideoFrame(path string, fallbackWidth, fallbackHeight int) (image.Im
 }
 
 // OpenVideo starts a native video player for path.
+// OpenVideo opens a video file using mygo's hardware-accelerated system player
+// (AVFoundation/VideoToolbox on macOS, Media Foundation on Windows, GStreamer on Linux),
+// falling back to ffmpeg only for containers the OS does not natively support.
 func OpenVideo(path string, fallbackWidth, fallbackHeight int) (*VideoPlayer, error) {
+	if native, err := video.Open(path); err == nil {
+		native.SetLoop(true)
+		native.Pause()
+		info := VideoInfo{
+			Width:    fallbackWidth,
+			Height:   fallbackHeight,
+			FPS:      30,
+			Duration: native.Duration(),
+		}
+		return &VideoPlayer{
+			path:          path,
+			info:          info,
+			ui:            native,
+			nativeSys:     true,
+			volume:        1.0,
+			rate:          1.0,
+			rateBits:      math.Float64bits(1.0),
+			thumbCache:    make(map[int]ui.ImageSource),
+			thumbInflight: make(map[int]bool),
+		}, nil
+	}
+
 	info := ProbeVideo(path, fallbackWidth, fallbackHeight)
 	if info.Width <= 0 || info.Height <= 0 {
 		return nil, errors.New("video dimensions are unknown; ffprobe is required for this file")
@@ -154,7 +191,17 @@ func OpenVideo(path string, fallbackWidth, fallbackHeight int) (*VideoPlayer, er
 	}
 	// Start on the first frame; opening the preview must not blast audio.
 	native.Pause()
-	v := &VideoPlayer{path: path, info: info, ui: native}
+	v := &VideoPlayer{
+		path:          path,
+		info:          info,
+		ui:            native,
+		volume:        1.0,
+		rate:          1.0,
+		rateBits:      math.Float64bits(1.0),
+		thumbCache:    make(map[int]ui.ImageSource),
+		thumbInflight: make(map[int]bool),
+	}
+	dec.player = v
 	go v.extractAudio()
 	return v, nil
 }
@@ -176,6 +223,11 @@ func (v *VideoPlayer) Duration() time.Duration {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	if v.nativeSys && v.ui != nil {
+		if d := v.ui.Duration(); d > 0 {
+			return d
+		}
+	}
 	return v.info.Duration
 }
 
@@ -186,6 +238,9 @@ func (v *VideoPlayer) Position() time.Duration {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	if v.nativeSys && v.ui != nil {
+		return v.ui.Position()
+	}
 	return v.positionLocked()
 }
 
@@ -207,6 +262,9 @@ func (v *VideoPlayer) Playing() bool {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	if v.nativeSys && v.ui != nil {
+		return v.ui.Playing()
+	}
 	if !v.playing {
 		return false
 	}
@@ -224,6 +282,11 @@ func (v *VideoPlayer) Play() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.closed || v.ui == nil {
+		return
+	}
+	if v.nativeSys {
+		v.ui.Play()
+		v.playing = true
 		return
 	}
 	if v.playing {
@@ -250,6 +313,11 @@ func (v *VideoPlayer) Pause() {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	if v.nativeSys && v.ui != nil {
+		v.ui.Pause()
+		v.playing = false
+		return
+	}
 	if !v.playing || v.ui == nil {
 		return
 	}
@@ -287,6 +355,10 @@ func (v *VideoPlayer) Seek(pos time.Duration) error {
 	if pos < 0 {
 		pos = 0
 	}
+	if v.nativeSys {
+		v.ui.Seek(pos)
+		return nil
+	}
 	if v.info.Duration > 0 && pos > v.info.Duration {
 		pos = v.info.Duration
 	}
@@ -295,6 +367,7 @@ func (v *VideoPlayer) Seek(pos time.Duration) error {
 	if err != nil {
 		return err
 	}
+	dec.player = v
 	native, err := ui.NewVideoPlayer(dec)
 	if err != nil {
 		_ = dec.Close()
@@ -406,8 +479,11 @@ func (v *VideoPlayer) extractAudio() {
 	}
 	v.audio, v.audioPath = audio, audioPath
 	v.audioCancel = nil
+	vol := v.effectiveVolumeLocked()
 	playing, pos := v.playing, v.positionLocked()
 	v.mu.Unlock()
+
+	audio.SetVolume(vol)
 
 	if pos > 0 {
 		audio.Seek(pos)
@@ -433,6 +509,7 @@ type ffmpegDecoder struct {
 	stderr    bytes.Buffer
 	buf       []byte
 	closeOnce sync.Once
+	player    *VideoPlayer
 }
 
 func newFFmpegDecoder(path string, startAt time.Duration, info VideoInfo) (*ffmpegDecoder, error) {
@@ -497,6 +574,7 @@ func (d *ffmpegDecoder) start() error {
 	args = append(args,
 		"-i", d.path,
 		"-an", "-sn", "-dn",
+		"-sws_flags", "fast_bilinear",
 		"-vf", fmt.Sprintf("scale=%d:%d", d.width, d.height),
 		"-pix_fmt", "rgba",
 		"-f", "rawvideo", "pipe:1",
@@ -533,7 +611,13 @@ func (d *ffmpegDecoder) Next() (ui.VideoFrame, error) {
 	pix := make([]byte, len(d.buf))
 	copy(pix, d.buf)
 	img := &image.RGBA{Pix: pix, Stride: d.width * 4, Rect: image.Rect(0, 0, d.width, d.height)}
-	return ui.VideoFrame{Image: img, Duration: d.frameDur}, nil
+	dur := d.frameDur
+	if d.player != nil {
+		if r := d.player.Rate(); r > 0 && r != 1.0 {
+			dur = time.Duration(float64(dur) / r)
+		}
+	}
+	return ui.VideoFrame{Image: img, Duration: dur}, nil
 }
 
 func (d *ffmpegDecoder) Rewind() error {
@@ -562,4 +646,253 @@ func (d *ffmpegDecoder) stop() {
 			d.cmd = nil
 		}
 	})
+}
+
+func (v *VideoPlayer) effectiveVolumeLocked() float64 {
+	if v.muted {
+		return 0
+	}
+	if v.volume < 0 {
+		return 0
+	}
+	if v.volume > 1 {
+		return 1
+	}
+	return v.volume
+}
+
+// SetVolume sets playback volume in [0, 1].
+func (v *VideoPlayer) SetVolume(vol float64) {
+	if v == nil {
+		return
+	}
+	if vol < 0 {
+		vol = 0
+	}
+	if vol > 1 {
+		vol = 1
+	}
+	v.mu.Lock()
+	v.volume = vol
+	if vol > 0 && v.muted {
+		v.muted = false
+	}
+	if v.nativeSys && v.ui != nil {
+		v.ui.SetVolume(vol)
+		v.ui.SetMuted(v.muted)
+		v.mu.Unlock()
+		return
+	}
+	audio := v.audio
+	eff := v.effectiveVolumeLocked()
+	v.mu.Unlock()
+	if audio != nil {
+		audio.SetVolume(eff)
+	}
+}
+
+// Volume returns the current volume in [0, 1].
+func (v *VideoPlayer) Volume() float64 {
+	if v == nil {
+		return 1
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.volume
+}
+
+// SetMuted toggles mute without losing the previous volume level.
+func (v *VideoPlayer) SetMuted(m bool) {
+	if v == nil {
+		return
+	}
+	v.mu.Lock()
+	v.muted = m
+	if v.nativeSys && v.ui != nil {
+		v.ui.SetMuted(m)
+		v.mu.Unlock()
+		return
+	}
+	audio := v.audio
+	eff := v.effectiveVolumeLocked()
+	v.mu.Unlock()
+	if audio != nil {
+		audio.SetVolume(eff)
+	}
+}
+
+// Muted reports whether audio is muted.
+func (v *VideoPlayer) Muted() bool {
+	if v == nil {
+		return false
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.muted
+}
+
+// SetRate sets video playback speed (e.g. 1.0, 1.25, 1.5, 2.0).
+func (v *VideoPlayer) SetRate(r float64) {
+	if v == nil {
+		return
+	}
+	if r <= 0 {
+		r = 1.0
+	}
+	atomic.StoreUint64(&v.rateBits, math.Float64bits(r))
+	v.mu.Lock()
+	v.rate = r
+	if v.nativeSys && v.ui != nil {
+		v.ui.SetRate(r)
+	}
+	v.mu.Unlock()
+}
+
+// Rate returns the current playback speed.
+func (v *VideoPlayer) Rate() float64 {
+	if v == nil {
+		return 1.0
+	}
+	bits := atomic.LoadUint64(&v.rateBits)
+	if bits == 0 {
+		return 1.0
+	}
+	return math.Float64frombits(bits)
+}
+
+// FrameThumbnail returns a cached 160px-wide preview frame for the 1-second
+// bucket around pos, extracting it asynchronously if not yet cached.
+func (v *VideoPlayer) FrameThumbnail(pos time.Duration) ui.ImageSource {
+	if v == nil || pos < 0 {
+		return nil
+	}
+	sec := int(pos.Seconds())
+	v.mu.Lock()
+	if v.closed {
+		v.mu.Unlock()
+		return nil
+	}
+	if img, ok := v.thumbCache[sec]; ok {
+		v.mu.Unlock()
+		return img
+	}
+	if v.thumbInflight[sec] {
+		v.mu.Unlock()
+		return nil
+	}
+	v.thumbInflight[sec] = true
+	path := v.path
+	v.mu.Unlock()
+
+	go func() {
+		defer func() {
+			v.mu.Lock()
+			delete(v.thumbInflight, sec)
+			v.mu.Unlock()
+		}()
+		cmd := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+			"-ss", strconv.Itoa(sec), "-i", path,
+			"-frames:v", "1", "-vf", "scale=160:-2", "-f", "image2pipe", "-vcodec", "png", "pipe:1")
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		if err := cmd.Run(); err != nil {
+			return
+		}
+		img, err := ui.DecodeImage(out.Bytes())
+		if err != nil {
+			return
+		}
+		v.mu.Lock()
+		if !v.closed && v.thumbCache != nil {
+			v.thumbCache[sec] = img
+		}
+		v.mu.Unlock()
+	}()
+	return nil
+}
+
+// AudioWaveform returns normalized audio amplitude buckets in [0.08, 1.0],
+// extracted asynchronously once per video via ffmpeg.
+func (v *VideoPlayer) AudioWaveform(buckets int) []float32 {
+	if v == nil || buckets <= 0 {
+		return nil
+	}
+	v.mu.Lock()
+	if v.closed {
+		v.mu.Unlock()
+		return nil
+	}
+	if len(v.waveform) > 0 {
+		out := append([]float32(nil), v.waveform...)
+		v.mu.Unlock()
+		return out
+	}
+	if v.waveInflight {
+		v.mu.Unlock()
+		return nil
+	}
+	v.waveInflight = true
+	path := v.path
+	v.mu.Unlock()
+
+	go func() {
+		defer func() {
+			v.mu.Lock()
+			v.waveInflight = false
+			v.mu.Unlock()
+		}()
+		cmd := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+			"-i", path, "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1")
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		if err := cmd.Run(); err != nil {
+			return
+		}
+		raw := out.Bytes()
+		nSamples := len(raw) / 2
+		if nSamples < buckets {
+			return
+		}
+		peaks := make([]float32, buckets)
+		step := nSamples / buckets
+		var maxPeak float32
+		for b := 0; b < buckets; b++ {
+			start := b * step
+			end := start + step
+			if b == buckets-1 || end > nSamples {
+				end = nSamples
+			}
+			var peak float32
+			for i := start; i < end; i++ {
+				sample := int16(raw[i*2]) | int16(raw[i*2+1])<<8
+				val := float32(sample)
+				if val < 0 {
+					val = -val
+				}
+				if val > peak {
+					peak = val
+				}
+			}
+			peaks[b] = peak
+			if peak > maxPeak {
+				maxPeak = peak
+			}
+		}
+		if maxPeak <= 0 {
+			maxPeak = 1
+		}
+		for i := range peaks {
+			n := math.Sqrt(float64(peaks[i] / maxPeak))
+			if n < 0.03 {
+				n = 0.03
+			}
+			peaks[i] = float32(n)
+		}
+		v.mu.Lock()
+		if !v.closed {
+			v.waveform = peaks
+		}
+		v.mu.Unlock()
+	}()
+	return nil
 }

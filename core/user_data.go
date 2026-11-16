@@ -246,7 +246,11 @@ type MobileSettings struct {
 	Port            int                `json:"port,omitempty"`
 	PairingRequired bool               `json:"pairingRequired"`
 	Tokens          []MobileTokenEntry `json:"tokens,omitempty"`
-	AllowedNetworks []string           `json:"allowedNetworks,omitempty"`
+	// AllowedNetworks lists the network interfaces (or interface types/IPs)
+	// exposed for discovery and pairing QR codes. A nil list means the
+	// conservative default (LAN only); an explicit empty list means the user
+	// turned every interface off, so it must survive a JSON round trip.
+	AllowedNetworks []string `json:"allowedNetworks"`
 }
 
 // Token source identifiers for MobileTokenEntry.Source.

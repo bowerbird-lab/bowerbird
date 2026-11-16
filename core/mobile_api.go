@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -201,6 +202,7 @@ func (s *MobileServer) Start() error {
 	mux.HandleFunc("/api/v1/items", s.authMiddleware(s.handleItemsList))
 	mux.HandleFunc("/api/v1/query", s.authMiddleware(s.handleQuery))
 	mux.HandleFunc("/api/v1/stats", s.authMiddleware(s.handleStats))
+	mux.HandleFunc("/api/v1/plugins/preview", s.authMiddleware(s.handlePreviewPlugins))
 	mux.HandleFunc("/api/v1/items/collection", s.authMiddleware(s.handleCollectionItems))
 	mux.HandleFunc("/api/v1/items/", s.authMiddleware(s.handleItemRoutes))
 	mux.HandleFunc("/api/v1/thumbs/", s.authMiddleware(s.handleThumbnail))
@@ -1692,10 +1694,14 @@ func (s *MobileServer) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	itemDir := filepath.Join(activePath, "items", itemID)
-	thumbPath := filepath.Join(itemDir, "thumbnail.jpg")
+	thumbPath := ResolveThumbnailPath(itemDir)
 
 	if _, err := os.Stat(thumbPath); err == nil {
-		w.Header().Set("Content-Type", "image/jpeg")
+		if strings.HasSuffix(thumbPath, ".png") {
+			w.Header().Set("Content-Type", "image/png")
+		} else {
+			w.Header().Set("Content-Type", "image/jpeg")
+		}
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		http.ServeFile(w, r, thumbPath)
 		return
@@ -1826,24 +1832,7 @@ func GetAvailableNetworkInterfaces(allowedNetworks []string) []NetworkInterfaceI
 			netType = "tailscale"
 		}
 
-		selected := false
-		if allowedNetworks == nil {
-			// Default: only LAN interfaces are selected
-			selected = (netType == "lan")
-		} else {
-			for _, allowed := range allowedNetworks {
-				if allowed == iface.Name || allowed == netType {
-					selected = true
-					break
-				}
-				for _, ipStr := range ips {
-					if allowed == ipStr {
-						selected = true
-						break
-					}
-				}
-			}
-		}
+		selected := networkInterfaceSelected(allowedNetworks, iface.Name, netType, ips)
 
 		displayName := fmt.Sprintf("%s (%s)", iface.Name, strings.Join(ips, ", "))
 		results = append(results, NetworkInterfaceInfo{
@@ -1856,6 +1845,50 @@ func GetAvailableNetworkInterfaces(allowedNetworks []string) []NetworkInterfaceI
 	}
 
 	return results
+}
+
+// networkInterfaceSelected reports whether an interface is exposed by the
+// persisted allowed-network list. A nil list is the untouched default: only
+// LAN interfaces are exposed. A non-nil empty list is an explicit "nothing is
+// exposed", which is why the settings JSON keeps it instead of omitting it.
+func networkInterfaceSelected(allowedNetworks []string, ifaceName, netType string, ips []string) bool {
+	if allowedNetworks == nil {
+		return netType == "lan"
+	}
+	for _, allowed := range allowedNetworks {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == "" {
+			continue
+		}
+		if allowed == ifaceName || allowed == netType {
+			return true
+		}
+		for _, ip := range ips {
+			if allowed == ip {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// normalizeAllowedNetworks drops blank and duplicate entries while keeping an
+// explicit empty selection non-nil.
+func normalizeAllowedNetworks(networks []string) []string {
+	if networks == nil {
+		return nil
+	}
+	out := make([]string, 0, len(networks))
+	seen := make(map[string]bool, len(networks))
+	for _, network := range networks {
+		network = strings.TrimSpace(network)
+		if network == "" || seen[network] {
+			continue
+		}
+		seen[network] = true
+		out = append(out, network)
+	}
+	return out
 }
 
 // GetFilteredLocalIPs returns candidate IPv4 addresses according to allowed networks configuration.
@@ -2007,4 +2040,85 @@ func (s *MobileServer) GetStatus() MobileServerStatus {
 		AvailableNetworks: GetAvailableNetworkInterfaces(allowed),
 		Devices:           s.listDevices(),
 	}
+}
+
+func (s *MobileServer) handlePreviewPlugins(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	type previewDesc struct {
+		ID           string   `json:"id"`
+		Name         string   `json:"name"`
+		Version      string   `json:"version"`
+		Renderer     string   `json:"renderer"`
+		Extensions   []string `json:"extensions,omitempty"`
+		MimePrefixes []string `json:"mimePrefixes,omitempty"`
+		SupportsZoom bool     `json:"supportsZoom,omitempty"`
+		Priority     int      `json:"priority,omitempty"`
+		Platforms    []string `json:"platforms,omitempty"`
+		Enabled      bool     `json:"enabled"`
+	}
+	type rawManifest struct {
+		ID           string   `json:"id"`
+		Name         string   `json:"name"`
+		Version      string   `json:"version"`
+		Kind         string   `json:"kind"`
+		Native       string   `json:"native"`
+		Extensions   []string `json:"extensions"`
+		MimePrefixes []string `json:"mimePrefixes"`
+		SupportsZoom bool     `json:"supportsZoom"`
+		Priority     int      `json:"priority"`
+		Capabilities []string `json:"capabilities"`
+		Platforms    []string `json:"platforms"`
+	}
+	cfgDir, _ := os.UserConfigDir()
+	pluginsDir := filepath.Join(cfgDir, "Bowerbird", "plugins")
+	var out []previewDesc
+	entries, _ := os.ReadDir(pluginsDir)
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(pluginsDir, e.Name(), "plugin.json"))
+		if err != nil {
+			continue
+		}
+		var m rawManifest
+		if err := json.Unmarshal(data, &m); err != nil {
+			continue
+		}
+		if !strings.EqualFold(m.Kind, "preview") && m.Native == "" {
+			continue
+		}
+		platforms := m.Platforms
+		if len(platforms) == 0 {
+			platforms = []string{"desktop", "mobile"}
+		}
+		out = append(out, previewDesc{
+			ID:           m.ID,
+			Name:         m.Name,
+			Version:      m.Version,
+			Renderer:     m.Native,
+			Extensions:   m.Extensions,
+			MimePrefixes: m.MimePrefixes,
+			SupportsZoom: m.SupportsZoom,
+			Priority:     m.Priority,
+			Platforms:    platforms,
+			Enabled:      true,
+		})
+	}
+	raw, _ := json.Marshal(out)
+	sum := sha256.Sum256(raw)
+	hostName, _ := os.Hostname()
+	bundle := map[string]any{
+		"hostId":      hostName,
+		"hostName":    hostName,
+		"count":       len(out),
+		"hash":        hex.EncodeToString(sum[:]),
+		"generatedAt": time.Now().UTC(),
+		"plugins":     out,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(bundle)
 }

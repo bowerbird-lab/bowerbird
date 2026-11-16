@@ -1,0 +1,33 @@
+{
+  "colors": {
+    "window": "#070b14",
+    "background": "#0b1220",
+    "sidebar": "#0f172a",
+    "surface": "#16203a",
+    "surfaceAlt": "#1e2a47",
+    "text": "#e6edf7",
+    "textMuted": "#93a3bd",
+    "textFaint": "#64748b",
+    "border": "#ffffff1a",
+    "hover": "#ffffff0f",
+    "pressed": "#ffffff1f",
+    "accent": "#64d2ff",
+    "onAccent": "#04121a",
+    "danger": "#ff6b81",
+    "warning": "#f0b429",
+    "info": "#5bc0eb",
+    "star": "#ffd166",
+    "starStrong": "#ffc233",
+    "shadow": "#000000a6",
+    "overlay": "#00000066",
+    "preview": "#000000e6",
+    "badge": "#000000a6",
+    "onBadge": "#ffffff",
+    "success": "#16a34a"
+  },
+  "material": {
+    "sidebarOpacity": 0.6,
+    "headerTint": "#0b1220cc",
+    "headerBlurRadius": 14
+  }
+}

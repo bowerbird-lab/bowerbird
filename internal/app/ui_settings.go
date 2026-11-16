@@ -971,6 +971,26 @@ func (a *App) settingsMobile(c *ui.Context) {
 			})
 		}
 	})
+	a.settingsCardHelp(c, a.t("settings.mobile.discoveryNetworks"), a.t("settings.mobile.discoveryNetworksDesc"), func() {
+		networks := []core.NetworkInterfaceInfo{}
+		if status != nil {
+			networks = status.AvailableNetworks
+		}
+		if len(networks) == 0 {
+			ui.Text(c, a.t("settings.mobile.noNetworksFound")).FontSize(11.5).TextColor(p.faint)
+			return
+		}
+		for _, network := range networks {
+			network := network
+			label := fmt.Sprintf("%s · %s", network.ID, strings.Join(network.IPs, ", "))
+			a.settingsRow(c, label, a.mobileNetworkTypeLabel(network.Type), func() {
+				on := network.Selected
+				if ui.Switch(c.Key("mobile-network-"+network.ID), &on).Changed() {
+					a.setMobileNetworkEnabled(network.ID, on)
+				}
+			})
+		}
+	})
 	a.settingsCard(c, a.t("settings.mobile.qrTitle"), func() {
 		ui.Row(c).FillWidth().Gap(20).AlignItems(ui.Start).Children(func() {
 			ui.Column(c).Grow(1).Shrink(1).Gap(8).Children(func() {
@@ -983,10 +1003,12 @@ func (a *App) settingsMobile(c *ui.Context) {
 				}
 				ui.Text(c, a.t("settings.mobile.qrTip")).FontSize(10.5).TextColor(p.faint).Wrap()
 			})
-			if status != nil && status.Running && a.mobileQR != nil {
+			if status != nil && status.Running && len(status.Addresses) > 0 && a.mobileQR != nil {
 				ui.Box(c).Padding(8).Radius(8).Background(ui.RGB(255, 255, 255)).Children(func() {
 					ui.Image(c, a.mobileQR).Size(176, 176).Fit(ui.Contain)
 				})
+			} else if status != nil && status.Running {
+				ui.Text(c, a.t("settings.mobile.noNetworksSelected")).FontSize(11.5).TextColor(p.warning).MaxWidth(220).Wrap()
 			} else {
 				ui.Text(c, a.t("settings.mobile.qrUnavailable")).FontSize(11.5).TextColor(p.faint).MaxWidth(220).Wrap()
 			}
@@ -1014,6 +1036,78 @@ func (a *App) settingsMobile(c *ui.Context) {
 			})
 		}
 	})
+}
+
+// mobileNetworkTypeLabel names the interface class shown in the discovery
+// network list.
+func (a *App) mobileNetworkTypeLabel(networkType string) string {
+	switch networkType {
+	case "lan":
+		return a.t("settings.mobile.netLan")
+	case "tailscale":
+		return a.t("settings.mobile.netTailscale")
+	default:
+		return a.t("settings.mobile.netOther")
+	}
+}
+
+// setMobileNetworkEnabled persists a new discovery-network selection and
+// refreshes the pairing QR code so it only advertises the exposed addresses.
+func (a *App) setMobileNetworkEnabled(ifaceID string, enabled bool) {
+	if a.mobile == nil {
+		return
+	}
+	allowed := make([]string, 0, len(a.mobile.AvailableNetworks))
+	for i := range a.mobile.AvailableNetworks {
+		network := &a.mobile.AvailableNetworks[i]
+		selected := network.Selected
+		if network.ID == ifaceID {
+			selected = enabled
+			network.Selected = enabled
+		}
+		if selected {
+			allowed = append(allowed, network.ID)
+		}
+	}
+	a.mobileNetworkWanted = append([]string{}, allowed...)
+	if a.mobileNetworkSaving {
+		return
+	}
+	a.mobileNetworkSaving = true
+	a.saveMobileNetworks()
+}
+
+// saveMobileNetworks persists the latest discovery-network selection. A
+// toggle that arrives while a save is in flight only replaces the wanted
+// list; the worker applies it after the current request finishes.
+func (a *App) saveMobileNetworks() {
+	wanted := append([]string{}, a.mobileNetworkWanted...)
+	go func() {
+		err := a.svc.SetMobileAllowedNetworks(wanted)
+		a.postSettings(func() {
+			if !sameNetworkSelection(a.mobileNetworkWanted, wanted) {
+				a.saveMobileNetworks()
+				return
+			}
+			a.mobileNetworkSaving = false
+			if err != nil {
+				a.showToast(err.Error())
+			}
+			a.refreshSettings()
+		})
+	}()
+}
+
+func sameNetworkSelection(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // applyMobilePort validates the port field and switches the LAN listener.

@@ -246,7 +246,12 @@ func (a *App) viewLibraryPicker(c *ui.Context) {
 				a.post(func() { a.showToast(err.Error()) })
 				return
 			}
-			a.post(func() { a.refreshAll() })
+			a.post(func() {
+				a.nav = NavAll
+				a.folderID = ""
+				a.clearWorkspaceSelection()
+				a.refreshAll()
+			})
 		}()
 	})
 }
@@ -322,6 +327,8 @@ func (a *App) openLibraryRef(ref core.LibraryRef) {
 				a.showToast(err.Error())
 				return
 			}
+			a.nav = NavAll
+			a.folderID = ""
 			a.clearWorkspaceSelection()
 			a.refreshAll()
 		})

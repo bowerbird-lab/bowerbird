@@ -296,6 +296,25 @@ type App struct {
 	video             *player.VideoPlayer
 	videoErr          string
 	videoScrub        float64
+	videoVolScrub     float64
+	videoMoreOpen     bool
+	videoLastSeek     time.Time
+	videoPendingSeek  bool
+	videoDragging     bool
+	videoHovering     bool
+	videoHoverPos     float64
+	videoVolHover     bool
+	videoVolLeaveAt   time.Time
+	videoVolRightPad  float32
+	videoRateOpen     bool
+	videoRateRightPad float32
+	videoTrackAnim    float32
+	videoTrackRect    ui.Rect
+	videoLastMove      time.Time
+	videoLastPtrX       float32
+	videoLastPtrY       float32
+	videoControlsHidden bool
+	videoResumeScrub    bool
 	videoSeq          uint64
 	previewSeq        uint64
 
@@ -316,7 +335,12 @@ type App struct {
 	mobilePort        string
 	mobilePairingURL  string
 	mobileQR          *ui.Bitmap
-	settingsDirty     bool
+	// Discovery-network toggles save asynchronously. Wanted holds the latest
+	// selection so quick consecutive toggles cannot let an earlier save
+	// overwrite a newer one.
+	mobileNetworkWanted []string
+	mobileNetworkSaving bool
+	settingsDirty       bool
 
 	// Settings.
 	settingsSection int

@@ -12,6 +12,10 @@ import (
 
 // viewMain builds one frame of the primary workspace. It has a single root:
 // mygo lays out the top-level children of a view as the window, so the
+func (a *App) isImmersiveFullscreen() bool {
+	return a.win != nil && a.win.IsFullScreen() && a.previewOpen
+}
+
 // workspace, toasts and dialogs must be children of one Box rather than
 // sibling roots.
 func (a *App) viewMain(c *ui.Context) {
@@ -27,6 +31,12 @@ func (a *App) viewMain(c *ui.Context) {
 	root := ui.Box(c).Fill()
 	a.attachURLDropTarget(root)
 	root.Children(func() {
+		if a.isImmersiveFullscreen() && len(a.items) > 0 && a.previewIndex >= 0 && a.previewIndex < len(a.items) {
+			ui.Box(c).Fill().Background(ui.RGB(0, 0, 0)).Children(func() {
+				a.viewPreviewBody(c, a.workspaceItem(a.previewIndex))
+			})
+			return
+		}
 		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 			if a.prefs.SidebarOpen {
 				a.viewSidebar(c)
@@ -169,6 +179,10 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 	}
 	if matched(core.ShortcutForceReload) {
 		a.reloadIgnoringCache()
+	}
+	if matched(core.ShortcutDismiss) && a.isImmersiveFullscreen() {
+		a.win.SetFullScreen(false)
+		return
 	}
 	if matched(core.ShortcutFullscreen) && a.win != nil {
 		a.win.ToggleFullScreen()

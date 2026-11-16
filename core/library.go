@@ -12,7 +12,7 @@ import (
 	"image"
 	_ "image/gif"
 	"image/jpeg"
-	_ "image/png"
+	"image/png"
 	"io"
 	"log"
 	"net/http"
@@ -2255,17 +2255,40 @@ func encodeThumbnailAndExtractPalette(img image.Image, origW, origH int, itemDir
 
 	dominantColor, palette, imgMeta := ExtractPaletteAndMeta(img, thumb, origW, origH, ext, filePath)
 
-	thumbFile, err := os.Create(filepath.Join(itemDir, "thumbnail.jpg"))
+	isPNG := strings.EqualFold(strings.TrimPrefix(ext, "."), "png")
+	thumbName := "thumbnail.jpg"
+	if isPNG {
+		thumbName = "thumbnail.png"
+	}
+
+	thumbFile, err := os.Create(filepath.Join(itemDir, thumbName))
 	if err != nil {
 		return origW, origH, false, dominantColor, palette, imgMeta
 	}
 	defer thumbFile.Close()
 
-	if err := jpeg.Encode(thumbFile, thumb, &jpeg.Options{Quality: 84}); err != nil {
-		return origW, origH, false, dominantColor, palette, imgMeta
+	if isPNG {
+		if err := png.Encode(thumbFile, thumb); err != nil {
+			return origW, origH, false, dominantColor, palette, imgMeta
+		}
+		_ = os.Remove(filepath.Join(itemDir, "thumbnail.jpg"))
+	} else {
+		if err := jpeg.Encode(thumbFile, thumb, &jpeg.Options{Quality: 84}); err != nil {
+			return origW, origH, false, dominantColor, palette, imgMeta
+		}
 	}
 
 	return origW, origH, true, dominantColor, palette, imgMeta
+}
+
+// ResolveThumbnailPath returns the existing thumbnail path in itemDir,
+// preferring thumbnail.png (for transparent PNGs) over thumbnail.jpg.
+func ResolveThumbnailPath(itemDir string) string {
+	pngPath := filepath.Join(itemDir, "thumbnail.png")
+	if _, err := os.Stat(pngPath); err == nil {
+		return pngPath
+	}
+	return filepath.Join(itemDir, "thumbnail.jpg")
 }
 
 func (m *LibraryManager) processImageThumbnail(mediaPath string, itemDir string, ext string) (int, int, bool, string, []string, *ImageMeta) {

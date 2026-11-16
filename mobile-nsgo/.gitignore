@@ -1,0 +1,7 @@
+/dist/
+/build/
+/android/.gradle/
+/android/.kotlin/
+/android/app/build/
+/android/libs/*.aar
+/android/local.properties
