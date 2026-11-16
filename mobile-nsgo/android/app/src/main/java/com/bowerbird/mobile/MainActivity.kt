@@ -7,6 +7,11 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
+import android.window.BackEvent
+import android.window.OnBackAnimationCallback
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
+import androidx.annotation.RequiresApi
 import dev.oneo.nsgo.NsgoView
 import java.util.concurrent.Executors
 
@@ -22,6 +27,7 @@ class MainActivity : Activity() {
     private lateinit var intake: ShareIntake
     private val ioExecutor = Executors.newCachedThreadPool()
     private var scanReply: NsgoView.HostReply? = null
+    private var detailBackCallback: Any? = null
 
     override fun onCreate(state: Bundle?) {
         val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
@@ -173,6 +179,58 @@ class MainActivity : Activity() {
                 runOnUiThread { reply.resolve(info) }
             }
         }
+        app.handle("detail.setPredictiveBack") { data, reply ->
+            val enabled = (data as? Map<*, *>)?.get("enabled") == true
+            setDetailPredictiveBack(enabled)
+            reply.resolve(null)
+        }
+    }
+
+    private fun setDetailPredictiveBack(enabled: Boolean) {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (enabled) {
+            if (detailBackCallback != null) return
+            val callback = if (Build.VERSION.SDK_INT >= 34) {
+                createDetailBackAnimationCallback()
+            } else {
+                OnBackInvokedCallback { app.send("detail.backInvoke", null) }
+            }
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_OVERLAY,
+                callback
+            )
+            detailBackCallback = callback
+        } else {
+            unregisterDetailPredictiveBack()
+        }
+    }
+
+    private fun unregisterDetailPredictiveBack() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val callback = detailBackCallback as? OnBackInvokedCallback ?: return
+        detailBackCallback = null
+        runCatching { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback) }
+    }
+
+    @RequiresApi(34)
+    private fun createDetailBackAnimationCallback(): OnBackAnimationCallback {
+        return object : OnBackAnimationCallback {
+            override fun onBackStarted(backEvent: BackEvent) {
+                app.send("detail.backStart", mapOf("progress" to backEvent.progress))
+            }
+
+            override fun onBackProgressed(backEvent: BackEvent) {
+                app.send("detail.backProgress", mapOf("progress" to backEvent.progress))
+            }
+
+            override fun onBackCancelled() {
+                app.send("detail.backCancel", null)
+            }
+
+            override fun onBackInvoked() {
+                app.send("detail.backInvoke", null)
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -213,6 +271,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        unregisterDetailPredictiveBack()
         discovery.stop()
         ioExecutor.shutdownNow()
         app.stop()

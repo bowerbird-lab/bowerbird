@@ -185,20 +185,30 @@ type App struct {
 	toast         *core.Signal[string]
 
 	// Shared-element preview: the thumbnail proxy travels from its tile
-	// into the full preview, and back, through a layout transition.
-	matchStage       *core.Signal[int]
-	matchDetail      *core.Signal[bool]
-	matchRev         *core.Signal[int]
-	matchFrom        core.Bounds
-	matchTo          core.Bounds
-	matchThumb       string
-	matchOriginal    string
-	matchOpenedIndex int
-	matchGen         int
-	matchAnimated    bool
-	matchApply       func()
-	matchApplied     bool
-	forceMatchAnim   bool
+	// into the full preview, and back, through GPU-animated transforms.
+	matchStage            *core.Signal[int]
+	matchDetail           *core.Signal[bool]
+	matchRev              *core.Signal[int]
+	matchCornerRadius     *core.Signal[core.Points]
+	matchCornerDur        *core.Signal[time.Duration]
+	matchFrom             core.Bounds
+	matchTo               core.Bounds
+	matchThumb            string
+	matchOriginal         string
+	matchOpenedIndex      int
+	matchTileRadius       core.Points
+	matchGen              int
+	matchAnimated         bool
+	matchApply            func()
+	matchApplied          bool
+	matchInteractive      bool
+	matchInteractiveReady bool
+	matchPendingAction    int
+	matchPendingProgress  float64
+	matchProgressVal      *core.AnimatedValue
+	matchDynamicScope     *core.Scope
+	matchLastHostPred     bool
+	forceMatchAnim        bool
 
 	wsRunning     atomic.Bool
 	sharesRunning atomic.Bool
@@ -289,6 +299,8 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		matchStage:           core.NewSignal(cx, 0),
 		matchDetail:          core.NewSignal(cx, false),
 		matchRev:             core.NewSignal(cx, 0),
+		matchCornerRadius:    core.NewSignal(cx, core.Points(0)),
+		matchCornerDur:       core.NewSignal(cx, time.Duration(0)),
 		detailChrome:         core.NewSignal(cx, false),
 		metaOpen:             core.NewSignal(cx, false),
 		confirmDel:           core.NewSignal(cx, false),
@@ -374,6 +386,35 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 	cx.OnHostEvent("openUrl", func(data any) {
 		if raw, ok := data.(string); ok {
 			a.handlePairURL(cx, raw)
+		}
+	})
+	cx.OnHostEvent("detail.backStart", func(data any) {
+		m, _ := data.(map[string]any)
+		a.startInteractiveBack(nativeFloat(m, "progress"))
+	})
+	cx.OnHostEvent("detail.backProgress", func(data any) {
+		m, _ := data.(map[string]any)
+		a.updateInteractiveBack(nativeFloat(m, "progress"))
+	})
+	cx.OnHostEvent("detail.backCancel", func(any) {
+		a.finishInteractiveBack(false)
+	})
+	cx.OnHostEvent("detail.backInvoke", func(any) {
+		a.finishInteractiveBack(true)
+	})
+	cx.Effect(func() {
+		if !a.env.HasHost || cx.Env().OS() != core.OSAndroid {
+			return
+		}
+		stage := a.matchStage.Get()
+		enabled := (a.screen.Get() == screenDetail || (a.matchInteractive && stage != 0)) &&
+			!a.metaOpen.Get() &&
+			!a.confirmDel.Get() &&
+			!cx.Env().ReduceMotion() &&
+			a.canRunHeroBack()
+		if enabled != a.matchLastHostPred {
+			a.matchLastHostPred = enabled
+			cx.CallHost("detail.setPredictiveBack", map[string]any{"enabled": enabled}, nil)
 		}
 	})
 	if raw := core.Untracked(cx, cx.Env().OpenedURL); raw != "" {
@@ -469,7 +510,9 @@ func (a *App) mainStack(cx *core.Scope) core.Node {
 		Then: func(cx *core.Scope) core.Node {
 			return core.Screen{
 				TestID: "screen.detail", HeaderHidden: true,
-				NoPopOnBack: true,
+				// On Android, let the stack's predictive back gesture pop the page
+				// interactively while the header back button runs the hero shrink.
+				NoPopOnBack: core.Untracked(cx, cx.Env().OS) != core.OSAndroid,
 				OnBackPress: func() { a.backFromDetail() },
 				OnDismiss:   func() { a.dismissDetail() },
 				Children:    []core.Node{a.detailPage(cx)},

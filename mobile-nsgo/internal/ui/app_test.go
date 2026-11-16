@@ -474,6 +474,55 @@ func TestPreviewMatchAnimatesAndCleansUp(t *testing.T) {
 		t.Fatalf("system back preview.match stayed mounted after finish: %d", n)
 	}
 
+	// Interactive predictive back: start -> scrub -> cancel restores detail cleanly.
+	appState.scope.Post(func() {
+		appState.openDetail(appState.scope, 0, screenGallery, core.Bounds{
+			Origin: core.Point{X: 12, Y: 94},
+			Size:   core.Size{Width: 128, Height: 128},
+		})
+	})
+	app.Settle()
+	app.Advance(previewMatchOpenDuration + 180*time.Millisecond)
+	appState.scope.Post(func() {
+		appState.startInteractiveBack(0.1)
+	})
+	app.Settle()
+	app.Advance(20 * time.Millisecond) // RequestAnimationFrame reveals gallery behind hero
+	if len(app.QueryMounted("id:preview.match")) != 1 {
+		t.Fatal("expected preview.match during interactive predictive back")
+	}
+	appState.scope.Post(func() {
+		appState.updateInteractiveBack(0.6)
+		appState.finishInteractiveBack(false)
+	})
+	app.Settle()
+	app.Advance(360 * time.Millisecond)
+	if len(app.QueryMounted("id:detail.media")) != 1 {
+		t.Fatal("expected detail.media restored after cancelled predictive back")
+	}
+	if n := len(app.QueryMounted("id:preview.match")); n != 0 {
+		t.Fatalf("preview.match stayed mounted after cancelled predictive back: %d", n)
+	}
+
+	// Interactive predictive back: start -> scrub -> invoke shrinks into tile and cleans up.
+	appState.scope.Post(func() {
+		appState.startInteractiveBack(0.1)
+	})
+	app.Settle()
+	app.Advance(20 * time.Millisecond)
+	appState.scope.Post(func() {
+		appState.updateInteractiveBack(0.8)
+		appState.finishInteractiveBack(true)
+	})
+	app.Settle()
+	app.Advance(260 * time.Millisecond)
+	if len(app.QueryMounted("id:detail.media")) != 0 {
+		t.Fatal("expected detail.media unmounted after invoked predictive back")
+	}
+	if n := len(app.QueryMounted("id:preview.match")); n != 0 {
+		t.Fatalf("preview.match stayed mounted after invoked predictive back: %d", n)
+	}
+
 	// Opening without valid source bounds skips the proxy entirely.
 	appState.scope.Post(func() {
 		appState.screen.Set(screenGallery)

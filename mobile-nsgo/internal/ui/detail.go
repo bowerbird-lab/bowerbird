@@ -80,8 +80,155 @@ const (
 func (a *App) cancelPreviewMatch() {
 	a.matchGen++
 	a.matchAnimated = false
+	a.matchInteractive = false
+	a.matchInteractiveReady = false
+	a.matchPendingAction = 0
+	a.matchProgressVal = nil
+	a.matchDynamicScope = nil
+	a.matchCornerDur.Set(0)
+	a.matchCornerRadius.Set(0)
 	a.matchStage.Set(0)
 	a.matchDetail.Set(false)
+}
+
+func (a *App) canRunHeroBack() bool {
+	return a.detailIndex.Get() == a.matchOpenedIndex &&
+		a.matchThumb != "" &&
+		a.matchFrom.Size.Width >= 24 &&
+		a.matchFrom.Size.Height >= 24 &&
+		a.matchTo.Size.Width > 0 &&
+		a.matchTo.Size.Height > 0
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func interactiveHeroProgress(gestureProgress float64) float64 {
+	return 1.0 - 0.50*clamp01(gestureProgress)
+}
+
+func (a *App) startInteractiveBack(progress float64) {
+	if !a.canRunHeroBack() || a.matchStage.Get() != 0 {
+		return
+	}
+	if (!a.env.HasHost && !a.forceMatchAnim) || a.scope.Env().ReduceMotion() {
+		return
+	}
+	a.videoPaused.Set(true)
+	a.matchGen++
+	a.matchAnimated = false
+	a.matchInteractive = true
+	a.matchInteractiveReady = false
+	a.matchPendingAction = 0
+	a.matchPendingProgress = clamp01(progress)
+	a.matchProgressVal = nil
+	a.matchDynamicScope = nil
+	a.matchCornerDur.Set(0)
+	a.matchCornerRadius.Set(0)
+	a.matchStage.Set(2)
+	a.matchRev.Update(func(v int) int { return v + 1 })
+}
+
+func (a *App) updateInteractiveBack(raw float64) {
+	if !a.matchInteractive {
+		return
+	}
+	p := clamp01(raw)
+	a.matchPendingProgress = p
+	if a.matchInteractiveReady && a.matchProgressVal != nil {
+		hp := interactiveHeroProgress(p)
+		a.matchProgressVal.Set(hp)
+		a.matchCornerDur.Set(0)
+		a.matchCornerRadius.Set(a.matchTileRadius * core.Points(1.0-hp))
+	}
+}
+
+func (a *App) finishInteractiveBack(commit bool) {
+	if !a.matchInteractive {
+		if commit {
+			a.backFromDetail()
+		}
+		return
+	}
+	if !a.matchInteractiveReady {
+		if commit {
+			a.matchPendingAction = 1
+		} else {
+			a.matchPendingAction = -1
+		}
+		return
+	}
+	gen := a.matchGen
+	a.matchInteractive = false
+	a.matchInteractiveReady = false
+	a.matchPendingAction = 0
+	p := a.matchProgressVal
+	dynCx := a.matchDynamicScope
+	if p == nil || dynCx == nil || dynCx.Disposed() {
+		if commit {
+			a.screen.Set(a.detailReturnScreen())
+		} else {
+			a.screen.Set(screenDetail)
+			a.bump()
+		}
+		a.matchStage.Set(0)
+		return
+	}
+	easing := core.BezierEasing(core.EaseOut)
+	if commit {
+		a.screen.Set(a.detailReturnScreen())
+		a.matchCornerDur.Set(200 * time.Millisecond)
+		a.matchCornerRadius.Set(a.matchTileRadius)
+		dynCx.StartAnimation(core.Timing(p, 0, core.TimingConfig{
+			Duration: 200 * time.Millisecond,
+			Easing:   easing,
+		}), func(bool) {
+			if a.matchGen == gen {
+				a.matchStage.Set(0)
+			}
+		})
+		a.after(320*time.Millisecond, func() {
+			if a.matchGen == gen && a.matchStage.Get() != 0 {
+				a.matchStage.Set(0)
+			}
+		})
+		return
+	}
+	a.matchCornerDur.Set(180 * time.Millisecond)
+	a.matchCornerRadius.Set(0)
+	dynCx.StartAnimation(core.Timing(p, 1, core.TimingConfig{
+		Duration: 180 * time.Millisecond,
+		Easing:   easing,
+	}), func(bool) {
+		if a.matchGen != gen {
+			return
+		}
+		a.screen.Set(screenDetail)
+		a.bump()
+		a.after(140*time.Millisecond, func() {
+			if a.matchGen == gen {
+				a.matchStage.Set(0)
+			}
+		})
+	})
+	a.after(380*time.Millisecond, func() {
+		if a.matchGen == gen {
+			if a.screen.Get() != screenDetail {
+				a.screen.Set(screenDetail)
+				a.bump()
+			}
+			if a.matchStage.Get() != 0 {
+				a.matchStage.Set(0)
+			}
+		}
+	})
 }
 
 // startPreviewMatch runs a GPU-driven hero + backdrop fade between the tapped
@@ -160,13 +307,29 @@ func (a *App) previewMatchOverlay(cx *core.Scope) core.Node {
 				sy0 = 0.05
 			}
 			u0 := max(sx0, sy0)
+			tileRadius := core.Points(8 / ((sx0 + sy0) / 2))
+			if tileRadius > 48 {
+				tileRadius = 48
+			}
+			a.matchTileRadius = tileRadius
 
 			startVal := 0.0
 			if !open {
 				startVal = 1.0
 			}
+			a.matchCornerDur.Set(0)
+			if open {
+				a.matchCornerRadius.Set(tileRadius)
+			} else {
+				a.matchCornerRadius.Set(0)
+			}
 			progress := core.NewAnimatedValue(cx, startVal)
 			easing := core.BezierEasing(core.EaseOut)
+			interactive := !open && a.matchInteractive
+			if interactive {
+				a.matchProgressVal = progress
+				a.matchDynamicScope = cx
+			}
 
 			if open {
 				cx.StartAnimation(core.Timing(progress, 1, core.TimingConfig{
@@ -186,6 +349,31 @@ func (a *App) previewMatchOverlay(cx *core.Scope) core.Node {
 						}
 					})
 				})
+				a.scope.RequestAnimationFrame(func(time.Time) {
+					if a.matchGen != gen || cx.Disposed() {
+						return
+					}
+					a.matchCornerDur.Set(previewMatchOpenDuration)
+					a.matchCornerRadius.Set(0)
+				})
+			} else if interactive {
+				a.scope.RequestAnimationFrame(func(time.Time) {
+					if a.matchGen != gen || !a.matchInteractive || cx.Disposed() {
+						return
+					}
+					a.matchInteractiveReady = true
+					a.screen.Set(a.detailReturnScreen())
+					if a.matchPendingAction != 0 {
+						a.finishInteractiveBack(a.matchPendingAction > 0)
+						return
+					}
+					if a.matchPendingProgress > 0 {
+						hp := interactiveHeroProgress(a.matchPendingProgress)
+						progress.Set(hp)
+						a.matchCornerDur.Set(0)
+						a.matchCornerRadius.Set(tileRadius * core.Points(1.0-hp))
+					}
+				})
 			} else {
 				a.scope.RequestAnimationFrame(func(time.Time) {
 					if a.matchGen != gen || cx.Disposed() {
@@ -195,6 +383,8 @@ func (a *App) previewMatchOverlay(cx *core.Scope) core.Node {
 						a.matchApplied = true
 						a.matchApply()
 					}
+					a.matchCornerDur.Set(previewMatchCloseDuration)
+					a.matchCornerRadius.Set(tileRadius)
 					cx.StartAnimation(core.Timing(progress, 0, core.TimingConfig{
 						Duration: previewMatchCloseDuration,
 						Easing:   easing,
@@ -262,11 +452,24 @@ func (a *App) previewMatchOverlay(cx *core.Scope) core.Node {
 					},
 					core.View{
 						TestID: "preview.match",
-						Style: core.Style{
-							Position: core.Absolute, Left: core.Pt(dst.Origin.X), Top: core.Pt(dst.Origin.Y),
-							Width: core.Pt(dst.Size.Width), Height: core.Pt(dst.Size.Height),
-							Overflow: core.Hidden,
-							Animated: clipAnim,
+						StyleFunc: func() core.Style {
+							dur := a.matchCornerDur.Get()
+							var tr core.Transition
+							if dur > 0 {
+								tr = core.Transition{
+									Duration:   dur,
+									Easing:     core.EaseOut,
+									Properties: core.TransitionBorder,
+								}
+							}
+							return core.Style{
+								Position: core.Absolute, Left: core.Pt(dst.Origin.X), Top: core.Pt(dst.Origin.Y),
+								Width: core.Pt(dst.Size.Width), Height: core.Pt(dst.Size.Height),
+								CornerRadius: a.matchCornerRadius.Get(),
+								Overflow:     core.Hidden,
+								Animated:     clipAnim,
+								Transition:   tr,
+							}
 						},
 						Children: []core.Node{
 							core.View{
