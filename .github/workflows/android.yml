@@ -1,0 +1,79 @@
+name: Build Android APK
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "mobile-nsgo/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile-nsgo
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: mobile-nsgo/go.mod
+          cache-dependency-path: mobile-nsgo/go.sum
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-root-directory: mobile-nsgo/android
+
+      - name: Verify Go & NSGo Dependencies
+        run: |
+          go mod download
+          go tool nsgo check
+
+      - name: Build NSGo AAR (android_arm64)
+        run: ./scripts/build-aar.sh android_arm64
+
+      - name: Build Android APKs
+        working-directory: mobile-nsgo/android
+        run: ./gradlew assembleDebug assembleRelease
+
+      - name: Upload APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: |
+            mobile-nsgo/android/app/build/outputs/apk/debug/app-debug.apk
+            mobile-nsgo/android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            mobile-nsgo/android/app/build/outputs/apk/debug/app-debug.apk
+            mobile-nsgo/android/app/build/outputs/apk/release/app-release.apk
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
