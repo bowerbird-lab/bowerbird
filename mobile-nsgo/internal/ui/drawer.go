@@ -55,8 +55,8 @@ func (a *App) bottomDrawer(cx *core.Scope, s bottomDrawerSpec) core.Node {
 		headChildren := make([]core.Node, 0, 1+len(s.Header))
 		if s.Title != "" {
 			headChildren = append(headChildren, core.Text{
-				Content: s.Title,
-				Style:   nsui.TypeTitle.Merge(core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}),
+				Content:   s.Title,
+				Style:     nsui.TypeTitle.Merge(core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}),
 				StyleFunc: nsui.Colored(colors.Text),
 			})
 		}
@@ -76,7 +76,7 @@ func (a *App) bottomDrawer(cx *core.Scope, s bottomDrawerSpec) core.Node {
 			}
 		},
 		CloseOnSwipe:  false,
-		BackdropStyle: core.Style{Background: core.RGBA(0x000000, 0.42)},
+		BackdropStyle: core.Style{Background: themeRole(cx, "overlay")},
 		PopupStyleFunc: func() core.Style {
 			safe := cx.Env().SafeArea()
 			maxH := cx.Env().Window().Height * 0.86
@@ -252,7 +252,7 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 			}
 			return core.Style{
 				Position: core.Absolute, Left: core.Pt(0), Top: core.Pt(0), Bottom: core.Pt(0),
-				Width: core.Pt(dw), Background: colors.Background(),
+				Width: core.Pt(dw), Background: themeRole(cx, "sidebar"),
 				Padding: core.Edges{Top: safe.Top + 10, Bottom: safe.Bottom + 8, Left: safe.Left + 12, Right: 12},
 				Gap:     2, ZIndex: 10,
 				Transform:  core.Transform{TranslateX: tx},

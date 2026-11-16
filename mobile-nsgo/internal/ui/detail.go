@@ -31,9 +31,10 @@ func (a *App) openDetail(cx *core.Scope, flatIndex int, from string) {
 }
 
 func (a *App) detailPage(cx *core.Scope) core.Node {
-	colors := nsui.ColorsOf(cx)
-	white := func() core.Color { return core.RGB(0xffffff) }
-	whiteMuted := core.RGBA(0xffffff, 0.72)
+	preview := func() core.Color { return themeRole(cx, "preview") }
+	onPreview := func() core.Color { return themeRole(cx, "onBadge") }
+	onPreviewMuted := func() core.Color { return themeRole(cx, "onBadge").Faded(0.72) }
+	overlay := func() core.Color { return themeRole(cx, "badge") }
 
 	currentItem := func() (model.ItemSummary, int, int, bool) {
 		items := a.currentGalleryFor(a.detailFrom).Snapshot().Items
@@ -59,10 +60,10 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 				Style: core.Style{
 					Width: core.Pct(100), Height: core.Pct(100),
 					AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 10,
-					Background: core.RGB(0x000000),
+					Background: preview(),
 				},
 				Children: []core.Node{
-					core.Text{Content: "素材已不在当前列表", Style: nsui.TypeBody.Merge(core.Style{Color: whiteMuted})},
+					core.Text{Content: "素材已不在当前列表", Style: nsui.TypeBody.Merge(core.Style{Color: onPreviewMuted()})},
 					nsui.Button{Text: "返回", Variant: nsui.ButtonSecondary, OnPress: func() { a.backFromDetail() }},
 				},
 			}
@@ -276,31 +277,31 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 								Left:   safe.Left + 8,
 								Right:  safe.Right + 8,
 							},
-							Background: core.RGBA(0x000000, 0.64),
+							Background: overlay(),
 							ZIndex:     20,
 						}
 					},
 					Children: []core.Node{
-						nsui.IconButton{Icon: lucide.ArrowLeft, Label: "返回", Size: 36, IconSize: 20, Tint: white,
+						nsui.IconButton{Icon: lucide.ArrowLeft, Label: "返回", Size: 36, IconSize: 20, Tint: onPreview,
 							OnPress: func() { a.backFromDetail() }, TestID: "detail.back"},
 						core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 1}, Children: []core.Node{
 							core.Text{Content: item.DisplayName(), MaxLines: 1,
-								Style: nsui.TypeBody.Merge(core.Style{Color: white()})},
+								Style: nsui.TypeBody.Merge(core.Style{Color: onPreview()})},
 							core.Text{Content: itoa(index+1) + " / " + itoa(total),
-								Style: nsui.TypeCaption.Merge(core.Style{Color: whiteMuted})},
+								Style: nsui.TypeCaption.Merge(core.Style{Color: onPreviewMuted()})},
 						}},
-						nsui.IconButton{Icon: lucide.Info, Label: "信息", Size: 36, IconSize: 19, Tint: white,
+						nsui.IconButton{Icon: lucide.Info, Label: "信息", Size: 36, IconSize: 19, Tint: onPreview,
 							OnPress: func() {
 								a.ensureItemDetail(cx, item.ID)
 								a.metaOpen.Set(true)
 							}, TestID: "detail.meta"},
-						nsui.IconButton{Icon: lucide.Copy, Label: "复制", Size: 36, IconSize: 19, Tint: white,
+						nsui.IconButton{Icon: lucide.Copy, Label: "复制", Size: 36, IconSize: 19, Tint: onPreview,
 							OnPress: func() { a.copyItemContent(cx, item) }, TestID: "detail.copy"},
-						nsui.IconButton{Icon: lucide.Download, Label: "下载", Size: 36, IconSize: 19, Tint: white,
+						nsui.IconButton{Icon: lucide.Download, Label: "下载", Size: 36, IconSize: 19, Tint: onPreview,
 							OnPress: func() { a.exportItem(cx, item, false) }, TestID: "detail.download"},
-						nsui.IconButton{Icon: lucide.Share2, Label: "分享", Size: 36, IconSize: 19, Tint: white,
+						nsui.IconButton{Icon: lucide.Share2, Label: "分享", Size: 36, IconSize: 19, Tint: onPreview,
 							OnPress: func() { a.exportItem(cx, item, true) }, TestID: "detail.share"},
-						nsui.IconButton{Icon: lucide.Trash, Label: "删除", Size: 36, IconSize: 19, Tint: white,
+						nsui.IconButton{Icon: lucide.Trash, Label: "删除", Size: 36, IconSize: 19, Tint: onPreview,
 							OnPress: func() {
 								a.quickDelTarget = item
 								a.confirmDel.Set(true)
@@ -310,11 +311,10 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 			},
 		}
 
-		_ = colors
 		return core.View{
 			Style: core.Style{
 				Width: core.Pct(100), Height: core.Pct(100),
-				Background: core.RGB(0x000000),
+				Background: preview(),
 				Overflow:   core.Hidden,
 			},
 			Children: []core.Node{
@@ -328,8 +328,8 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 }
 
 func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Node {
-	white := core.RGB(0xffffff)
-	muted := core.RGBA(0xffffff, 0.72)
+	white := themeRole(cx, "onBadge")
+	muted := themeRole(cx, "onBadge").Faded(0.72)
 	original := a.client.OriginalURL(item.ID)
 	if item.IsVideo() {
 		if msg := a.videoError.Get(); msg != "" {

@@ -36,7 +36,10 @@ class MainActivity : Activity() {
         intake = ShareIntake(this)
         app = NsgoView(this)
         app.setStorageDirectory(filesDir)
-        app.setParams(mapOf("deviceName" to (Build.MODEL ?: "Android")))
+        app.setParams(mapOf(
+            "deviceName" to (Build.MODEL ?: "Android"),
+            "systemAccent" to systemAccentHex(),
+        ))
         app.setErrorListener { message -> android.util.Log.e("bowerbird", message) }
         app.registerComponent("gallery_grid") { ctx, events -> GalleryGridComponent(ctx, events) }
         installHandlers()
@@ -46,6 +49,21 @@ class MainActivity : Activity() {
             if (saved) app.send("share.available", null)
         }
         intent?.data?.takeIf { it.scheme == "bowerbird" }?.let { app.send("openUrl", it.toString()) }
+    }
+
+    /**
+     * Reads the platform's accent colour so the app's "follow system accent"
+     * setting can use the same idea as the desktop client. Empty when the OS
+     * does not expose one.
+     */
+    private fun systemAccentHex(): String {
+        if (Build.VERSION.SDK_INT < 31) return ""
+        return runCatching {
+            val id = resources.getIdentifier("system_accent1_500", "color", "android")
+            if (id == 0) return ""
+            val color = resources.getColor(id, theme)
+            String.format("#%06X", 0xFFFFFF and color)
+        }.getOrDefault("")
     }
 
     @Suppress("DEPRECATION")

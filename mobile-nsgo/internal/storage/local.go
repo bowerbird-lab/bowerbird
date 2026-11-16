@@ -655,3 +655,65 @@ func (l *Local) MarkMigration(step string, run func() error) (bool, error) {
 	m.UpdatedAt = time.Now().UnixMilli()
 	return true, l.store.Save("migration.json", m, privateFile)
 }
+
+// Preferences is the app's local appearance settings. It mirrors the desktop's
+// theme preferences: one colour mode and one light and dark theme ID.
+type Preferences struct {
+	Version      int    `json:"version"`
+	ThemeMode    string `json:"themeMode"` // "system", "light" or "dark"
+	LightTheme   string `json:"lightTheme"`
+	DarkTheme    string `json:"darkTheme"`
+	SystemAccent bool   `json:"systemAccent"`
+}
+
+// PreferencesVersion is the current preferences document version.
+const PreferencesVersion = 1
+
+// DefaultPreferences are the values a fresh install and a corrupt document
+// fall back to.
+func DefaultPreferences() Preferences {
+	return Preferences{
+		Version:      PreferencesVersion,
+		ThemeMode:    "system",
+		LightTheme:   "default-light",
+		DarkTheme:    "default-dark",
+		SystemAccent: true,
+	}
+}
+
+// LoadPreferences returns the saved preferences, repaired to the defaults when
+// the file is missing or carries a value the app cannot use.
+func (l *Local) LoadPreferences() (Preferences, error) {
+	prefs := DefaultPreferences()
+	found, err := l.store.Load("preferences.json", &prefs)
+	if !found || err != nil {
+		return DefaultPreferences(), err
+	}
+	return prefs.Normalize(), nil
+}
+
+// SavePreferences writes the appearance settings atomically.
+func (l *Local) SavePreferences(prefs Preferences) error {
+	prefs = prefs.Normalize()
+	return l.store.Save("preferences.json", prefs, privateFile)
+}
+
+// Normalize fills missing values and rejects an unknown colour mode.
+func (p Preferences) Normalize() Preferences {
+	def := DefaultPreferences()
+	if p.Version == 0 {
+		p.Version = PreferencesVersion
+	}
+	switch p.ThemeMode {
+	case "system", "light", "dark":
+	default:
+		p.ThemeMode = def.ThemeMode
+	}
+	if strings.TrimSpace(p.LightTheme) == "" {
+		p.LightTheme = def.LightTheme
+	}
+	if strings.TrimSpace(p.DarkTheme) == "" {
+		p.DarkTheme = def.DarkTheme
+	}
+	return p
+}

@@ -4,10 +4,24 @@ This module is the replacement mobile client. It talks to the existing desktop
 `/api/v1` HTTP + WebSocket API and runs as an NSGo Go app inside a small Kotlin
 Android host.
 
-Status: **P0 scaffolding + the first vertical slice**. Pairing, gallery paging,
-search, detail, download/share/delete are implemented; inbox, multi-select,
-QR scanning, library switching and the full data migration are next. See
-`reports/移动端NSGo实施任务计划.md`.
+Status: **P0–P5 vertical slices implemented**. Pairing, gallery paging,
+search, detail, download/share/delete, inbox, multi-select, QR scanning,
+library switching, appearance settings and desktop-compatible themes are in
+place. See `reports/移动端NSGo实施任务计划.md`.
+
+## Appearance
+
+The settings screen is reachable from the gallery "更多" sheet and from the
+connect screen. It offers system/light/dark mode, separate light and dark theme
+variants, an optional Android system accent, and grid density.
+
+Colour themes use the desktop schema, so `internal/theme/presets` can be copied
+as-is. On the phone, use "导入主题" to pick a `*-light.json` / `*-dark.json` desktop
+theme file, or put files in `<app data>/themes` and press "重新读取". Built-ins
+(`default-light`, `default-dark`, `sand-light`, `midnight-dark`) cannot be
+replaced. Mobile adds
+one optional `success` token; desktop files without it inherit it from the
+matching built-in theme.
 
 ## Layout
 
@@ -17,10 +31,11 @@ nsgo.yaml               // app id com.bowerbird.mobile, Android permissions
 internal/model          // per-endpoint DTOs
 internal/query          // query-string builder + legacy fallback capability
 internal/transport      // HTTP, errors, query/items fallback, upload/download, WS
-internal/storage        // atomic versioned JSON: session, history, usage, inbox, tags
-internal/platform       // host-channel contracts: secure store, discovery, share intake
+internal/storage        // atomic versioned JSON: session, history, usage, inbox, tags, preferences
+internal/theme          // desktop-compatible colour themes (built-in presets + user JSON files)
+internal/platform       // host-channel contracts: secure store, discovery, share intake, system accent
 internal/app            // session manager, gallery generations, event classification
-internal/ui             // connect, gallery, search, detail, inbox placeholder
+internal/ui             // connect, gallery, search, detail, inbox, settings & theme pickers
 android/                // Kotlin host: Keystore, NSD, share intake, deep links
 ```
 

@@ -185,3 +185,32 @@ func TestMigrationStepsAreIdempotentAndMigrateLegacyFlutterData(t *testing.T) {
 		t.Fatalf("migration state = %+v", m)
 	}
 }
+
+func TestPreferencesDefaultsNormalizeAndRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	local := NewLocal(dir)
+	prefs, err := local.LoadPreferences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefs != DefaultPreferences() {
+		t.Fatalf("fresh preferences = %+v", prefs)
+	}
+
+	want := Preferences{ThemeMode: "dark", LightTheme: "sand-light", DarkTheme: "midnight-dark", SystemAccent: false}
+	if err := local.SavePreferences(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := local.LoadPreferences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ThemeMode != want.ThemeMode || got.LightTheme != want.LightTheme || got.DarkTheme != want.DarkTheme || got.SystemAccent != want.SystemAccent || got.Version != PreferencesVersion {
+		t.Fatalf("loaded preferences = %+v", got)
+	}
+
+	bad := Preferences{ThemeMode: "sepia", LightTheme: "", DarkTheme: ""}.Normalize()
+	if bad.ThemeMode != "system" || bad.LightTheme != "default-light" || bad.DarkTheme != "default-dark" {
+		t.Fatalf("normalized = %+v", bad)
+	}
+}

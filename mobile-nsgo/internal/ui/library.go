@@ -95,6 +95,10 @@ func (a *App) menuDialog(cx *core.Scope) core.Node {
 						a.emptyTrashOpen.Set(true)
 					}))
 				}
+				items = append(items, row(lucide.Settings, "设置", "", false, func() {
+					a.menuOpen.Set(false)
+					a.openSettings(screenGallery)
+				}))
 				items = append(items, row(lucide.LogOut, "断开连接", "", true, func() {
 					a.menuOpen.Set(false)
 					a.confirmDisc.Set(true)

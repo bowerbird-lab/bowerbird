@@ -7,6 +7,7 @@ import (
 
 	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
+	"github.com/nsgo-dev/nsgo/icons/lucide"
 	nsui "github.com/nsgo-dev/nsgo/ui"
 
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/app"
@@ -30,9 +31,13 @@ func (a *App) connect(cx *core.Scope) core.Node {
 			core.View{
 				Style: core.Style{Width: core.Pct(100), Gap: 14, Padding: core.Edges{Top: 32, Bottom: 24}},
 				Children: []core.Node{
-					core.View{Style: core.Style{Gap: 4}, Children: []core.Node{
-						core.Text{Content: "Bowerbird", Style: nsui.TypeHeading, StyleFunc: nsui.Colored(colors.Text)},
-						core.Text{Content: "连接电脑上的素材库", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Muted)},
+					core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{
+						core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 4}, Children: []core.Node{
+							core.Text{Content: "Bowerbird", Style: nsui.TypeHeading, StyleFunc: nsui.Colored(colors.Text)},
+							core.Text{Content: "连接电脑上的素材库", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Muted)},
+						}},
+						nsui.IconButton{Icon: lucide.Settings, Label: "设置", Size: 38, IconSize: 20,
+							OnPress: func() { a.openSettings(screenConnect) }, TestID: "connect.settings"},
 					}},
 					core.Show{When: func() bool { return a.legacyNotice.Get() != "" }, Then: func(cx *core.Scope) core.Node {
 						return core.View{

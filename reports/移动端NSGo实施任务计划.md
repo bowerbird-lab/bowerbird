@@ -2,7 +2,7 @@
 
 > 日期：2026-11-15。基线：`bc3ae77`。
 > 依据：[移动端现有功能清单](移动端现有功能清单.md)、[移动端 NSGo 重写方案](移动端NSGo重写方案.md)。
-> 状态：**P1～P5 核心功能与原生扩展已全部落地，32 项自动化测试通过，并在 arm64 真机完成重点链路实测与 0 掉帧滚动优化**；详见 [移动端功能迁移验收表](移动端功能迁移验收表.md)。待办仅剩 P6 发布候选签名、双真机压测与 P7 Flutter 清理。
+> 状态：**P1～P5 核心功能与原生扩展已全部落地，45 项自动化测试通过，并在 arm64 真机完成重点链路实测与 0 掉帧滚动优化**；详见 [移动端功能迁移验收表](移动端功能迁移验收表.md)。待办仅剩 P6 发布候选签名、双真机压测与 P7 Flutter 清理。
 
 本文件把重写方案拆成可执行任务。每个任务都有产出、验收方式和状态，禁止把“有代码”直接标成“已验收”。功能编号（C/B/Q/M/G/I/R/U/E）沿用现有功能清单，作为最终验收编号。
 
@@ -88,7 +88,7 @@
 | P1-07 | 版本化原子 JSON、损坏文件旁置 | `storage.Store`、`Local` | ✅ |
 | P1-08 | 连接历史 10 条、使用历史 500 条、share_tags 2000 条上限 | `storage.Local` | ✅ |
 | P1-09 | 迁移状态机与幂等步骤 | `storage.MarkMigration` | ✅ |
-| P1-10 | 主题、颜色、通用空态/错误条/确认框 | `internal/ui` | ✅ 初版 |
+| P1-10 | 主题、颜色、通用空态/错误条/确认框 | `internal/ui`、`internal/theme` | ✅ 电脑端同套主题 + 设置页 |
 | P1-11 | 宿主 Keystore secure.get/set/delete | `android/.../SecurePrefs.kt` | ✅ |
 | P1-12 | 把 token 从 `session.json` 移入 SecureStore，JSON 只留非敏感字段 | `SessionManager`、`Local` | ✅ |
 | P1-13 | 旧 secure storage 格式兼容读取器 | `platform` + 迁移器 | ⬜ |
@@ -202,7 +202,7 @@
 | P6-05 | 性能对照：首屏、滚动 p50/p95、内存、100MB 传输峰值、包体 | 性能报告 | ⬜ |
 | P6-06 | release keystore、versionCode、ABI、产物命名 | CI/签名说明 | ⬜ |
 | P6-07 | CI 干净构建 AAR + APK | workflow | ⬜ |
-| P6-08 | 旧 Dart 测试语义迁移（query/zoom/tags/theme/menu/fallback） | Go/NSGo 测试 | 🟡 query/fallback 已迁 |
+| P6-08 | 旧 Dart 测试语义迁移（query/zoom/tags/theme/menu/fallback） | Go/NSGo 测试 | 🟡 query/fallback/theme 已迁 |
 | P6-09 | 应急构建与回滚说明 | 发布说明 | ⬜ |
 
 **发布候选门槛**：P6-01 无未解释缺口；P6-02～P6-05 达标；P6-06/07 可复现。

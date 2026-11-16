@@ -13,6 +13,7 @@ import (
 	appstate "github.com/owocc/bowerbird/mobile-nsgo/internal/app"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/query"
+	apptheme "github.com/owocc/bowerbird/mobile-nsgo/internal/theme"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/transport"
 )
 
@@ -29,23 +30,10 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 	a.post(func() { a.ensureLoaded(cx) })
 
 	// Floating simplified header (matches Flutter GalleryHeader + HeaderActionPill)
-	floatingHeader := core.View{
-		StyleFunc: func() core.Style {
-			safe := cx.Env().SafeArea()
-			return core.Style{
-				Position: core.Absolute, Top: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0),
-				Padding: core.Edges{
-					Top:    safe.Top + 6,
-					Bottom: 10,
-					Left:   safe.Left + 12,
-					Right:  safe.Right + 12,
-				},
-				Gradients: []core.Gradient{
-					core.LinearGradient(180, colors.Background(), nsui.Alpha(colors.Background(), 0)),
-				},
-				ZIndex: 12,
-			}
-		},
+	floatingHeader := a.appHeader(cx, appHeaderSpec{
+		Floating:      true,
+		InsetSafeArea: true,
+		TestID:        "gallery.header",
 		Children: []core.Node{
 			core.Show{
 				When: func() bool { return a.multiSelect.Get() },
@@ -170,7 +158,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 				},
 			},
 		},
-	}
+	})
 
 	bannerStack := core.View{
 		StyleFunc: func() core.Style {
@@ -284,7 +272,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 			return core.View{
 				Style: core.Style{
 					Position: core.Absolute, Top: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0),
-					Background: core.RGBA(0x000000, 0.28), ZIndex: 20,
+					Background: themeRole(cx, "overlay"), ZIndex: 20,
 				},
 				OnPress:       func(core.PressEvent) { a.drawerOpen.Set(false) },
 				PanActivation: core.PanActivation{ActiveOffsetX: 14, FailOffsetY: 16},
@@ -386,9 +374,20 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 				topDp = 4
 				bottomDp = 24
 			}
+			themeColors := make(map[string]any, 12)
+			palette := cx.Palette()
+			for _, name := range []string{
+				"background", "surface", "surfaceAlt", "inset", "border", "text", "textMuted",
+				"faint", "accent", "accentFill", "onAccent", "badge", "onBadge", "success", "overlay",
+			} {
+				if c, ok := palette.Color(name); ok {
+					themeColors[name] = apptheme.FormatColor(c)
+				}
+			}
 			return map[string]any{
 				"cols":          a.gridCols.Get(),
 				"isDark":        cx.Env().Dark(),
+				"theme":         themeColors,
 				"refreshing":    snap.Loading,
 				"emptyText":     emptyText,
 				"scrollTopSeq":  scrollSeq,
@@ -695,23 +694,23 @@ func (a *App) slotTile(cx *core.Scope, slotAt func() (TileSlot, bool), from stri
 						core.Show{When: func() bool { return badgeText() != "" }, Then: func(cx *core.Scope) core.Node {
 							return core.View{
 								Style: core.Style{Position: core.Absolute, Right: core.Pt(5), Top: core.Pt(5),
-									Padding: core.Symmetric(2, 5), CornerRadius: 4, Background: core.RGBA(0x000000, 0.62)},
+									Padding: core.Symmetric(2, 5), CornerRadius: 4, Background: themeRole(cx, "badge")},
 								Children: []core.Node{core.Text{ContentFunc: badgeText,
-									Style: core.Style{FontSize: 10, LineHeight: 13, Color: core.RGBA(0xffffff, 0.95)}}},
+									Style: core.Style{FontSize: 10, LineHeight: 13, Color: themeRole(cx, "onBadge")}}},
 							}
 						}},
 						core.Show{When: isShareMarked, Then: func(cx *core.Scope) core.Node {
 							return core.View{
 								Style: core.Style{Position: core.Absolute, Left: core.Pt(5), Bottom: core.Pt(5),
-									Padding: core.Symmetric(2, 5), CornerRadius: 4, Background: core.RGBA(0x16a34a, 0.85)},
+									Padding: core.Symmetric(2, 5), CornerRadius: 4, Background: themeRole(cx, "success")},
 								Children: []core.Node{core.Text{Content: "分享",
-									Style: core.Style{FontSize: 9, LineHeight: 12, Color: core.RGBA(0xffffff, 0.98)}}},
+									Style: core.Style{FontSize: 9, LineHeight: 12, Color: themeRole(cx, "onBadge")}}},
 							}
 						}},
 						core.Show{When: isSelected, Then: func(cx *core.Scope) core.Node {
 							return core.View{
 								Style: core.Style{Position: core.Absolute, Top: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0),
-									Background: core.RGBA(0x000000, 0.36), AlignItems: core.AlignEnd, JustifyContent: core.JustifyStart, Padding: core.All(5)},
+									Background: themeRole(cx, "overlay"), AlignItems: core.AlignEnd, JustifyContent: core.JustifyStart, Padding: core.All(5)},
 								Children: []core.Node{
 									core.View{
 										Style: core.Style{Width: core.Pt(20), Height: core.Pt(20), CornerRadius: 10,
@@ -839,8 +838,8 @@ func (a *App) quickPreviewSheet(cx *core.Scope) core.Node {
 				}
 				actionBtn := func(label string, onPress func()) core.Node {
 					return core.View{
-						Style:   core.Style{Width: core.Pct(100), Padding: core.Symmetric(11, 12), CornerRadius: 8, Background: colors.Surface()},
-						OnPress: func(core.PressEvent) { onPress() },
+						Style:    core.Style{Width: core.Pct(100), Padding: core.Symmetric(11, 12), CornerRadius: 8, Background: colors.Surface()},
+						OnPress:  func(core.PressEvent) { onPress() },
 						Children: []core.Node{core.Text{Content: label, Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})}},
 					}
 				}

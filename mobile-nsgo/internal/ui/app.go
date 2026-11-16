@@ -4,6 +4,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/platform"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/query"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/storage"
+	apptheme "github.com/owocc/bowerbird/mobile-nsgo/internal/theme"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/transport"
 )
 
@@ -26,11 +28,12 @@ const maxClipboardFileBytes = 500_000_000
 
 // Screens.
 const (
-	screenConnect = "connect"
-	screenGallery = "gallery"
-	screenSearch  = "search"
-	screenDetail  = "detail"
-	screenInbox   = "inbox"
+	screenConnect  = "connect"
+	screenGallery  = "gallery"
+	screenSearch   = "search"
+	screenDetail   = "detail"
+	screenInbox    = "inbox"
+	screenSettings = "settings"
 )
 
 // App is the root component's state.
@@ -134,6 +137,18 @@ type App struct {
 	shareTagIDs   map[string]bool
 	shareTagHexes map[string]bool
 
+	// Appearance & settings
+	settingsMode         *core.Signal[string]
+	settingsLightTheme   *core.Signal[string]
+	settingsDarkTheme    *core.Signal[string]
+	settingsSystemAccent *core.Signal[bool]
+	settingsThemeOpen    *core.Signal[bool]
+	settingsThemePick    apptheme.Appearance
+	settingsBackScreen   string
+	themes               []*apptheme.Theme
+	themeIndex           map[string]*apptheme.Theme
+	systemAccent         core.Color
+
 	// Connect screen
 	screen        *core.Signal[string]
 	rev           *core.Signal[int]
@@ -177,77 +192,90 @@ func Root(cx *core.Scope) core.Node {
 }
 
 func rootWithDir(cx *core.Scope, dataDir string) core.Node {
+	local := storage.NewLocal(dataDir)
+	prefs, prefsErr := local.LoadPreferences()
+	if prefsErr != nil {
+		log.Printf("[Settings] preferences unavailable, using defaults: %v", prefsErr)
+	}
 	a := &App{
-		local:              storage.NewLocal(dataDir),
-		screen:             core.NewSignal(cx, screenConnect),
-		rev:                core.NewSignal(cx, 0),
-		address:            core.NewSignal(cx, ""),
-		code:               core.NewSignal(cx, ""),
-		busy:               core.NewSignal(cx, false),
-		formErr:            core.NewSignal(cx, ""),
-		connectStatus:      core.NewSignal(cx, ""),
-		legacyNotice:       core.NewSignal(cx, ""),
-		pairOpen:           core.NewSignal(cx, false),
-		discovering:        core.NewSignal(cx, false),
-		searchText:         core.NewSignal(cx, ""),
-		searchType:         core.NewSignal(cx, ""),
-		searchOrient:       core.NewSignal(cx, ""),
-		libsOpen:           core.NewSignal(cx, false),
-		menuOpen:           core.NewSignal(cx, false),
-		confirmDisc:        core.NewSignal(cx, false),
-		libsBusy:           core.NewSignal(cx, false),
-		drawerOpen:         core.NewSignal(cx, false),
-		gridCols:           core.NewSignal(cx, 3),
-		galleryRev:         core.NewSignal(cx, 0),
-		galleryScrollSeq:   core.NewSignal(cx, 0),
-		searchScrollSeq:    core.NewSignal(cx, 0),
-		cachedTileSize:     118,
-		multiSelect:        core.NewSignal(cx, false),
-		selectedIDs:        map[string]bool{},
-		batchBusy:          core.NewSignal(cx, false),
-		batchTagOpen:       core.NewSignal(cx, false),
-		batchTagInput:      core.NewSignal(cx, ""),
-		batchFolderOpen:    core.NewSignal(cx, false),
-		batchDelOpen:       core.NewSignal(cx, false),
-		quickOpen:          core.NewSignal(cx, false),
-		restoreOpen:        core.NewSignal(cx, false),
-		emptyTrashOpen:     core.NewSignal(cx, false),
-		sharesBusy:         core.NewSignal(cx, false),
-		inboxBusy:          core.NewSignal(cx, false),
-		inboxStatus:        core.NewSignal(cx, ""),
-		inboxConfirmDel:    core.NewSignal(cx, false),
-		inboxTextOpen:      core.NewSignal(cx, false),
-		uploadStatus:       core.NewSignal(cx, ""),
-		filterOpen:         core.NewSignal(cx, false),
-		filterDraftType:    core.NewSignal(cx, ""),
-		filterDraftOrient:  core.NewSignal(cx, ""),
-		filterDraftSize:    core.NewSignal(cx, ""),
-		filterDraftRating:  core.NewSignal(cx, 0),
-		filterDraftHasURL:  core.NewSignal(cx, ""),
-		filterDraftHasNote: core.NewSignal(cx, ""),
-		filterDraftTag:     core.NewSignal(cx, ""),
-		filterDraftColor:   core.NewSignal(cx, ""),
-		filterDraftFolder:  core.NewSignal(cx, ""),
-		galleryRef:         &core.Ref{},
-		searchRef:          &core.Ref{},
-		detailIndex:        core.NewSignal(cx, 0),
-		detailChrome:       core.NewSignal(cx, false),
-		metaOpen:           core.NewSignal(cx, false),
-		confirmDel:         core.NewSignal(cx, false),
-		videoPaused:        core.NewSignal(cx, false),
-		videoError:         core.NewSignal(cx, ""),
-		toast:              core.NewSignal(cx, ""),
-		sidebarView:        SidebarAll,
-		expandedFolders:    map[string]bool{},
-		shareTagIDs:        map[string]bool{},
-		shareTagHexes:      map[string]bool{},
-		detailCache:        map[string]model.ItemDetail{},
-		detailLoading:      map[string]bool{},
-		lastLifecycle:      core.LifecycleActive,
+		local:                local,
+		themes:               apptheme.Load(filepath.Join(dataDir, "themes")),
+		settingsMode:         core.NewSignal(cx, prefs.ThemeMode),
+		settingsLightTheme:   core.NewSignal(cx, prefs.LightTheme),
+		settingsDarkTheme:    core.NewSignal(cx, prefs.DarkTheme),
+		settingsSystemAccent: core.NewSignal(cx, prefs.SystemAccent),
+		settingsThemeOpen:    core.NewSignal(cx, false),
+		settingsThemePick:    apptheme.Light,
+		detailCache:          map[string]model.ItemDetail{},
+		detailLoading:        map[string]bool{},
+		lastLifecycle:        core.LifecycleActive,
+		screen:               core.NewSignal(cx, screenConnect),
+		rev:                  core.NewSignal(cx, 0),
+		address:              core.NewSignal(cx, ""),
+		code:                 core.NewSignal(cx, ""),
+		busy:                 core.NewSignal(cx, false),
+		formErr:              core.NewSignal(cx, ""),
+		connectStatus:        core.NewSignal(cx, ""),
+		legacyNotice:         core.NewSignal(cx, ""),
+		pairOpen:             core.NewSignal(cx, false),
+		discovering:          core.NewSignal(cx, false),
+		searchText:           core.NewSignal(cx, ""),
+		searchType:           core.NewSignal(cx, ""),
+		searchOrient:         core.NewSignal(cx, ""),
+		libsOpen:             core.NewSignal(cx, false),
+		menuOpen:             core.NewSignal(cx, false),
+		confirmDisc:          core.NewSignal(cx, false),
+		libsBusy:             core.NewSignal(cx, false),
+		drawerOpen:           core.NewSignal(cx, false),
+		gridCols:             core.NewSignal(cx, 3),
+		galleryRev:           core.NewSignal(cx, 0),
+		galleryScrollSeq:     core.NewSignal(cx, 0),
+		searchScrollSeq:      core.NewSignal(cx, 0),
+		cachedTileSize:       118,
+		multiSelect:          core.NewSignal(cx, false),
+		selectedIDs:          map[string]bool{},
+		batchBusy:            core.NewSignal(cx, false),
+		batchTagOpen:         core.NewSignal(cx, false),
+		batchTagInput:        core.NewSignal(cx, ""),
+		batchFolderOpen:      core.NewSignal(cx, false),
+		batchDelOpen:         core.NewSignal(cx, false),
+		quickOpen:            core.NewSignal(cx, false),
+		restoreOpen:          core.NewSignal(cx, false),
+		emptyTrashOpen:       core.NewSignal(cx, false),
+		sharesBusy:           core.NewSignal(cx, false),
+		inboxBusy:            core.NewSignal(cx, false),
+		inboxStatus:          core.NewSignal(cx, ""),
+		inboxConfirmDel:      core.NewSignal(cx, false),
+		inboxTextOpen:        core.NewSignal(cx, false),
+		uploadStatus:         core.NewSignal(cx, ""),
+		filterOpen:           core.NewSignal(cx, false),
+		filterDraftType:      core.NewSignal(cx, ""),
+		filterDraftOrient:    core.NewSignal(cx, ""),
+		filterDraftSize:      core.NewSignal(cx, ""),
+		filterDraftRating:    core.NewSignal(cx, 0),
+		filterDraftHasURL:    core.NewSignal(cx, ""),
+		filterDraftHasNote:   core.NewSignal(cx, ""),
+		filterDraftTag:       core.NewSignal(cx, ""),
+		filterDraftColor:     core.NewSignal(cx, ""),
+		filterDraftFolder:    core.NewSignal(cx, ""),
+		galleryRef:           &core.Ref{},
+		searchRef:            &core.Ref{},
+		detailIndex:          core.NewSignal(cx, 0),
+		detailChrome:         core.NewSignal(cx, false),
+		metaOpen:             core.NewSignal(cx, false),
+		confirmDel:           core.NewSignal(cx, false),
+		videoPaused:          core.NewSignal(cx, false),
+		videoError:           core.NewSignal(cx, ""),
+		toast:                core.NewSignal(cx, ""),
+		sidebarView:          SidebarAll,
+		expandedFolders:      map[string]bool{},
+		shareTagIDs:          map[string]bool{},
+		shareTagHexes:        map[string]bool{},
 	}
 	a.scope = cx
 	a.appCtx = cx.Context()
 	a.env = platform.HostEnv(cx)
+	a.setupTheme(cx)
 	a.client = transport.New(transport.Config{DeviceName: a.env.Device.Name})
 	a.session = app.NewSessionManager(a.client, a.local, a.env.Secure)
 	a.gallery = app.NewGallery()
@@ -255,6 +283,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 	a.inbox = app.NewInbox(a.local)
 	a.detailFrom = screenGallery
 	a.inboxBackScreen = screenGallery
+	a.settingsBackScreen = screenConnect
 
 	a.session.RestoreAsync(func(session *storage.Session, err error) {
 		a.post(func() {
@@ -324,8 +353,15 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		case a.inboxTextOpen.Get():
 			a.inboxTextOpen.Set(false)
 			return true
+		case a.settingsThemeOpen.Get():
+			a.settingsThemeOpen.Set(false)
+			return true
 		case a.multiSelect.Get():
 			a.exitMultiSelect()
+			return true
+		}
+		if a.screen.Get() == screenSettings {
+			a.closeSettings()
 			return true
 		}
 		switch a.screen.Get() {
@@ -411,7 +447,7 @@ func (a *App) Render(cx *core.Scope) core.Node {
 			if a.screen.Get() == screenDetail {
 				return core.Style{
 					Width: core.Pct(100), Height: core.Pct(100),
-					Background: core.RGB(0x000000), Color: core.RGB(0xffffff),
+					Background: themeRole(cx, "preview"), Color: themeRole(cx, "onBadge"),
 				}
 			}
 			if a.screen.Get() == screenGallery {
@@ -433,6 +469,7 @@ func (a *App) Render(cx *core.Scope) core.Node {
 			core.Show{When: func() bool { return a.screen.Get() == screenSearch }, Then: a.searchPage},
 			core.Show{When: func() bool { return a.screen.Get() == screenDetail }, Then: a.detailPage},
 			core.Show{When: func() bool { return a.screen.Get() == screenInbox }, Then: a.inboxPage},
+			core.Show{When: func() bool { return a.screen.Get() == screenSettings }, Then: a.settingsPage},
 			core.Show{When: func() bool { return a.toast.Get() != "" }, Then: func(cx *core.Scope) core.Node {
 				return core.View{
 					StyleFunc: func() core.Style {

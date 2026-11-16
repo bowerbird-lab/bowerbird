@@ -11,6 +11,7 @@ import (
 	"github.com/nsgo-dev/nsgo/nsgotest"
 
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
+	"github.com/owocc/bowerbird/mobile-nsgo/internal/storage"
 )
 
 func TestMain(m *testing.M) { nsgotest.Main(m) }
@@ -199,5 +200,62 @@ func TestDarkModeAppearanceUpdatesCleanly(t *testing.T) {
 	app.SetEnvironment(core.Environment{Dark: false})
 	if v := app.Find("id:connect.address"); v == nil {
 		t.Fatal("connect address missing after toggling light mode")
+	}
+}
+
+func TestSettingsScreenSelectsAndPersistsThemes(t *testing.T) {
+	dir := t.TempDir()
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return rootWithDir(cx, dir) }, nsgotest.Size(420, 900))
+
+	app.Press("id:connect.settings")
+	app.WaitFor("id:settings.header", 2*time.Second)
+	if v := app.Find("text:颜色模式"); v == nil {
+		t.Fatal("appearance card is missing")
+	}
+
+	app.Press("id:settings.mode >> text:深色")
+	app.WaitFor("id:settings.lightTheme", 2*time.Second)
+
+	app.Press("id:settings.lightTheme")
+	app.WaitFor("id:settings.theme.sand-light", 2*time.Second)
+	app.Press("id:settings.theme.sand-light")
+	app.WaitForGone("id:settings.themePicker", 2*time.Second)
+	app.FastForward(400 * time.Millisecond)
+
+	app.Press("id:settings.darkTheme")
+	app.WaitFor("id:settings.theme.midnight-dark", 2*time.Second)
+	app.Press("id:settings.theme.midnight-dark")
+	app.WaitForGone("id:settings.themePicker", 2*time.Second)
+	app.FastForward(400 * time.Millisecond)
+
+	prefs, err := storage.NewLocal(dir).LoadPreferences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefs.ThemeMode != "dark" || prefs.LightTheme != "sand-light" || prefs.DarkTheme != "midnight-dark" {
+		t.Fatalf("persisted preferences = %+v", prefs)
+	}
+
+	// The settings screen returns to the connect screen it was opened from.
+	app.Press("id:settings.header >> text:完成")
+	app.WaitFor("id:connect.address", 2*time.Second)
+	if app.Exists("id:settings.header") {
+		t.Fatal("settings stayed open after 完成")
+	}
+}
+
+func TestThemeSettingsResetAndReloadKeepDefaults(t *testing.T) {
+	dir := t.TempDir()
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return rootWithDir(cx, dir) }, nsgotest.Size(420, 900))
+	app.Press("id:connect.settings")
+	app.WaitFor("id:settings.themes.reset", 2*time.Second)
+	app.Press("id:settings.themes.reset")
+	app.Press("id:settings.themes.reload")
+	prefs, err := storage.NewLocal(dir).LoadPreferences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefs.ThemeMode != "system" || prefs.LightTheme != "default-light" || prefs.DarkTheme != "default-dark" {
+		t.Fatalf("preferences after reset = %+v", prefs)
 	}
 }

@@ -44,9 +44,29 @@ class GalleryGridComponent(
         val selected: Boolean
     )
 
+    /** Colours supplied by the Go theme; every tile, badge and header reads these. */
+    private data class ThemeColors(
+        val background: Int = Color.TRANSPARENT,
+        val surface: Int = Color.WHITE,
+        val surfaceAlt: Int = Color.parseColor("#F4F4F5"),
+        val border: Int = Color.parseColor("#E4E4E7"),
+        val text: Int = Color.parseColor("#18181B"),
+        val textMuted: Int = Color.parseColor("#71717A"),
+        val faint: Int = Color.parseColor("#9A9AA3"),
+        val accent: Int = Color.parseColor("#2563EB"),
+        val onAccent: Int = Color.WHITE,
+        val badge: Int = Color.argb(158, 0, 0, 0),
+        val onBadge: Int = Color.WHITE,
+        val success: Int = Color.parseColor("#15803D"),
+        val overlay: Int = Color.argb(89, 0, 0, 0)
+    )
+
     private val density = context.resources.displayMetrics.density
     private var spanCount = 3
     private var isDark = false
+    private var theme = ThemeColors()
+    private var themeVersion = 0
+    private var hasThemeColors = false
     private var lastScrollTopSeq = 0
     private var topInsetDp = 0
     private var bottomInsetDp = 24
@@ -183,14 +203,47 @@ class GalleryGridComponent(
                 val dark = value == true
                 if (dark != isDark) {
                     isDark = dark
-                    emptyView.setTextColor(if (isDark) Color.parseColor("#A1A1AA") else Color.parseColor("#71717A"))
-                    swipeRefresh.setProgressBackgroundColorSchemeColor(
-                        if (isDark) Color.parseColor("#27272A") else Color.WHITE
-                    )
-                    swipeRefresh.setColorSchemeColors(
-                        if (isDark) Color.parseColor("#60A5FA") else Color.parseColor("#2563EB")
-                    )
-                    adapter.notifyDataSetChanged()
+                    if (!hasThemeColors) {
+                        theme = if (isDark) {
+                            ThemeColors(background = Color.parseColor("#141416"), surface = Color.parseColor("#232327"),
+                                surfaceAlt = Color.parseColor("#2C2C31"), border = Color.parseColor("#3F3F46"),
+                                text = Color.parseColor("#F4F4F5"), textMuted = Color.parseColor("#A1A1AA"),
+                                faint = Color.parseColor("#71717A"), accent = Color.parseColor("#6EA8FF"),
+                                onAccent = Color.parseColor("#0B1220"), badge = Color.argb(158, 0, 0, 0),
+                                onBadge = Color.WHITE, success = Color.parseColor("#16A34A"),
+                                overlay = Color.argb(89, 0, 0, 0))
+                        } else {
+                            ThemeColors()
+                        }
+                        applyTheme()
+                    } else {
+                        adapter.notifyDataSetChanged()
+                    }
+                }
+            }
+            "theme" -> {
+                val map = value as? Map<*, *> ?: return
+                val next = ThemeColors(
+                    background = colorOf(map, "background", theme.background),
+                    surface = colorOf(map, "surface", theme.surface),
+                    surfaceAlt = colorOf(map, "surfaceAlt", colorOf(map, "inset", theme.surfaceAlt)),
+                    border = colorOf(map, "border", theme.border),
+                    text = colorOf(map, "text", theme.text),
+                    textMuted = colorOf(map, "textMuted", theme.textMuted),
+                    faint = colorOf(map, "faint", theme.faint),
+                    accent = colorOf(map, "accent", colorOf(map, "accentFill", theme.accent)),
+                    onAccent = colorOf(map, "onAccent", theme.onAccent),
+                    badge = colorOf(map, "badge", theme.badge),
+                    onBadge = colorOf(map, "onBadge", theme.onBadge),
+                    success = colorOf(map, "success", theme.success),
+                    overlay = colorOf(map, "overlay", theme.overlay)
+                )
+                // Props are rebuilt every frame; only a real palette change
+                // should rebind the whole visible grid.
+                if (next != theme || !hasThemeColors) {
+                    theme = next
+                    hasThemeColors = true
+                    applyTheme()
                 }
             }
             "refreshing" -> {
@@ -259,6 +312,25 @@ class GalleryGridComponent(
         }
     }
 
+    private fun colorOf(map: Map<*, *>, key: String, fallback: Int): Int {
+        return try {
+            val raw = map[key] as? String ?: return fallback
+            Color.parseColor(raw)
+        } catch (_: IllegalArgumentException) {
+            fallback
+        }
+    }
+
+    private fun applyTheme() {
+        themeVersion++
+        swipeRefresh.setBackgroundColor(theme.background)
+        recyclerView.setBackgroundColor(theme.background)
+        emptyView.setTextColor(theme.textMuted)
+        swipeRefresh.setProgressBackgroundColorSchemeColor(theme.surface)
+        swipeRefresh.setColorSchemeColors(theme.accent)
+        adapter.notifyDataSetChanged()
+    }
+
     private fun applyInsets() {
         val pad = dp(8)
         recyclerView.setPadding(pad, dp(topInsetDp), pad, dp(bottomInsetDp))
@@ -268,7 +340,7 @@ class GalleryGridComponent(
     private fun updateEmptyVisibility() {
         val showEmpty = items.isEmpty() && emptyMessage.isNotBlank()
         emptyView.visibility = if (showEmpty) View.VISIBLE else View.GONE
-        emptyView.setTextColor(if (isDark) Color.parseColor("#A1A1AA") else Color.parseColor("#71717A"))
+        emptyView.setTextColor(theme.textMuted)
     }
 
     private fun dp(v: Int): Int = (v * density).toInt()
@@ -364,10 +436,10 @@ class GalleryGridComponent(
         val typeBadge = TextView(context).apply {
             id = ID_TILE_BADGE
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            setTextColor(Color.WHITE)
+            setTextColor(theme.onBadge)
             setPadding(dp(5), dp(1), dp(5), dp(1))
             background = GradientDrawable().apply {
-                setColor(Color.argb(160, 0, 0, 0))
+                setColor(theme.badge)
                 cornerRadius = dp(4).toFloat()
             }
             visibility = View.GONE
@@ -387,10 +459,10 @@ class GalleryGridComponent(
             id = ID_TILE_SHARE
             text = "分享"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
-            setTextColor(Color.WHITE)
+            setTextColor(theme.onBadge)
             setPadding(dp(5), dp(1), dp(5), dp(1))
             background = GradientDrawable().apply {
-                setColor(Color.argb(220, 22, 163, 74))
+                setColor(theme.success)
                 cornerRadius = dp(4).toFloat()
             }
             visibility = View.GONE
@@ -408,16 +480,17 @@ class GalleryGridComponent(
 
         val selectScrim = FrameLayout(context).apply {
             id = ID_TILE_SELECT
-            setBackgroundColor(Color.argb(96, 0, 0, 0))
+            setBackgroundColor(theme.overlay)
             visibility = View.GONE
             val check = TextView(context).apply {
+                id = ID_TILE_SELECT_CHECK
                 text = "✓"
-                setTextColor(Color.WHITE)
+                setTextColor(theme.onAccent)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 gravity = Gravity.CENTER
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#2563EB"))
+                    setColor(theme.accent)
                 }
             }
             addView(
@@ -444,9 +517,9 @@ class GalleryGridComponent(
 
         fun bind(entry: GridEntry) {
             titleView.text = entry.title
-            titleView.setTextColor(if (isDark) Color.parseColor("#F4F4F5") else Color.parseColor("#18181B"))
+            titleView.setTextColor(theme.text)
             countView.text = "${entry.count} 项"
-            countView.setTextColor(if (isDark) Color.parseColor("#A1A1AA") else Color.parseColor("#71717A"))
+            countView.setTextColor(theme.textMuted)
         }
     }
 
@@ -456,7 +529,7 @@ class GalleryGridComponent(
         private val share = root.findViewById<TextView>(ID_TILE_SHARE)
         private val selectOverlay = root.findViewById<View>(ID_TILE_SELECT)
         private var currentEntry: GridEntry? = null
-        private var boundDark: Boolean? = null
+        private var boundThemeVersion = -1
         private val bgDrawable = GradientDrawable().apply { cornerRadius = dp(8).toFloat() }
 
         init {
@@ -481,11 +554,21 @@ class GalleryGridComponent(
                 lp.height = cellSize
                 root.layoutParams = lp
             }
-            if (boundDark != isDark) {
-                boundDark = isDark
-                bgDrawable.setColor(if (isDark) Color.parseColor("#27272A") else Color.parseColor("#F4F4F5"))
-                bgDrawable.setStroke(1, if (isDark) Color.parseColor("#3F3F46") else Color.parseColor("#E4E4E7"))
+            if (boundThemeVersion != themeVersion) {
+                boundThemeVersion = themeVersion
+                bgDrawable.setColor(theme.surfaceAlt)
+                bgDrawable.setStroke(1, theme.border)
                 root.background = bgDrawable
+                badge.setTextColor(theme.onBadge)
+                (badge.background as? GradientDrawable)?.setColor(theme.badge)
+                share.setTextColor(theme.onBadge)
+                (share.background as? GradientDrawable)?.setColor(theme.success)
+                val check = selectOverlay.findViewById<TextView>(ID_TILE_SELECT_CHECK)
+                check?.setTextColor(theme.onAccent)
+                (check?.background as? GradientDrawable)?.setColor(theme.accent)
+                (selectOverlay.background as? android.graphics.drawable.ColorDrawable)?.let {
+                    selectOverlay.setBackgroundColor(theme.overlay)
+                }
             }
             ThumbLoader.load(context, image, entry.thumbUrl, cellSize)
 
@@ -509,5 +592,6 @@ class GalleryGridComponent(
         private const val ID_TILE_BADGE = 2002
         private const val ID_TILE_SHARE = 2003
         private const val ID_TILE_SELECT = 2004
+        private const val ID_TILE_SELECT_CHECK = 2005
     }
 }

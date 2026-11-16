@@ -110,9 +110,11 @@ type Env struct {
 	Media     MediaSaver
 	Migrator  LegacyMigrator
 	Device    Device
-	HasHost   bool
-	DataDir   string
-	CacheDir  string
+	// Accent is the system accent colour as #rrggbb, when the host provides one.
+	Accent   string
+	HasHost  bool
+	DataDir  string
+	CacheDir string
 }
 
 // ErrUnavailable is returned when the host has no implementation.
@@ -152,6 +154,7 @@ func HostEnv(cx *core.Scope) Env {
 	if name := stringParam(cx.HostParams(), "deviceName"); name != "" {
 		env.Device.Name = name
 	}
+	env.Accent = stringParam(cx.HostParams(), "systemAccent")
 	if env.HasHost {
 		env.Discovery = &hostDiscovery{cx: cx}
 		env.Secure = &hostSecure{cx: cx}
