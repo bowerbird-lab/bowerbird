@@ -729,18 +729,7 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 				TestID:           "settings.header",
 				Children: []core.Node{
 					core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
-						core.View{
-							TestID: "settings.back",
-							StyleFunc: func() core.Style {
-								return core.Style{
-									Width: core.Pt(42), Height: core.Pt(42), CornerRadius: 21,
-									AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
-									Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
-								}
-							},
-							OnPress:  func(core.PressEvent) { a.closeSettings() },
-							Children: []core.Node{nsui.Icon(lucide.ChevronLeft, 20, colors.Text)},
-						},
+						appCircleButton(colors, "settings.back", lucide.ChevronLeft, func(core.PressEvent) { a.closeSettings() }),
 						core.Text{Content: "设置", Role: core.RoleHeader,
 							Style:     nsui.TypeTitle.Merge(core.Style{FlexGrow: 1, TextAlign: core.TextAlignCenter}),
 							StyleFunc: nsui.Colored(colors.Text)},

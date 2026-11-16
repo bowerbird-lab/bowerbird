@@ -455,7 +455,7 @@ func (a *App) Render(cx *core.Scope) core.Node {
 					Background: themeRole(cx, "preview"), Color: themeRole(cx, "onBadge"),
 				}
 			}
-			if a.screen.Get() == screenGallery || a.screen.Get() == screenSettings {
+			if a.screen.Get() == screenGallery || a.screen.Get() == screenSettings || a.screen.Get() == screenSearch {
 				return core.Style{
 					Width: core.Pct(100), Height: core.Pct(100),
 					Background: colors.Background(), Color: colors.Text(),

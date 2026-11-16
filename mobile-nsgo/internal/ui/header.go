@@ -42,6 +42,23 @@ func safeSideInset(safe core.Edges) core.Points {
 	return max(safe.Left, safe.Right) + 12
 }
 
+// appCircleButton is the round surface button shared by the gallery menu and
+// page headers, keeping their size, shape and border identical.
+func appCircleButton(colors nsui.Colors, testID string, svg func() *core.SVG, onPress func(core.PressEvent)) core.Node {
+	return core.View{
+		TestID: testID,
+		StyleFunc: func() core.Style {
+			return core.Style{
+				Width: core.Pt(42), Height: core.Pt(42), CornerRadius: 21,
+				AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+				Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+			}
+		},
+		OnPress:  onPress,
+		Children: []core.Node{nsui.Icon(svg, 20, colors.Text)},
+	}
+}
+
 func (a *App) appHeader(cx *core.Scope, spec appHeaderSpec) core.Node {
 	colors := nsui.ColorsOf(cx)
 

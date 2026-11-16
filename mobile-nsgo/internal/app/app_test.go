@@ -36,6 +36,15 @@ func TestGalleryRejectsStaleGenerations(t *testing.T) {
 	}
 }
 
+func TestGalleryClearLeavesAnIdleEmptyState(t *testing.T) {
+	g := NewGallery()
+	g.Clear(query.Spec{}, model.SortDesc, 60)
+	snap := g.Snapshot()
+	if snap.Loading || snap.LoadedOnce || len(snap.Items) != 0 {
+		t.Fatalf("cleared snapshot = %+v", snap)
+	}
+}
+
 func TestGalleryPaginationDedupesAndStopsAtTotal(t *testing.T) {
 	g := NewGallery()
 	token := g.Reset(query.Spec{}, model.SortDesc, 2)

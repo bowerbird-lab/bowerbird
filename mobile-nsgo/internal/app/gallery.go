@@ -58,6 +58,17 @@ func (g *Gallery) Reset(spec query.Spec, sort string, limit int) uint64 {
 	return g.generation
 }
 
+// Clear resets to an empty, idle state for a page that waits for the user's
+// first query. Unlike Reset it does not mark the gallery as loading, so an
+// empty search page shows its prompt instead of a permanent spinner.
+func (g *Gallery) Clear(spec query.Spec, sort string, limit int) uint64 {
+	token := g.Reset(spec, sort, limit)
+	g.mu.Lock()
+	g.loading = false
+	g.mu.Unlock()
+	return token
+}
+
 // Invalidate bumps the generation without clearing data. Use it when the
 // library identity or session changed; the next Request uses a new token and
 // any in-flight reply is dropped.

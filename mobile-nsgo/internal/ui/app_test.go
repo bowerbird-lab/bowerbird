@@ -167,7 +167,7 @@ func TestPairingToGalleryDrawerFilterAndDetailFlow(t *testing.T) {
 	app.Press("id:gallery.search")
 	app.WaitFor("id:search.text", 2*time.Second)
 	app.Type("id:search.text", "sunset")
-	app.Press("id:search.submit")
+	app.Submit("id:search.text")
 	app.WaitFor("text:1 个结果", 2*time.Second)
 }
 

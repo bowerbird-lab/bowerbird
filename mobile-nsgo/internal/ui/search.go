@@ -2,9 +2,11 @@ package ui
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/nsgo-dev/nsgo/core"
+	"github.com/nsgo-dev/nsgo/icons/lucide"
 	nsui "github.com/nsgo-dev/nsgo/ui"
 
 	appstate "github.com/owocc/bowerbird/mobile-nsgo/internal/app"
@@ -19,7 +21,7 @@ func (a *App) openSearchPage() {
 	a.searchType.Set("")
 	a.searchOrient.Set("")
 	a.searchExtra = query.Spec{}
-	a.searchGallery.Reset(query.Spec{}, model.SortDesc, model.DefaultPageSize)
+	a.searchGallery.Clear(query.Spec{}, model.SortDesc, model.DefaultPageSize)
 	a.rebuildSearchRows()
 	a.bump()
 }
@@ -27,36 +29,36 @@ func (a *App) openSearchPage() {
 func (a *App) searchPage(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
 	_ = a.rev.Get()
-	header := core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6}, Children: []core.Node{
-		nsui.Button{Text: "返回", Variant: nsui.ButtonGhost, OnPress: func() {
-			a.detailFrom = screenGallery
-			a.screen.Set(screenGallery)
-		}},
-		nsui.Input{Value: func() string { return a.searchText.Get() }, OnChange: a.searchText.Set,
-			Placeholder: "搜索名称、标签、备注…", Style: core.Style{FlexGrow: 1}, OnSubmit: func(string) { a.applySearch(cx) }, TestID: "search.text"},
-		nsui.Button{Text: "搜索", OnPress: func() { a.applySearch(cx) }, TestID: "search.submit"},
-	}}
-	types, orientations, _ := query.Dims()
-	typeRow := core.View{Style: core.Style{Direction: core.Row, Gap: 6, Wrap: core.Wrap, AlignItems: core.AlignCenter}, Children: append(
-		append([]core.Node{
-			nsui.Button{Text: "更多筛选", Variant: nsui.ButtonSecondary, OnPress: func() { a.openFilterSheet("search") }, TestID: "search.filter"},
-		}, chips(cx, types, func() string { return a.searchType.Get() }, func(v string) {
-			if a.searchType.Get() == v {
-				a.searchType.Set("")
-			} else {
-				a.searchType.Set(v)
-			}
-			a.applySearch(cx)
-		})...),
-		chips(cx, orientations, func() string { return a.searchOrient.Get() }, func(v string) {
-			if a.searchOrient.Get() == v {
-				a.searchOrient.Set("")
-			} else {
-				a.searchOrient.Set(v)
-			}
-			a.applySearch(cx)
-		})...),
+	searchField := core.Input{
+		Value: func() string { return a.searchText.Get() }, OnChange: a.searchText.Set,
+		Placeholder: "搜索名称、标签、备注…", OnSubmit: func(string) { a.applySearch(cx) },
+		ReturnKeyType: core.ReturnKeySearch, TestID: "search.text",
+		Style: core.Style{
+			FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Height: core.Pt(42),
+			CornerRadius: 21, Padding: core.Symmetric(0, 16),
+			Background: colors.Field(), BorderWidth: 1, BorderColor: colors.FieldBorder(),
+			FontSize: 14, LineHeight: 18, Color: colors.Text(),
+			PlaceholderColor: colors.Faint(), CaretColor: colors.Accent(),
+			SelectionColor: cx.Palette().Selection,
+		},
 	}
+	header := a.appHeader(cx, appHeaderSpec{
+		Floating: true, InsetSafeArea: true, OmitLeftSafeArea: func() bool { return true },
+		TestID: "search.header",
+		Children: []core.Node{
+			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
+				appCircleButton(colors, "search.back", lucide.ChevronLeft, func(core.PressEvent) {
+					a.detailFrom = screenGallery
+					a.screen.Set(screenGallery)
+				}),
+				searchField,
+			}},
+		},
+	})
+	filterRow := core.Dynamic(func(cx *core.Scope) core.Node {
+		_ = a.rev.Get()
+		return a.searchFilterRow(cx)
+	})
 	var results core.Node
 	if a.env.HasHost {
 		results = a.nativeGridNode(cx, true)
@@ -84,25 +86,131 @@ func (a *App) searchPage(cx *core.Scope) core.Node {
 			Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
 		}
 	}
-	return core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, Gap: 8}, Children: []core.Node{
-		header, typeRow,
-		core.View{Style: core.Style{Direction: core.Row, JustifyContent: core.JustifySpaceBetween, AlignItems: core.AlignCenter}, Children: []core.Node{
-			core.Text{ContentFunc: func() string {
-				a.rev.Get()
-				return searchCount(a.searchGallery.Snapshot())
-			}, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
-			nsui.Button{Text: "重置", Variant: nsui.ButtonGhost, OnPress: func() {
-				a.searchText.Set("")
-				a.searchType.Set("")
-				a.searchOrient.Set("")
-				a.searchExtra = query.Spec{}
-				a.applySearch(cx)
+	return core.View{Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}, Children: []core.Node{
+		core.View{StyleFunc: func() core.Style {
+			safe := cx.Env().SafeArea()
+			pad := safeSideInset(safe)
+			return core.Style{
+				Width: core.Pct(100), Height: core.Pct(100), Gap: 8,
+				Padding: core.Edges{Top: safe.Top + 56, Bottom: safe.Bottom + 12, Left: pad, Right: pad},
+			}
+		}, Children: []core.Node{
+			filterRow,
+			core.View{Style: core.Style{Direction: core.Row, JustifyContent: core.JustifySpaceBetween, AlignItems: core.AlignCenter}, Children: []core.Node{
+				core.Text{ContentFunc: func() string {
+					a.rev.Get()
+					return searchCount(a.searchGallery.Snapshot())
+				}, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
+				nsui.Button{Text: "重置", Variant: nsui.ButtonGhost, OnPress: func() {
+					a.searchText.Set("")
+					a.searchType.Set("")
+					a.searchOrient.Set("")
+					a.searchExtra = query.Spec{}
+					a.applySearch(cx)
+				}},
 			}},
+			a.errorBanner(cx, func() error { a.rev.Get(); return a.searchGallery.Snapshot().Err }),
+			results,
 		}},
-		a.errorBanner(cx, func() error { a.rev.Get(); return a.searchGallery.Snapshot().Err }),
-		results,
+		header,
 		a.filterSheet(cx),
 	}}
+}
+
+// searchFilterRow is the compact filter entry point: one plus button, with
+// the filters the user picked shown as chips beside it. The filter sheet holds
+// every condition, so the search page no longer shows a chip for each value.
+func (a *App) searchFilterRow(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
+	children := []core.Node{core.View{
+		TestID: "search.filter", Label: "添加筛选条件",
+		StyleFunc: func() core.Style {
+			return core.Style{
+				Width: core.Pt(32), Height: core.Pt(32), CornerRadius: 16,
+				AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+				Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+			}
+		},
+		OnPress:  func(core.PressEvent) { a.openFilterSheet("search") },
+		Children: []core.Node{nsui.Icon(lucide.Plus, 18, colors.Text)},
+	}}
+	for _, label := range a.searchFilterLabels() {
+		label := label
+		children = append(children, core.View{
+			StyleFunc: func() core.Style {
+				return core.Style{
+					Padding: core.Symmetric(5, 11), CornerRadius: 999,
+					Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+				}
+			},
+			OnPress: func(core.PressEvent) { a.openFilterSheet("search") },
+			Children: []core.Node{core.Text{Content: label, StyleFunc: func() core.Style {
+				return core.Style{FontSize: 12, LineHeight: 16, Color: colors.Text()}
+			}}},
+		})
+	}
+	return core.View{Style: core.Style{Direction: core.Row, Gap: 6, Wrap: core.Wrap, AlignItems: core.AlignCenter}, Children: children}
+}
+
+func (a *App) searchFilterLabels() []string {
+	spec := a.searchSpec()
+	labels := make([]string, 0, 8)
+	switch spec.Type {
+	case "image":
+		labels = append(labels, "图片")
+	case "video":
+		labels = append(labels, "视频")
+	case "audio":
+		labels = append(labels, "音频")
+	}
+	switch spec.Orientation {
+	case "landscape":
+		labels = append(labels, "横图")
+	case "portrait":
+		labels = append(labels, "竖图")
+	case "square":
+		labels = append(labels, "方形")
+	}
+	switch spec.Size {
+	case "small":
+		labels = append(labels, "小文件")
+	case "medium":
+		labels = append(labels, "中文件")
+	case "large":
+		labels = append(labels, "大文件")
+	}
+	if spec.Rating > 0 {
+		labels = append(labels, strconv.Itoa(spec.Rating)+"★")
+	}
+	switch spec.HasURL {
+	case "has":
+		labels = append(labels, "有链接")
+	case "empty":
+		labels = append(labels, "无链接")
+	}
+	switch spec.HasNote {
+	case "has":
+		labels = append(labels, "有备注")
+	case "empty":
+		labels = append(labels, "无备注")
+	}
+	if spec.Tag != "" {
+		labels = append(labels, "标签："+spec.Tag)
+	}
+	if spec.Folder != "" {
+		name := spec.Folder
+		for _, f := range a.flattenAllFolders() {
+			if f.ID == spec.Folder {
+				name = f.Name
+				break
+			}
+		}
+		labels = append(labels, "文件夹："+name)
+	}
+	if spec.Color != "" {
+		labels = append(labels, "主色 "+spec.Color)
+	}
+	return labels
 }
 
 func chips(cx *core.Scope, values []string, selected func() string, set func(string)) []core.Node {
