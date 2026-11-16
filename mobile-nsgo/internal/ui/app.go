@@ -184,6 +184,22 @@ type App struct {
 	detailLoading map[string]bool
 	toast         *core.Signal[string]
 
+	// Shared-element preview: the thumbnail proxy travels from its tile
+	// into the full preview, and back, through a layout transition.
+	matchStage       *core.Signal[int]
+	matchDetail      *core.Signal[bool]
+	matchRev         *core.Signal[int]
+	matchFrom        core.Bounds
+	matchTo          core.Bounds
+	matchThumb       string
+	matchOriginal    string
+	matchOpenedIndex int
+	matchGen         int
+	matchAnimated    bool
+	matchApply       func()
+	matchApplied     bool
+	forceMatchAnim   bool
+
 	wsRunning     atomic.Bool
 	sharesRunning atomic.Bool
 	wsStop        atomic.Bool
@@ -270,6 +286,9 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		galleryRef:           &core.Ref{},
 		searchRef:            &core.Ref{},
 		detailIndex:          core.NewSignal(cx, 0),
+		matchStage:           core.NewSignal(cx, 0),
+		matchDetail:          core.NewSignal(cx, false),
+		matchRev:             core.NewSignal(cx, 0),
 		detailChrome:         core.NewSignal(cx, false),
 		metaOpen:             core.NewSignal(cx, false),
 		confirmDel:           core.NewSignal(cx, false),
@@ -314,84 +333,6 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 			a.address.Set(base)
 		}
 	}
-
-	cx.OnBackPress(func() bool {
-		switch {
-		case a.metaOpen.Get():
-			a.metaOpen.Set(false)
-			return true
-		case a.confirmDel.Get():
-			a.confirmDel.Set(false)
-			return true
-		case a.filterOpen.Get():
-			a.filterOpen.Set(false)
-			return true
-		case a.drawerOpen.Get():
-			a.setDrawerOpen(a.scope, false)
-			return true
-		case a.quickOpen.Get():
-			a.quickOpen.Set(false)
-			return true
-		case a.libsOpen.Get():
-			a.libsOpen.Set(false)
-			return true
-		case a.menuOpen.Get():
-			a.menuOpen.Set(false)
-			return true
-		case a.confirmDisc.Get():
-			a.confirmDisc.Set(false)
-			return true
-		case a.batchTagOpen.Get():
-			a.batchTagOpen.Set(false)
-			return true
-		case a.batchFolderOpen.Get():
-			a.batchFolderOpen.Set(false)
-			return true
-		case a.batchDelOpen.Get():
-			a.batchDelOpen.Set(false)
-			return true
-		case a.restoreOpen.Get():
-			a.restoreOpen.Set(false)
-			return true
-		case a.emptyTrashOpen.Get():
-			a.emptyTrashOpen.Set(false)
-			return true
-		case a.inboxConfirmDel.Get():
-			a.inboxConfirmDel.Set(false)
-			return true
-		case a.inboxTextOpen.Get():
-			a.inboxTextOpen.Set(false)
-			return true
-		case a.settingsThemeOpen.Get():
-			a.settingsThemeOpen.Set(false)
-			return true
-		case a.multiSelect.Get():
-			a.exitMultiSelect()
-			return true
-		}
-		if a.screen.Get() == screenSettings {
-			a.closeSettings()
-			return true
-		}
-		switch a.screen.Get() {
-		case screenDetail:
-			a.backFromDetail()
-			return true
-		case screenSearch:
-			a.detailFrom = screenGallery
-			a.screen.Set(screenGallery)
-			return true
-		case screenInbox:
-			if a.inboxBackScreen == screenConnect && a.session.Current() == nil {
-				a.screen.Set(screenConnect)
-			} else {
-				a.screen.Set(screenGallery)
-			}
-			return true
-		default:
-			return false
-		}
-	})
 
 	cx.Effect(func() {
 		cols := a.gridCols.Get()
@@ -453,13 +394,7 @@ func (a *App) Render(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
 	return core.View{
 		StyleFunc: func() core.Style {
-			if a.screen.Get() == screenDetail {
-				return core.Style{
-					Width: core.Pct(100), Height: core.Pct(100),
-					Background: themeRole(cx, "preview"), Color: themeRole(cx, "onBadge"),
-				}
-			}
-			if a.screen.Get() == screenGallery || a.screen.Get() == screenSettings || a.screen.Get() == screenSearch {
+			if s := a.screen.Get(); s == screenGallery || s == screenSettings || s == screenSearch || s == screenDetail {
 				return core.Style{
 					Width: core.Pct(100), Height: core.Pct(100),
 					Background: colors.Background(), Color: colors.Text(),
@@ -474,11 +409,14 @@ func (a *App) Render(cx *core.Scope) core.Node {
 		},
 		Children: []core.Node{
 			core.Show{When: func() bool { return a.screen.Get() == screenConnect }, Then: a.connect},
-			core.Show{When: func() bool { return a.screen.Get() == screenGallery }, Then: a.galleryPage},
-			core.Show{When: func() bool { return a.screen.Get() == screenSearch }, Then: a.searchPage},
-			core.Show{When: func() bool { return a.screen.Get() == screenDetail }, Then: a.detailPage},
+			core.Show{When: func() bool {
+				s := a.screen.Get()
+				return s == screenGallery || s == screenSearch || s == screenDetail
+			}, Then: a.mainStack},
 			core.Show{When: func() bool { return a.screen.Get() == screenInbox }, Then: a.inboxPage},
 			core.Show{When: func() bool { return a.screen.Get() == screenSettings }, Then: a.settingsPage},
+			a.backGuard(cx),
+			a.previewMatchOverlay(cx),
 			core.Show{When: func() bool { return a.toast.Get() != "" }, Then: func(cx *core.Scope) core.Node {
 				return core.View{
 					StyleFunc: func() core.Style {
@@ -496,6 +434,101 @@ func (a *App) Render(cx *core.Scope) core.Node {
 				}
 			}},
 		},
+	}
+}
+
+// mainStack keeps the library, search and preview as screens of one stack:
+// the screens below stay mounted, so their scroll offsets survive a preview,
+// and Android's predictive back can reveal them under the page being popped.
+func (a *App) mainStack(cx *core.Scope) core.Node {
+	// The library screen is built once and stays mounted under search and
+	// preview, so its list keeps its scroll. Only the screens above it come
+	// and go.
+	gallery := core.Screen{
+		TestID: "screen.gallery", HeaderHidden: true,
+		Children: []core.Node{a.galleryPage(cx)},
+	}
+	search := core.Show{
+		When: func() bool {
+			s := a.screen.Get()
+			return s == screenSearch || (s == screenDetail && a.detailFrom == screenSearch)
+		},
+		Then: func(cx *core.Scope) core.Node {
+			return core.Screen{
+				TestID: "screen.search", HeaderHidden: true,
+				OnDismiss: func() {
+					a.detailFrom = screenGallery
+					a.screen.Set(screenGallery)
+				},
+				Children: []core.Node{a.searchPage(cx)},
+			}
+		},
+	}
+	detail := core.Show{
+		When: func() bool { return a.screen.Get() == screenDetail },
+		Then: func(cx *core.Scope) core.Node {
+			return core.Screen{
+				TestID: "screen.detail", HeaderHidden: true,
+				NoPopOnBack: true,
+				OnBackPress: func() { a.backFromDetail() },
+				OnDismiss:   func() { a.dismissDetail() },
+				Children:    []core.Node{a.detailPage(cx)},
+			}
+		},
+	}
+	return core.Stack{
+		Style:    core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+		Children: []core.Node{gallery, search, detail},
+	}
+}
+
+// backGuard takes back on the screens that do not pop a stack and whose
+// state is not a modal: the library drawer and multi-select, settings and
+// the inbox. It is absent on the preview stack so Android's predictive back
+// can run there.
+func (a *App) backGuard(cx *core.Scope) core.Node {
+	return core.Show{
+		When: func() bool {
+			switch a.screen.Get() {
+			case screenGallery:
+				return a.drawerOpen.Get() || a.multiSelect.Get()
+			case screenSettings, screenInbox:
+				return true
+			}
+			return false
+		},
+		Then: func(cx *core.Scope) core.Node {
+			return core.Overlay{
+				Style: core.Style{
+					Position: core.Absolute, Top: core.Pt(0), Right: core.Pt(0),
+					Bottom: core.Pt(0), Left: core.Pt(0),
+				},
+				PointerEvents: core.PointerEventsNone,
+				OnCancel:      func() { a.handleBack(cx) },
+			}
+		},
+	}
+}
+
+func (a *App) handleBack(cx *core.Scope) {
+	if a.screen.Get() == screenSettings {
+		a.closeSettings()
+		return
+	}
+	if a.screen.Get() == screenInbox {
+		if a.inboxBackScreen == screenConnect && a.session.Current() == nil {
+			a.screen.Set(screenConnect)
+		} else {
+			a.screen.Set(screenGallery)
+		}
+		return
+	}
+	if a.multiSelect.Get() {
+		a.exitMultiSelect()
+		return
+	}
+	if a.drawerOpen.Get() {
+		a.setDrawerOpen(cx, false)
 	}
 }
 
@@ -817,6 +850,7 @@ func (a *App) invalidateForLibraryChange(cx *core.Scope) {
 	a.searchGallery.Reset(query.Spec{}, model.SortDesc, model.DefaultPageSize)
 	a.rebuildSearchRows()
 	if a.screen.Get() == screenDetail || a.screen.Get() == screenSearch {
+		a.cancelPreviewMatch()
 		a.screen.Set(screenGallery)
 	}
 	a.refreshGalleryView(cx, true)
@@ -909,6 +943,7 @@ func (a *App) handleEvent(cx *core.Scope, ev model.WSEvent) {
 		a.stopWS()
 		_ = a.session.Disconnect()
 		a.resetSessionState()
+		a.cancelPreviewMatch()
 		a.showToast("授权已被桌面端撤销，请重新配对")
 		a.screen.Set(screenConnect)
 	}

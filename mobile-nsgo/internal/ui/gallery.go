@@ -224,6 +224,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 			EstimatedSize: a.cachedTileSize + 6,
 			OnLoadMore:    func() { a.loadMoreGalleryView(cx) },
 			Ref:           a.galleryRef,
+			TestID:        "gallery.list",
 			Footer: core.Show{When: func() bool { a.rev.Get(); return a.gallery.Snapshot().LoadingMore }, Then: func(cx *core.Scope) core.Node {
 				return core.Text{Content: "加载更多…", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted(), TextAlign: core.TextAlignCenter, Padding: core.All(12)})}
 			}},
@@ -348,16 +349,20 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 		Children: []core.Node{
 			a.leftDrawerPanel(cx),
 			mainShift,
-			a.filterSheet(cx),
-			a.menuDialog(cx),
-			a.disconnectDialog(cx),
-			a.librariesDialog(cx),
-			a.quickPreviewSheet(cx),
-			a.restoreDialog(cx),
-			a.emptyTrashDialog(cx),
-			a.batchTagDialog(cx),
-			a.batchFolderDialog(cx),
-			a.batchDeleteDialog(cx),
+			core.Show{When: func() bool { return a.screen.Get() == screenGallery }, Then: func(cx *core.Scope) core.Node {
+				return core.Group{
+					a.filterSheet(cx),
+					a.menuDialog(cx),
+					a.disconnectDialog(cx),
+					a.librariesDialog(cx),
+					a.quickPreviewSheet(cx),
+					a.restoreDialog(cx),
+					a.emptyTrashDialog(cx),
+					a.batchTagDialog(cx),
+					a.batchFolderDialog(cx),
+					a.batchDeleteDialog(cx),
+				}
+			}},
 		},
 	}
 }
@@ -472,7 +477,7 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 				if isSearch {
 					from = screenSearch
 				}
-				a.openDetail(cx, idx, from)
+				a.openDetail(cx, idx, from, nativeBounds(m))
 			case "longPress":
 				if isSearch || a.sidebarView == SidebarTrash || a.sidebarView == SidebarHistory {
 					return
@@ -584,6 +589,45 @@ func nativeStr(m map[string]any, key string) string {
 	}
 	s, _ := m[key].(string)
 	return s
+}
+
+func nativeFloat(m map[string]any, key string) float64 {
+	if m == nil {
+		return 0
+	}
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	case float32:
+		return float64(v)
+	}
+	return 0
+}
+
+// nativeBounds is the tapped tile's frame reported by the Android grid, in
+// points, for the thumbnail flip.
+func nativeBounds(m map[string]any) core.Bounds {
+	w, h := nativeFloat(m, "w"), nativeFloat(m, "h")
+	if w <= 0 || h <= 0 {
+		return core.Bounds{}
+	}
+	return core.Bounds{
+		Origin: core.Point{X: core.Points(nativeFloat(m, "x")), Y: core.Points(nativeFloat(m, "y"))},
+		Size:   core.Size{Width: core.Points(w), Height: core.Points(h)},
+	}
+}
+
+func (a *App) previewTileBounds(at core.Point) core.Bounds {
+	size := a.cachedTileSize
+	if size <= 0 {
+		size = 118
+	}
+	return core.Bounds{
+		Origin: core.Point{X: at.X - size/2, Y: at.Y - size/2},
+		Size:   core.Size{Width: size, Height: size},
+	}
 }
 
 func (a *App) galleryListRow(cx *core.Scope, isSearch bool, row core.ListRow, from string) core.Node {
@@ -756,7 +800,7 @@ func (a *App) slotTile(cx *core.Scope, slotAt func() (TileSlot, bool), from stri
 				}
 			}},
 		},
-		OnPress: func(core.PressEvent) {
+		OnPress: func(ev core.PressEvent) {
 			slot, ok := slotAt()
 			if !ok {
 				return
@@ -771,7 +815,7 @@ func (a *App) slotTile(cx *core.Scope, slotAt func() (TileSlot, bool), from stri
 				a.toggleSelectItem(slot.Item.ID)
 				return
 			}
-			a.openDetail(cx, slot.FlatIndex, from)
+			a.openDetail(cx, slot.FlatIndex, from, a.previewTileBounds(ev.PagePosition))
 		},
 		OnLongPress: func(core.PressEvent) {
 			slot, ok := slotAt()
@@ -887,7 +931,7 @@ func (a *App) quickPreviewSheet(cx *core.Scope) core.Node {
 					}},
 					actionBtn("查看详情", func() {
 						a.quickOpen.Set(false)
-						a.openDetail(cx, itemIdx, screenGallery)
+						a.openDetail(cx, itemIdx, screenGallery, core.Bounds{})
 					}),
 					actionBtn("多选此项", func() {
 						a.quickOpen.Set(false)

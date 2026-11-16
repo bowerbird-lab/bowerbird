@@ -11,6 +11,7 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewParent
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
@@ -19,6 +20,7 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import dev.oneo.nsgo.NsgoComponent
+import dev.oneo.nsgo.NsgoView
 
 /**
  * Native 120fps gallery grid backed by Android RecyclerView + GridLayoutManager
@@ -538,7 +540,26 @@ class GalleryGridComponent(
         init {
             root.setOnClickListener {
                 currentEntry?.let { e ->
-                    events.emit("press", mapOf("index" to e.flatIndex, "id" to e.id))
+                    val loc = IntArray(2)
+                    root.getLocationInWindow(loc)
+                    val hostLoc = IntArray(2)
+                    var p: ViewParent? = root.parent
+                    while (p is View) {
+                        if (p is NsgoView) {
+                            p.getLocationInWindow(hostLoc)
+                            break
+                        }
+                        p = p.parent
+                    }
+                    val d = root.resources.displayMetrics.density
+                    events.emit("press", mapOf(
+                        "index" to e.flatIndex,
+                        "id" to e.id,
+                        "x" to (loc[0] - hostLoc[0]) / d,
+                        "y" to (loc[1] - hostLoc[1]) / d,
+                        "w" to root.width / d,
+                        "h" to root.height / d
+                    ))
                 }
             }
             root.setOnLongClickListener {

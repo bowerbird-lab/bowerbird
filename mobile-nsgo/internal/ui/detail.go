@@ -16,22 +16,283 @@ import (
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/transport"
 )
 
-func (a *App) openDetail(cx *core.Scope, flatIndex int, from string) {
+func (a *App) openDetail(cx *core.Scope, flatIndex int, from string, src core.Bounds) {
 	a.detailIndex.Set(flatIndex)
 	a.detailFrom = from
 	a.detailChrome.Set(false) // Immersive fullscreen by default; tap to toggle header
 	a.videoError.Set("")
 	a.videoPaused.Set(false)
-	a.screen.Set(screenDetail)
 	items := a.currentGalleryFor(from).Snapshot().Items
 	if flatIndex >= 0 && flatIndex < len(items) {
-		a.ensureItemDetail(cx, items[flatIndex].ID)
+		item := items[flatIndex]
+		a.ensureItemDetail(cx, item.ID)
+		thumb := a.client.MediaURL(item.ThumbnailURL)
+		if thumb == "" {
+			thumb = a.client.ThumbURL(item.ID)
+		}
+		win := cx.Env().Window()
+		dst := detailContainBounds(win, item.Width, item.Height)
+		if item.IsImage() && src.Size.Width >= 24 && src.Size.Height >= 24 && dst.Size.Width > 0 && dst.Size.Height > 0 {
+			a.matchFrom = src
+			a.matchTo = dst
+			a.matchThumb = thumb
+			a.matchOriginal = a.client.OriginalURL(item.ID)
+			a.matchOpenedIndex = flatIndex
+			a.startPreviewMatch(true, func() {
+				a.screen.Set(screenDetail)
+				a.bump()
+			})
+			return
+		}
 	}
+	a.cancelPreviewMatch()
+	a.screen.Set(screenDetail)
 	a.bump()
 }
 
+func detailContainBounds(win core.Size, itemW, itemH int) core.Bounds {
+	if win.Width <= 0 || win.Height <= 0 {
+		return core.Bounds{}
+	}
+	if itemW <= 0 || itemH <= 0 {
+		s := min(win.Width, win.Height)
+		return core.Bounds{
+			Origin: core.Point{X: (win.Width - s) / 2, Y: (win.Height - s) / 2},
+			Size:   core.Size{Width: s, Height: s},
+		}
+	}
+	w, h := float64(itemW), float64(itemH)
+	scale := min(float64(win.Width)/w, float64(win.Height)/h)
+	dw := core.Points(w * scale)
+	dh := core.Points(h * scale)
+	return core.Bounds{
+		Origin: core.Point{X: (win.Width - dw) / 2, Y: (win.Height - dh) / 2},
+		Size:   core.Size{Width: dw, Height: dh},
+	}
+}
+
+const (
+	previewMatchOpenDuration  = 240 * time.Millisecond
+	previewMatchCloseDuration = 220 * time.Millisecond
+	previewMatchDuration      = previewMatchOpenDuration
+)
+
+func (a *App) cancelPreviewMatch() {
+	a.matchGen++
+	a.matchAnimated = false
+	a.matchStage.Set(0)
+	a.matchDetail.Set(false)
+}
+
+// startPreviewMatch runs a GPU-driven hero + backdrop fade between the tapped
+// grid tile and the detail page's contain frame. Opening keeps the gallery
+// visible underneath while the backdrop dims to black, then swaps in screenDetail
+// after the flight finishes. Closing covers screenDetail, immediately reveals
+// the gallery underneath, and shrinks the hero back to its tile.
+func (a *App) startPreviewMatch(open bool, apply func()) {
+	if a.matchThumb == "" || a.matchFrom.Size.Width < 24 || a.matchFrom.Size.Height < 24 ||
+		a.matchTo.Size.Width <= 0 || a.matchTo.Size.Height <= 0 {
+		a.cancelPreviewMatch()
+		apply()
+		return
+	}
+	if (!a.env.HasHost && !a.forceMatchAnim) || a.scope.Env().ReduceMotion() {
+		a.cancelPreviewMatch()
+		apply()
+		return
+	}
+	a.matchGen++
+	gen := a.matchGen
+	a.matchAnimated = false
+	a.matchApply = apply
+	a.matchApplied = false
+	if open {
+		a.matchStage.Set(1)
+	} else {
+		a.matchStage.Set(2)
+	}
+	a.matchRev.Update(func(v int) int { return v + 1 })
+
+	// Unconditional safety net so the destination screen always mounts and
+	// the overlay never lingers even if an animation callback is skipped.
+	a.after(previewMatchOpenDuration+320*time.Millisecond, func() {
+		if a.matchGen != gen {
+			return
+		}
+		if !a.matchApplied && a.matchApply != nil {
+			a.matchApplied = true
+			a.matchApply()
+		}
+		if a.matchStage.Get() != 0 {
+			a.matchStage.Set(0)
+		}
+	})
+}
+
+// previewMatchOverlay renders a single hero thumbnail moving on GPU
+// (TranslateX, TranslateY, Scale) over a fading dark backdrop.
+func (a *App) previewMatchOverlay(cx *core.Scope) core.Node {
+	return core.Show{When: func() bool { return a.matchStage.Get() != 0 }, Then: func(cx *core.Scope) core.Node {
+		return core.Dynamic(func(cx *core.Scope) core.Node {
+			_ = a.matchRev.Get()
+			stage := core.Untracked(cx, a.matchStage.Get)
+			if stage == 0 || a.matchThumb == "" || a.matchTo.Size.Width <= 0 || a.matchTo.Size.Height <= 0 {
+				return core.View{}
+			}
+			gen := a.matchGen
+			open := stage == 1
+			thumb := a.matchThumb
+			src := a.matchFrom
+			dst := a.matchTo
+
+			sx := float64(src.Origin.X + src.Size.Width/2)
+			sy := float64(src.Origin.Y + src.Size.Height/2)
+			dx := float64(dst.Origin.X + dst.Size.Width/2)
+			dy := float64(dst.Origin.Y + dst.Size.Height/2)
+			fromTX := sx - dx
+			fromTY := sy - dy
+			sx0 := float64(src.Size.Width) / float64(dst.Size.Width)
+			sy0 := float64(src.Size.Height) / float64(dst.Size.Height)
+			if sx0 < 0.05 {
+				sx0 = 0.05
+			}
+			if sy0 < 0.05 {
+				sy0 = 0.05
+			}
+			u0 := max(sx0, sy0)
+
+			startVal := 0.0
+			if !open {
+				startVal = 1.0
+			}
+			progress := core.NewAnimatedValue(cx, startVal)
+			easing := core.BezierEasing(core.EaseOut)
+
+			if open {
+				cx.StartAnimation(core.Timing(progress, 1, core.TimingConfig{
+					Duration: previewMatchOpenDuration,
+					Easing:   easing,
+				}), func(bool) {
+					if a.matchGen != gen {
+						return
+					}
+					if !a.matchApplied && a.matchApply != nil {
+						a.matchApplied = true
+						a.matchApply()
+					}
+					a.after(140*time.Millisecond, func() {
+						if a.matchGen == gen {
+							a.matchStage.Set(0)
+						}
+					})
+				})
+			} else {
+				a.scope.RequestAnimationFrame(func(time.Time) {
+					if a.matchGen != gen || cx.Disposed() {
+						return
+					}
+					if !a.matchApplied && a.matchApply != nil {
+						a.matchApplied = true
+						a.matchApply()
+					}
+					cx.StartAnimation(core.Timing(progress, 0, core.TimingConfig{
+						Duration: previewMatchCloseDuration,
+						Easing:   easing,
+					}), func(bool) {
+						if a.matchGen == gen {
+							a.matchStage.Set(0)
+						}
+					})
+				})
+			}
+
+			backdropAnim := &core.AnimatedStyle{
+				Opacity: core.Interpolate(progress, core.Interpolation{
+					Input:  []float64{0, 1},
+					Output: []float64{0, 1},
+				}),
+			}
+			clipScaleX := core.Interpolate(progress, core.Interpolation{
+				Input:  []float64{0, 1},
+				Output: []float64{sx0, 1},
+			})
+			clipScaleY := core.Interpolate(progress, core.Interpolation{
+				Input:  []float64{0, 1},
+				Output: []float64{sy0, 1},
+			})
+			imageUniform := core.Interpolate(progress, core.Interpolation{
+				Input:  []float64{0, 1},
+				Output: []float64{u0, 1},
+			})
+			clipAnim := &core.AnimatedStyle{
+				TranslateX: core.Interpolate(progress, core.Interpolation{
+					Input:  []float64{0, 1},
+					Output: []float64{fromTX, 0},
+				}),
+				TranslateY: core.Interpolate(progress, core.Interpolation{
+					Input:  []float64{0, 1},
+					Output: []float64{fromTY, 0},
+				}),
+				ScaleX: clipScaleX,
+				ScaleY: clipScaleY,
+			}
+			// Compensate non-uniform clip scaling so the photo keeps its true aspect ratio
+			// while morphing cleanly between the square Cover crop and full Contain frame.
+			innerAnim := &core.AnimatedStyle{
+				ScaleX: core.Div(imageUniform, clipScaleX),
+				ScaleY: core.Div(imageUniform, clipScaleY),
+			}
+
+			return core.View{
+				TestID: "preview.match.root",
+				Style: core.Style{
+					Position: core.Absolute, Top: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0),
+					PointerEvents: core.PointerEventsNone, ZIndex: 100,
+				},
+				Children: []core.Node{
+					core.View{
+						TestID: "preview.match.backdrop",
+						StyleFunc: func() core.Style {
+							return core.Style{
+								Position: core.Absolute, Top: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0),
+								Background: nsui.ColorsOf(cx).Background(),
+								Animated:   backdropAnim,
+							}
+						},
+					},
+					core.View{
+						TestID: "preview.match",
+						Style: core.Style{
+							Position: core.Absolute, Left: core.Pt(dst.Origin.X), Top: core.Pt(dst.Origin.Y),
+							Width: core.Pt(dst.Size.Width), Height: core.Pt(dst.Size.Height),
+							Overflow: core.Hidden,
+							Animated: clipAnim,
+						},
+						Children: []core.Node{
+							core.View{
+								Style: core.Style{
+									Width: core.Pct(100), Height: core.Pct(100),
+									Animated: innerAnim,
+								},
+								Children: []core.Node{
+									core.Image{
+										Source:       core.Src(thumb),
+										ResizeMode:   core.Contain,
+										FadeDuration: time.Millisecond,
+										Style:        core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+		})
+	}}
+}
+
 func (a *App) detailPage(cx *core.Scope) core.Node {
-	preview := func() core.Color { return themeRole(cx, "preview") }
+	colors := nsui.ColorsOf(cx)
 	onPreview := func() core.Color { return themeRole(cx, "onBadge") }
 	onPreviewMuted := func() core.Color { return themeRole(cx, "onBadge").Faded(0.72) }
 	overlay := func() core.Color { return themeRole(cx, "badge") }
@@ -57,13 +318,15 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 		item, index, total, ok := currentItem()
 		if !ok {
 			return core.View{
-				Style: core.Style{
-					Width: core.Pct(100), Height: core.Pct(100),
-					AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 10,
-					Background: preview(),
+				StyleFunc: func() core.Style {
+					return core.Style{
+						Width: core.Pct(100), Height: core.Pct(100),
+						AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 10,
+						Background: colors.Background(),
+					}
 				},
 				Children: []core.Node{
-					core.Text{Content: "素材已不在当前列表", Style: nsui.TypeBody.Merge(core.Style{Color: onPreviewMuted()})},
+					core.Text{Content: "素材已不在当前列表", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Muted)},
 					nsui.Button{Text: "返回", Variant: nsui.ButtonSecondary, OnPress: func() { a.backFromDetail() }},
 				},
 			}
@@ -74,6 +337,7 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 		panX := core.NewSignal(cx, core.Points(0))
 		panY := core.NewSignal(cx, core.Points(0))
 		swipeX := core.NewSignal(cx, core.Points(0))
+		smooth := core.NewSignal(cx, true)
 
 		maxPan := func(z float32, dim core.Points) core.Points {
 			if z <= 1.01 || dim <= 0 {
@@ -108,13 +372,15 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 		var startZoom float32 = 1
 		var startPanX, startPanY core.Points
 		var atLeftEdge, atRightEdge, switchingMode bool
+		var axisLocked, horizontalSwipe bool
 		var lastTapAt time.Time
 
 		onMediaTap := func() {
 			now := time.Now()
 			if item.IsImage() && !lastTapAt.IsZero() && now.Sub(lastTapAt) < 280*time.Millisecond {
 				lastTapAt = time.Time{}
-				// Double-tap toggles zoom and keeps chrome consistent.
+				// Double-tap toggles zoom with a smooth transition.
+				smooth.Set(true)
 				if zoom.Get() > 1.05 {
 					zoom.Set(1)
 					panX.Set(0)
@@ -133,6 +399,8 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 
 		var mediaContent core.Node
 		if item.IsImage() {
+			origReady := core.NewSignal(cx, false)
+			thumbURL := a.itemThumbURL(item)
 			mediaContent = core.View{
 				TestID:  "detail.media",
 				Style:   core.Style{Width: core.Pct(100), Height: core.Pct(100), Overflow: core.Hidden},
@@ -140,6 +408,7 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 				OnPinch: func(ev core.GestureEvent) {
 					switch ev.Phase {
 					case core.GestureBegan:
+						smooth.Set(false)
 						pinchStartZoom = zoom.Get()
 					case core.GestureChanged:
 						nextZ := pinchStartZoom * ev.Value
@@ -155,6 +424,7 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 						panX.Set(clamp(panX.Get(), -mx, mx))
 						panY.Set(clamp(panY.Get(), -my, my))
 					case core.GestureEnded, core.GestureCancelled:
+						smooth.Set(true)
 						if zoom.Get() < 1.05 {
 							zoom.Set(1)
 							panX.Set(0)
@@ -167,6 +437,7 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 					win := cx.Env().Window()
 					switch ev.Phase {
 					case core.GestureBegan:
+						smooth.Set(false)
 						startZoom = zoom.Get()
 						startPanX = panX.Get()
 						startPanY = panY.Get()
@@ -174,18 +445,32 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 						atLeftEdge = startPanX >= mx-3
 						atRightEdge = startPanX <= -mx+3
 						switchingMode = false
+						axisLocked = false
+						horizontalSwipe = false
 					case core.GestureChanged:
+						dx := ev.Translation.X
+						dy := ev.Translation.Y
 						if startZoom <= 1.02 {
-							dx := ev.Translation.X
+							// Lock the gesture to an axis first: a mostly
+							// vertical swipe must not page sideways because
+							// of the small sideways wobble of a finger.
+							if !axisLocked {
+								if math.Abs(float64(dx)) > 8 || math.Abs(float64(dy)) > 8 {
+									axisLocked = true
+									horizontalSwipe = math.Abs(float64(dx)) > math.Abs(float64(dy))*1.35
+								}
+							}
+							if !horizontalSwipe {
+								swipeX.Set(0)
+								return
+							}
 							if (index == 0 && dx > 0) || (index == total-1 && dx < 0) {
 								dx *= 0.25
 							}
 							swipeX.Set(dx)
 							return
 						}
-						dx := ev.Translation.X
-						dy := ev.Translation.Y
-						if !switchingMode && math.Abs(float64(dx)) > math.Abs(float64(dy))*1.4 {
+						if !switchingMode && math.Abs(float64(dx)) > math.Abs(float64(dy))*1.6 {
 							if atLeftEdge && dx > 20 && index > 0 {
 								switchingMode = true
 							} else if atRightEdge && dx < -20 && index < total-1 {
@@ -200,15 +485,33 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 						panX.Set(clamp(startPanX+dx, -mx, mx))
 						panY.Set(clamp(startPanY+dy, -my, my))
 					case core.GestureEnded, core.GestureCancelled:
+						smooth.Set(true)
 						if startZoom <= 1.02 || switchingMode {
 							dx := swipeX.Get()
 							swipeX.Set(0)
-							if ev.Phase == core.GestureEnded {
-								if (dx < -64 || ev.Velocity.X < -420) && index < total-1 {
-									goTo(index + 1)
-								} else if (dx > 64 || ev.Velocity.X > 420) && index > 0 {
-									goTo(index - 1)
-								}
+							if ev.Phase != core.GestureEnded {
+								return
+							}
+							if startZoom <= 1.02 && !horizontalSwipe {
+								return
+							}
+							// A page turn needs both a clear sideways intent
+							// and a distance or a fast sideways flick.
+							dy := ev.Translation.Y
+							vx, vy := ev.Velocity.X, ev.Velocity.Y
+							sideways := math.Abs(float64(dx)) > math.Abs(float64(dy))*1.35
+							flick := math.Abs(float64(vx)) > 700 && math.Abs(float64(vx)) > math.Abs(float64(vy))*1.6
+							if !sideways && !flick {
+								return
+							}
+							threshold := win.Width * 0.2
+							if threshold < 84 {
+								threshold = 84
+							}
+							if (dx < -threshold || (flick && vx < 0)) && index < total-1 {
+								goTo(index + 1)
+							} else if (dx > threshold || (flick && vx > 0)) && index > 0 {
+								goTo(index - 1)
 							}
 						}
 					}
@@ -216,6 +519,10 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 				Children: []core.Node{
 					core.View{
 						StyleFunc: func() core.Style {
+							tr := core.Transition{Duration: 220 * time.Millisecond, Easing: core.EaseOut, Properties: core.TransitionTransform}
+							if !smooth.Get() {
+								tr = core.Transition{}
+							}
 							return core.Style{
 								Width: core.Pct(100), Height: core.Pct(100),
 								AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
@@ -224,15 +531,32 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 									TranslateX: panX.Get() + swipeX.Get(),
 									TranslateY: panY.Get(),
 								},
+								Transition: tr,
 							}
 						},
 						Children: []core.Node{
+							core.Show{
+								When: func() bool { return !origReady.Get() },
+								Then: func(cx *core.Scope) core.Node {
+									return core.Image{
+										Source:       core.Src(thumbURL),
+										ResizeMode:   core.Contain,
+										FadeDuration: time.Millisecond,
+										Style: core.Style{
+											Position: core.Absolute, Top: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0),
+										},
+									}
+								},
+							},
 							core.Image{
-								Source:      core.Src(a.client.OriginalURL(item.ID)),
-								Placeholder: core.Src(a.client.ThumbURL(item.ID)),
-								ResizeMode:  core.Contain,
-								Style:       core.Style{Width: core.Pct(100), Height: core.Pct(100)},
-								TestID:      "detail.image",
+								Source:       core.Src(a.client.OriginalURL(item.ID)),
+								ResizeMode:   core.Contain,
+								FadeDuration: time.Millisecond,
+								OnLoad: func(core.Size) {
+									cx.AfterFunc(40*time.Millisecond, func() { origReady.Set(true) })
+								},
+								Style:  core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+								TestID: "detail.image",
 							},
 						},
 					},
@@ -246,14 +570,22 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 					AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
 				},
 				OnPress:       func(core.PressEvent) { a.detailChrome.Update(func(v bool) bool { return !v }) },
-				PanActivation: core.PanActivation{ActiveOffsetX: 36, FailOffsetY: 20},
+				PanActivation: core.PanActivation{ActiveOffsetX: 42, FailOffsetY: 24},
 				OnPan: func(ev core.PanEvent) {
 					if ev.Phase != core.GestureEnded {
 						return
 					}
-					if ev.Translation.X < -56 && index < total-1 {
+					dx, dy := ev.Translation.X, ev.Translation.Y
+					if math.Abs(float64(dx)) <= math.Abs(float64(dy))*1.5 {
+						return
+					}
+					threshold := cx.Env().Window().Width * 0.2
+					if threshold < 84 {
+						threshold = 84
+					}
+					if dx < -threshold && index < total-1 {
 						goTo(index + 1)
-					} else if ev.Translation.X > 56 && index > 0 {
+					} else if dx > threshold && index > 0 {
 						goTo(index - 1)
 					}
 				},
@@ -312,10 +644,12 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 		}
 
 		return core.View{
-			Style: core.Style{
-				Width: core.Pct(100), Height: core.Pct(100),
-				Background: preview(),
-				Overflow:   core.Hidden,
+			StyleFunc: func() core.Style {
+				return core.Style{
+					Width: core.Pct(100), Height: core.Pct(100),
+					Background: colors.Background(),
+					Overflow:   core.Hidden,
+				}
 			},
 			Children: []core.Node{
 				mediaContent,
@@ -328,14 +662,13 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 }
 
 func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Node {
-	white := themeRole(cx, "onBadge")
-	muted := themeRole(cx, "onBadge").Faded(0.72)
+	colors := nsui.ColorsOf(cx)
 	original := a.client.OriginalURL(item.ID)
 	if item.IsVideo() {
 		if msg := a.videoError.Get(); msg != "" {
 			return core.View{Style: core.Style{Gap: 10, AlignItems: core.AlignCenter, Padding: core.All(24)}, Children: []core.Node{
-				core.Text{Content: "视频无法在应用内播放", Style: nsui.TypeTitle.Merge(core.Style{Color: white})},
-				core.Text{Content: msg, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{Color: muted, TextAlign: core.TextAlignCenter})},
+				core.Text{Content: "视频无法在应用内播放", Style: nsui.TypeTitle, StyleFunc: nsui.Colored(colors.Text)},
+				core.Text{Content: msg, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{TextAlign: core.TextAlignCenter}), StyleFunc: nsui.Colored(colors.Muted)},
 				core.View{Style: core.Style{Direction: core.Row, Gap: 8}, Children: []core.Node{
 					nsui.Button{Text: "下载原视频", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, false) }},
 					nsui.Button{Text: "用其他应用打开", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, true) }},
@@ -361,10 +694,10 @@ func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Nod
 	}
 	if item.IsAudio() {
 		return core.View{Style: core.Style{Gap: 10, AlignItems: core.AlignCenter, Padding: core.All(24)}, Children: []core.Node{
-			core.Text{Content: "音频文件", Style: nsui.TypeTitle.Merge(core.Style{Color: white})},
-			core.Text{Content: item.Filename, MaxLines: 2, Style: nsui.TypeCaption.Merge(core.Style{Color: white, TextAlign: core.TextAlignCenter})},
+			core.Text{Content: "音频文件", Style: nsui.TypeTitle, StyleFunc: nsui.Colored(colors.Text)},
+			core.Text{Content: item.Filename, MaxLines: 2, Style: nsui.TypeCaption.Merge(core.Style{TextAlign: core.TextAlignCenter}), StyleFunc: nsui.Colored(colors.Text)},
 			core.Text{Content: "当前版本没有内置音频播放器，可下载或分享后用其他应用播放", MaxLines: 3,
-				Style: nsui.TypeCaption.Merge(core.Style{Color: muted, TextAlign: core.TextAlignCenter})},
+				Style: nsui.TypeCaption.Merge(core.Style{TextAlign: core.TextAlignCenter}), StyleFunc: nsui.Colored(colors.Muted)},
 			core.View{Style: core.Style{Direction: core.Row, Gap: 8}, Children: []core.Node{
 				nsui.Button{Text: "下载", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, false) }},
 				nsui.Button{Text: "分享", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, true) }},
@@ -372,9 +705,9 @@ func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Nod
 		}}
 	}
 	return core.View{Style: core.Style{Gap: 10, AlignItems: core.AlignCenter, Padding: core.All(24)}, Children: []core.Node{
-		core.Text{Content: "暂无预览", Style: nsui.TypeTitle.Merge(core.Style{Color: white})},
-		core.Text{Content: item.Filename, MaxLines: 2, Style: nsui.TypeCaption.Merge(core.Style{Color: muted, TextAlign: core.TextAlignCenter})},
-		core.Text{Content: "可点击屏幕显示顶部菜单进行下载或分享", Style: nsui.TypeCaption.Merge(core.Style{Color: muted})},
+		core.Text{Content: "暂无预览", Style: nsui.TypeTitle, StyleFunc: nsui.Colored(colors.Text)},
+		core.Text{Content: item.Filename, MaxLines: 2, Style: nsui.TypeCaption.Merge(core.Style{TextAlign: core.TextAlignCenter}), StyleFunc: nsui.Colored(colors.Muted)},
+		core.Text{Content: "可点击屏幕显示顶部菜单进行下载或分享", Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 		core.View{Style: core.Style{Direction: core.Row, Gap: 8}, Children: []core.Node{
 			nsui.Button{Text: "下载", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, false) }},
 			nsui.Button{Text: "分享", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, true) }},
@@ -545,13 +878,40 @@ func (a *App) deleteDialog(cx *core.Scope) core.Node {
 	}
 }
 
-func (a *App) backFromDetail() {
-	a.videoPaused.Set(true)
-	if a.detailFrom == screenSearch {
-		a.screen.Set(screenSearch)
-	} else {
-		a.screen.Set(screenGallery)
+func (a *App) itemThumbURL(item model.ItemSummary) string {
+	if thumb := a.client.MediaURL(item.ThumbnailURL); thumb != "" {
+		return thumb
 	}
+	return a.client.ThumbURL(item.ID)
+}
+
+func (a *App) detailReturnScreen() string {
+	if a.detailFrom == screenSearch {
+		return screenSearch
+	}
+	return screenGallery
+}
+
+func (a *App) backFromDetail() {
+	if a.matchStage.Get() != 0 {
+		return
+	}
+	a.videoPaused.Set(true)
+	from := a.detailReturnScreen()
+	if a.detailIndex.Get() != a.matchOpenedIndex {
+		a.cancelPreviewMatch()
+		a.screen.Set(from)
+		return
+	}
+	a.startPreviewMatch(false, func() {
+		a.screen.Set(from)
+	})
+}
+
+func (a *App) dismissDetail() {
+	a.videoPaused.Set(true)
+	a.cancelPreviewMatch()
+	a.screen.Set(a.detailReturnScreen())
 }
 
 func (a *App) ensureItemDetail(cx *core.Scope, id string) {

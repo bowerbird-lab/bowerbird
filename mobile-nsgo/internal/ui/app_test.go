@@ -153,8 +153,11 @@ func TestPairingToGalleryDrawerFilterAndDetailFlow(t *testing.T) {
 
 	// Open detail (immersive by default), single-tap to show header, then open metadata sheet.
 	app.WaitFor("id:gallery.tile", 2*time.Second)
-	app.Press("id:gallery.tile")
+	app.Press("id:gallery.tile >> nth=0")
 	app.WaitFor("id:detail.media", 2*time.Second)
+	if len(app.QueryMounted("id:screen.gallery")) == 0 {
+		t.Fatal("the library left the tree behind the preview, losing its scroll")
+	}
 	app.Press("id:detail.media")
 	app.WaitFor("id:detail.meta", 2*time.Second)
 	app.Press("id:detail.meta")
@@ -169,6 +172,56 @@ func TestPairingToGalleryDrawerFilterAndDetailFlow(t *testing.T) {
 	app.Type("id:search.text", "sunset")
 	app.Submit("id:search.text")
 	app.WaitFor("text:1 个结果", 2*time.Second)
+}
+
+func TestPreviewKeepsGalleryScrollOffset(t *testing.T) {
+	items := make([]model.ItemSummary, 0, 40)
+	for i := 0; i < 40; i++ {
+		items = append(items, model.ItemSummary{
+			ID: "item-" + itoa(i), Name: "Item " + itoa(i), Filename: "item-" + itoa(i) + ".jpg",
+			Extension: "jpg", MimeType: "image/jpeg", Size: 1024,
+			Width: 800, Height: 600, Date: time.Now().Add(-time.Duration(i) * time.Hour).UnixMilli(),
+		})
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/status":
+			_ = json.NewEncoder(w).Encode(model.Status{Name: "Lib", PairingRequired: false, Capabilities: []string{"query"}})
+		case "/api/v1/query":
+			_ = json.NewEncoder(w).Encode(model.ItemsPage{Total: len(items), Items: items})
+		case "/api/v1/stats":
+			_ = json.NewEncoder(w).Encode(model.Stats{Total: len(items)})
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		}
+	}))
+	defer srv.Close()
+
+	app := nsgotest.Start(t, isolatedRoot(t), nsgotest.Size(420, 800))
+	app.Type("id:connect.address", srv.URL)
+	app.Press("id:connect.submit")
+	app.WaitFor("id:gallery.list", 2*time.Second)
+
+	app.DragScroll("id:gallery.list", core.Point{Y: -900}, 0)
+	app.Advance(400 * time.Millisecond)
+	before := app.QueryMounted("id:gallery.list")[0].Offset.Y
+	if before == 0 {
+		t.Fatal("the gallery did not scroll")
+	}
+
+	app.Press("id:gallery.tile >> nth=0")
+	app.WaitFor("id:detail.media", 2*time.Second)
+	if len(app.QueryMounted("id:screen.gallery")) == 0 {
+		t.Fatal("the library left the tree behind the preview")
+	}
+	app.Back()
+	app.Advance(500 * time.Millisecond)
+	app.WaitFor("id:gallery.list", 2*time.Second)
+
+	if after := app.QueryMounted("id:gallery.list")[0].Offset.Y; after != before {
+		t.Fatalf("gallery scroll moved from %v to %v after the preview", before, after)
+	}
 }
 
 func TestFilterSheetAppliesSizeAndRatingQueries(t *testing.T) {
@@ -327,5 +380,110 @@ func TestThemeSettingsResetAndReloadKeepDefaults(t *testing.T) {
 	}
 	if prefs.ThemeMode != "system" || prefs.LightTheme != "default-light" || prefs.DarkTheme != "default-dark" {
 		t.Fatalf("preferences after reset = %+v", prefs)
+	}
+}
+
+func TestPreviewMatchAnimatesAndCleansUp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/status":
+			_ = json.NewEncoder(w).Encode(model.Status{Name: "Lib", PairingRequired: false, Capabilities: []string{"query"}})
+		case "/api/v1/query":
+			_ = json.NewEncoder(w).Encode(model.ItemsPage{
+				Total: 1,
+				Items: []model.ItemSummary{{
+					ID: "item-1", Name: "One", Filename: "one.jpg",
+					Extension: "jpg", MimeType: "image/jpeg", Size: 1024,
+					Width: 800, Height: 600, Date: time.Now().UnixMilli(),
+				}},
+			})
+		case "/api/v1/stats":
+			_ = json.NewEncoder(w).Encode(model.Stats{Total: 1})
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		}
+	}))
+	defer srv.Close()
+
+	var appState *App
+	dir := t.TempDir()
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		node := rootWithDir(cx, dir)
+		appState = node.(*App)
+		appState.forceMatchAnim = true
+		return node
+	}, nsgotest.Size(420, 800))
+
+	app.Type("id:connect.address", srv.URL)
+	app.Press("id:connect.submit")
+	app.WaitFor("id:gallery.tile", 2*time.Second)
+
+	app.Press("id:gallery.tile >> nth=0")
+	if len(app.QueryMounted("id:detail.media")) != 1 {
+		t.Fatal("expected detail.media to mount after open hero flight")
+	}
+	// After handoff, preview.match is unmounted so nothing stays stuck.
+	app.Advance(180 * time.Millisecond)
+	if n := len(app.QueryMounted("id:preview.match")); n != 0 {
+		t.Fatalf("preview.match stayed mounted after handoff: %d", n)
+	}
+
+	// Closing via back button reveals gallery and cleans up preview.match.
+	app.Press("id:detail.media")
+	app.WaitFor("id:detail.back", 2*time.Second)
+	app.Press("id:detail.back")
+	app.Advance(previewMatchCloseDuration + 80*time.Millisecond)
+	if len(app.QueryMounted("id:detail.media")) != 0 {
+		t.Fatal("expected detail.media to unmount after close")
+	}
+	if n := len(app.QueryMounted("id:preview.match")); n != 0 {
+		t.Fatalf("close preview.match stayed mounted after finish: %d", n)
+	}
+
+	// Inspect frame 0 via Post+Settle: preview.match mounts at the contain frame while gallery stays visible.
+	appState.scope.Post(func() {
+		appState.openDetail(appState.scope, 0, screenGallery, core.Bounds{
+			Origin: core.Point{X: 12, Y: 94},
+			Size:   core.Size{Width: 128, Height: 128},
+		})
+	})
+	app.Settle()
+	match := app.QueryMounted("id:preview.match")
+	if len(match) != 1 || match[0].Frame.Size.Width != 420 || match[0].Frame.Size.Height != 315 {
+		t.Fatalf("frame 0 preview.match = %+v, want contain frame 420x315", match)
+	}
+	if len(app.QueryMounted("id:detail.media")) != 0 {
+		t.Fatal("expected detail.media to wait until hero flight finishes")
+	}
+	app.Advance(previewMatchOpenDuration + 180*time.Millisecond)
+	if len(app.QueryMounted("id:detail.media")) != 1 {
+		t.Fatal("expected detail.media after advancing open hero flight")
+	}
+	if n := len(app.QueryMounted("id:preview.match")); n != 0 {
+		t.Fatalf("preview.match stayed mounted after advancing handoff: %d", n)
+	}
+
+	// System back button/gesture also triggers the shrink-back animation and cleans up.
+	app.Back()
+	app.Advance(previewMatchCloseDuration + 80*time.Millisecond)
+	if len(app.QueryMounted("id:detail.media")) != 0 {
+		t.Fatal("expected detail.media to unmount after system back")
+	}
+	if n := len(app.QueryMounted("id:preview.match")); n != 0 {
+		t.Fatalf("system back preview.match stayed mounted after finish: %d", n)
+	}
+
+	// Opening without valid source bounds skips the proxy entirely.
+	appState.scope.Post(func() {
+		appState.screen.Set(screenGallery)
+		appState.openDetail(appState.scope, 0, screenGallery, core.Bounds{})
+	})
+	app.Settle()
+	if n := len(app.QueryMounted("id:preview.match")); n != 0 {
+		t.Fatalf("expected no preview.match without source bounds, got %d", n)
+	}
+	if len(app.QueryMounted("id:detail.media")) != 1 {
+		t.Fatal("expected detail.media without source bounds")
 	}
 }

@@ -80,6 +80,7 @@ func (a *App) searchPage(cx *core.Scope) core.Node {
 			EstimatedSize: a.cachedTileSize + 6,
 			OnLoadMore:    func() { a.loadSearchMore(cx) },
 			Ref:           a.searchRef,
+			TestID:        "search.list",
 			Empty: core.View{Style: core.Style{FlexGrow: 1, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Padding: core.All(24)}, Children: []core.Node{
 				core.Text{Content: "输入关键词，或选择筛选条件", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
 			}},
@@ -113,7 +114,9 @@ func (a *App) searchPage(cx *core.Scope) core.Node {
 			results,
 		}},
 		header,
-		a.filterSheet(cx),
+		core.Show{When: func() bool { return a.screen.Get() == screenSearch }, Then: func(cx *core.Scope) core.Node {
+			return a.filterSheet(cx)
+		}},
 	}}
 }
 
