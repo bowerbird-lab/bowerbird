@@ -136,18 +136,9 @@ func (a *App) searchFilterRow(cx *core.Scope) core.Node {
 	}}
 	for _, label := range a.searchFilterLabels() {
 		label := label
-		children = append(children, core.View{
-			StyleFunc: func() core.Style {
-				return core.Style{
-					Padding: core.Symmetric(5, 11), CornerRadius: 999,
-					Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
-				}
-			},
-			OnPress: func(core.PressEvent) { a.openFilterSheet("search") },
-			Children: []core.Node{core.Text{Content: label, StyleFunc: func() core.Style {
-				return core.Style{FontSize: 12, LineHeight: 16, Color: colors.Text()}
-			}}},
-		})
+		children = append(children, drawerChip(colors, label, func() bool { return true }, func() {
+			a.openFilterSheet("search")
+		}))
 	}
 	return core.View{Style: core.Style{Direction: core.Row, Gap: 6, Wrap: core.Wrap, AlignItems: core.AlignCenter}, Children: children}
 }

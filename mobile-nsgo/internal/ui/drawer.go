@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
@@ -10,6 +11,44 @@ import (
 
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
 )
+
+// sheetPan follows a drag on a drawer's handle only, leaving the panel and
+// its scroll views to scrolling. A release past the threshold closes it.
+func (a *App) sheetPan(cx *core.Scope, close func()) func(core.PanEvent) {
+	return func(ev core.PanEvent) {
+		switch ev.Phase {
+		case core.GestureBegan:
+			a.sheetDrag.Set(0)
+			a.sheetDragging.Set(true)
+		case core.GestureChanged:
+			if !a.sheetDragging.Get() {
+				return
+			}
+			dy := core.Points(ev.Translation.Y)
+			if dy < 0 {
+				dy = 0
+			}
+			a.sheetDrag.Set(dy)
+		case core.GestureEnded:
+			if !a.sheetDragging.Get() {
+				return
+			}
+			dy := a.sheetDrag.Get()
+			a.sheetDragging.Set(false)
+			threshold := cx.Env().Window().Height * 0.14
+			if dy >= core.Points(threshold) || ev.Velocity.Y >= 700 {
+				if close != nil {
+					close()
+				}
+				return
+			}
+			a.sheetDrag.Set(0)
+		case core.GestureCancelled:
+			a.sheetDragging.Set(false)
+			a.sheetDrag.Set(0)
+		}
+	}
+}
 
 // SidebarView matches the desktop sidebar collections and folder navigation.
 type SidebarView string
@@ -38,18 +77,29 @@ type bottomDrawerSpec struct {
 }
 
 // bottomDrawer is the unified bottom drawer used across menu, libraries,
-// filters, quick preview, batch actions and metadata. CloseOnSwipe is off so
-// vertical scroll views inside the drawer always scroll smoothly.
+// filters, quick preview, batch actions and metadata. The handle follows a
+// downward drag and closes the drawer; its scroll views keep the whole
+// panel free for scrolling.
 func (a *App) bottomDrawer(cx *core.Scope, s bottomDrawerSpec) core.Node {
 	colors := nsui.ColorsOf(cx)
+	handleID := ""
+	if s.TestID != "" {
+		handleID = s.TestID + ".handle"
+	}
 	var body []core.Node
 	body = append(body, core.View{
-		StyleFunc: func() core.Style {
-			return core.Style{
-				Width: core.Pt(38), Height: core.Pt(4), CornerRadius: 2,
-				AlignSelf: core.AlignCenter, Background: colors.Border(),
-			}
-		},
+		TestID: handleID, Label: "拖动关闭抽屉",
+		Style:         core.Style{Height: core.Pt(24), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
+		PanActivation: core.PanActivation{ActiveOffsetY: 6, FailOffsetX: 12},
+		OnPan:         a.sheetPan(cx, s.OnClose),
+		Children: []core.Node{core.View{
+			StyleFunc: func() core.Style {
+				return core.Style{
+					Width: core.Pt(38), Height: core.Pt(4), CornerRadius: 2,
+					Background: colors.Border(),
+				}
+			},
+		}},
 	})
 	if s.Title != "" || len(s.Header) > 0 {
 		headChildren := make([]core.Node, 0, 1+len(s.Header))
@@ -75,25 +125,82 @@ func (a *App) bottomDrawer(cx *core.Scope, s bottomDrawerSpec) core.Node {
 				s.OnClose()
 			}
 		},
+		OnClose: func() {
+			a.sheetDrag.Set(0)
+			a.sheetDragging.Set(false)
+		},
 		CloseOnSwipe:  false,
 		BackdropStyle: core.Style{Background: themeRole(cx, "overlay")},
 		PopupStyleFunc: func() core.Style {
-			safe := cx.Env().SafeArea()
 			maxH := cx.Env().Window().Height * 0.86
 			if maxH <= 0 {
 				maxH = 640
 			}
-			return core.Style{
-				Gap:         12,
-				MaxHeight:   core.Pt(maxH),
-				Padding:     core.Edges{Top: 10, Right: 16, Bottom: safe.Bottom + 16, Left: 16},
-				CornerRadii: core.Corners{TopLeft: 20, TopRight: 20},
-				Background:  colors.Surface(),
-			}
+			// The sheet's own motion moves this transparent frame; the
+			// visible panel inside follows the handle, so a drag on it can
+			// move without fighting the sheet's animated translation.
+			return core.Style{MaxHeight: core.Pt(maxH), Background: core.Color(0)}
 		},
-		Children: body,
-		Label:    s.Title,
-		TestID:   s.TestID,
+		Children: []core.Node{core.View{
+			StyleFunc: func() core.Style {
+				safe := cx.Env().SafeArea()
+				tr := core.Transition{Duration: 220 * time.Millisecond, Easing: core.EaseOut, Properties: core.TransitionTransform}
+				if a.sheetDragging.Get() {
+					tr = core.Transition{}
+				}
+				return core.Style{
+					Gap:         12,
+					Padding:     core.Edges{Top: 10, Right: 16, Bottom: safe.Bottom + 16, Left: 16},
+					CornerRadii: core.Corners{TopLeft: 28, TopRight: 28},
+					Background:  colors.Surface(),
+					Transform:   core.Transform{TranslateY: a.sheetDrag.Get()},
+					Transition:  tr,
+				}
+			},
+			Children: body,
+		}},
+		Label:  s.Title,
+		TestID: s.TestID,
+	}
+}
+
+// drawerRowStyle is the shared shape of a tappable row inside a bottom
+// drawer: no fill at rest, with feedback only while a finger is on it.
+func drawerRowStyle(colors nsui.Colors) core.Style {
+	return core.Style{
+		Width: core.Pct(100), Direction: core.Row, AlignItems: core.AlignCenter,
+		Gap: 10, Padding: core.Symmetric(10, 12), CornerRadius: 10,
+		Active: &core.Style{Background: colors.Hover()},
+	}
+}
+
+// drawerChip is the shared pill used by the filter and batch drawers. An
+// unselected chip is transparent, as the rest of a drawer's items are; the
+// selected one keeps the accent fill, and a press shows feedback.
+func drawerChip(colors nsui.Colors, label string, selected func() bool, onPress func()) core.Node {
+	isSelected := func() bool { return selected != nil && selected() }
+	return core.View{
+		StyleFunc: func() core.Style {
+			st := core.Style{
+				Padding: core.Symmetric(5, 11), CornerRadius: 999,
+				BorderWidth: 1, BorderColor: colors.Border(),
+				Active: &core.Style{Background: colors.Hover()},
+			}
+			if isSelected() {
+				st.Background = colors.AccentFill()
+				st.BorderColor = colors.Accent()
+				st.Active = &core.Style{Background: colors.Now().AccentPressed}
+			}
+			return st
+		},
+		OnPress: func(core.PressEvent) { onPress() },
+		Children: []core.Node{core.Text{Content: label, StyleFunc: func() core.Style {
+			c := colors.Text()
+			if isSelected() {
+				c = colors.OnAccent()
+			}
+			return core.Style{FontSize: 12, LineHeight: 16, Color: c}
+		}}},
 	}
 }
 
@@ -210,13 +317,14 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 		selected := func() bool { a.rev.Get(); return a.sidebarView == view }
 		return core.View{
 			StyleFunc: func() core.Style {
-				bg := core.Color(0)
+				bg, pressed := core.Color(0), colors.Hover()
 				if selected() {
-					bg = colors.AccentFill()
+					bg, pressed = colors.AccentFill(), colors.Now().AccentPressed
 				}
 				return core.Style{
 					Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10,
 					Padding: core.Symmetric(9, 12), CornerRadius: 10, Background: bg,
+					Active: &core.Style{Background: pressed},
 				}
 			},
 			OnPress: func(core.PressEvent) {
@@ -261,11 +369,11 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 			selected := a.sidebarView == SidebarFolder && a.activeFolderID == f.ID
 			hasChildren := len(f.Children) > 0
 			expanded := a.expandedFolders[f.ID]
-			bg := core.Color(0)
+			bg, pressed := core.Color(0), colors.Hover()
 			fg := colors.Text()
 			muted := colors.Muted()
 			if selected {
-				bg = colors.AccentFill()
+				bg, pressed = colors.AccentFill(), colors.Now().AccentPressed
 				fg = colors.OnAccent()
 				muted = colors.OnAccent()
 			}
@@ -292,6 +400,7 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 					Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
 					Margin:  core.Edges{Left: core.Points(depth * 14)},
 					Padding: core.Symmetric(8, 10), CornerRadius: 8, Background: bg,
+					Active: &core.Style{Background: pressed},
 				},
 				OnPress: func(core.PressEvent) {
 					a.setDrawerOpen(cx, false)
@@ -346,8 +455,9 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 				OnPan:         a.drawerPan(cx),
 				Children: []core.Node{
 					core.View{
-						TestID:  "drawer.library",
-						Style:   core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Symmetric(8, 6), CornerRadius: 10},
+						TestID: "drawer.library",
+						Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Symmetric(8, 6), CornerRadius: 10,
+							Active: &core.Style{Background: colors.Hover()}},
 						OnPress: func(core.PressEvent) { a.openLibraries(cx) },
 						Children: []core.Node{
 							core.Text{ContentFunc: func() string { a.rev.Get(); return a.libraryName() }, MaxLines: 1,

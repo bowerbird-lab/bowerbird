@@ -28,26 +28,9 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 		btns := make([]core.Node, 0, len(options))
 		for _, opt := range options {
 			label, val := opt[0], opt[1]
-			btns = append(btns, core.View{
-				StyleFunc: func() core.Style {
-					bg, border := colors.Surface(), colors.Border()
-					if current() == val {
-						bg, border = colors.AccentFill(), colors.Accent()
-					}
-					return core.Style{
-						Padding: core.Symmetric(5, 11), CornerRadius: 999,
-						Background: bg, BorderWidth: 1, BorderColor: border,
-					}
-				},
-				OnPress: func(core.PressEvent) { set(val) },
-				Children: []core.Node{core.Text{Content: label, StyleFunc: func() core.Style {
-					c := colors.Text()
-					if current() == val {
-						c = colors.OnAccent()
-					}
-					return core.Style{FontSize: 12, LineHeight: 16, Color: c}
-				}}},
-			})
+			btns = append(btns, drawerChip(colors, label,
+				func() bool { return current() == val },
+				func() { set(val) }))
 		}
 		return core.View{Style: core.Style{Gap: 6}, Children: []core.Node{
 			core.Text{Content: title, Style: nsui.TypeLabel, StyleFunc: nsui.Colored(colors.Muted)},
@@ -76,23 +59,7 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 		}
 
 		colorNodes := []core.Node{
-			core.View{
-				StyleFunc: func() core.Style {
-					bg, border := colors.Surface(), colors.Border()
-					if fColor.Get() == "" {
-						bg, border = colors.AccentFill(), colors.Accent()
-					}
-					return core.Style{Padding: core.Symmetric(4, 10), CornerRadius: 999, Background: bg, BorderWidth: 1, BorderColor: border}
-				},
-				OnPress: func(core.PressEvent) { fColor.Set("") },
-				Children: []core.Node{core.Text{Content: "全部", StyleFunc: func() core.Style {
-					c := colors.Text()
-					if fColor.Get() == "" {
-						c = colors.OnAccent()
-					}
-					return core.Style{FontSize: 12, LineHeight: 16, Color: c}
-				}}},
-			},
+			drawerChip(colors, "全部", func() bool { return fColor.Get() == "" }, func() { fColor.Set("") }),
 		}
 		for _, hex := range a.colors {
 			h := hex
@@ -152,6 +119,7 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 		Open:    func() bool { return a.filterOpen.Get() },
 		OnClose: func() { a.filterOpen.Set(false) },
 		Title:   "筛选条件",
+		TestID:  "filter.sheet",
 		Header: []core.Node{
 			nsui.Button{Text: "重置", Variant: nsui.ButtonGhost, OnPress: func() {
 				a.resetFilterDraft()

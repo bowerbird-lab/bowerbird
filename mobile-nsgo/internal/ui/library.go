@@ -21,7 +21,7 @@ func (a *App) menuDialog(cx *core.Scope) core.Node {
 			badgeNode = core.Text{Content: badge, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})}
 		}
 		return core.View{
-			Style:   core.Style{Width: core.Pct(100), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 12, Padding: core.Symmetric(12, 12), CornerRadius: 10, Background: colors.Inset()},
+			Style:   drawerRowStyle(colors),
 			OnPress: func(core.PressEvent) { press() },
 			Children: []core.Node{
 				core.Icon{SVG: icon(), Style: core.Style{FontSize: 18, Color: ic}},
@@ -50,7 +50,8 @@ func (a *App) menuDialog(cx *core.Scope) core.Node {
 				}
 				colRow := core.View{
 					Style: core.Style{Width: core.Pct(100), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
-						Padding: core.Symmetric(10, 12), CornerRadius: 10, Background: colors.Inset()},
+						Padding: core.Symmetric(10, 12), CornerRadius: 10,
+						BorderWidth: 1, BorderColor: colors.Border()},
 					Children: []core.Node{
 						core.View{Style: core.Style{FlexGrow: 1, Gap: 1}, Children: []core.Node{
 							core.Text{Content: "网格列数", Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})},
@@ -163,8 +164,7 @@ func (a *App) librariesDialog(cx *core.Scope) core.Node {
 						subtitle = "当前活动库 · " + subtitle
 					}
 					rows = append(rows, core.View{
-						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.All(10),
-							CornerRadius: 10, Background: colors.Inset(), BorderWidth: 1, BorderColor: colors.Border()},
+						Style: drawerRowStyle(colors),
 						OnPress: func(core.PressEvent) {
 							if !a.libsBusy.Get() {
 								a.switchLibrary(cx, lib)

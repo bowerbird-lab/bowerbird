@@ -204,6 +204,50 @@ func TestFilterSheetAppliesSizeAndRatingQueries(t *testing.T) {
 	app.WaitFor("text:筛选", 2*time.Second)
 	app.Press("text:筛选")
 	app.WaitFor("text:小 <1MB", 2*time.Second)
+
+	// Drawer items sit on the sheet without a fill until they are touched.
+	chip := app.Find("text:小 <1MB")
+	if bg := chip.Parent.Style.Background; bg != core.Color(0) {
+		t.Fatalf("filter chip has a resting background %#x", bg)
+	}
+	app.PressDown("text:小 <1MB")
+	if bg := app.Find("text:小 <1MB").Parent.Style.Background; bg == core.Color(0) {
+		t.Fatal("filter chip has no background while pressed")
+	}
+	app.PressUp("text:小 <1MB")
+
+	// Dragging the handle moves the visible panel with the finger, then
+	// eases it back when the drag is short.
+	finger := app.Touch("id:filter.sheet.handle", core.Point{X: 200, Y: 12})
+	for y := 23; y <= 100; y += 11 {
+		finger.Move(core.Point{X: 200, Y: core.Points(y)})
+	}
+	if got := app.Find("id:filter.sheet").Children[0].Style.Transform.TranslateY; got < 70 {
+		t.Fatalf("sheet follows the handle by %v, want about 88", got)
+	}
+	finger.Lift()
+	app.Advance(400 * time.Millisecond)
+	if got := app.Find("id:filter.sheet").Children[0].Style.Transform.TranslateY; got > 1 {
+		t.Fatalf("short handle drag settled at %v, want 0", got)
+	}
+
+	// The panel body keeps vertical drags for its scroll view; only the
+	// handle closes the sheet.
+	app.Pan("id:filter.sheet", core.Point{Y: 20}, core.Point{Y: 500})
+	app.Advance(400 * time.Millisecond)
+	if !app.Exists("id:filter.sheet") {
+		t.Fatal("a drag on the filter body closed the sheet")
+	}
+	app.Pan("id:filter.sheet.handle", core.Point{Y: 20}, core.Point{Y: 500})
+	app.Advance(400 * time.Millisecond)
+	if app.Exists("id:filter.sheet") {
+		t.Fatal("filter sheet stayed after a downward swipe on its handle")
+	}
+
+	app.Press("id:gallery.more")
+	app.WaitFor("text:筛选", 2*time.Second)
+	app.Press("text:筛选")
+	app.WaitFor("text:小 <1MB", 2*time.Second)
 	app.Press("text:小 <1MB")
 	app.Press("text:5★")
 	app.Press("id:filter.apply")

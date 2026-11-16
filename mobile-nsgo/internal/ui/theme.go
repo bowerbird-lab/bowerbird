@@ -479,12 +479,10 @@ func (a *App) themePickerSheet(cx *core.Scope) core.Node {
 					rows = append(rows, core.View{
 						TestID: "settings.theme." + t.ID,
 						StyleFunc: func() core.Style {
-							st := core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 12,
-								Padding: core.Symmetric(10, 12), CornerRadius: 10,
-								Background: colors.Inset(), BorderWidth: 1, BorderColor: colors.Border()}
+							st := drawerRowStyle(colors)
+							st.BorderWidth = 1
 							if selected() {
 								st.BorderColor = colors.Accent()
-								st.Background = colors.Hover()
 							}
 							return st
 						},

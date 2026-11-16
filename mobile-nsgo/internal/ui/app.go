@@ -60,6 +60,8 @@ type App struct {
 	drawerDragging  *core.Signal[bool]
 	drawerPos       *core.Signal[core.Points]
 	drawerDragStart core.Points
+	sheetDrag       *core.Signal[core.Points]
+	sheetDragging   *core.Signal[bool]
 	stats           model.Stats
 	statsLoaded     bool
 	statsSupported  bool
@@ -232,6 +234,8 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		drawerOpen:           core.NewSignal(cx, false),
 		drawerDragging:       core.NewSignal(cx, false),
 		drawerPos:            core.NewSignal(cx, core.Points(0)),
+		sheetDrag:            core.NewSignal(cx, core.Points(0)),
+		sheetDragging:        core.NewSignal(cx, false),
 		gridCols:             core.NewSignal(cx, prefs.GridColumns),
 		galleryRev:           core.NewSignal(cx, 0),
 		galleryScrollSeq:     core.NewSignal(cx, 0),

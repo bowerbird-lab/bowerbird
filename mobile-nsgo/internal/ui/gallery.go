@@ -871,7 +871,7 @@ func (a *App) quickPreviewSheet(cx *core.Scope) core.Node {
 				}
 				actionBtn := func(label string, onPress func()) core.Node {
 					return core.View{
-						Style:    core.Style{Width: core.Pct(100), Padding: core.Symmetric(11, 12), CornerRadius: 8, Background: colors.Surface()},
+						Style:    drawerRowStyle(colors),
 						OnPress:  func(core.PressEvent) { onPress() },
 						Children: []core.Node{core.Text{Content: label, Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})}},
 					}
@@ -991,12 +991,8 @@ func (a *App) batchTagDialog(cx *core.Scope) core.Node {
 						break
 					}
 					tagName := t.Name
-					tagChips = append(tagChips, core.View{
-						Style: core.Style{Padding: core.Symmetric(5, 11), CornerRadius: 999,
-							Background: colors.Inset(), BorderWidth: 1, BorderColor: colors.Border()},
-						OnPress:  func(core.PressEvent) { a.batchTagInput.Set(tagName) },
-						Children: []core.Node{core.Text{Content: tagName, Style: core.Style{FontSize: 12, LineHeight: 16, Color: colors.Text()}}},
-					})
+					tagChips = append(tagChips, drawerChip(colors, tagName, nil,
+						func() { a.batchTagInput.Set(tagName) }))
 				}
 				if len(tagChips) == 0 {
 					return core.View{}
@@ -1026,8 +1022,7 @@ func (a *App) batchFolderDialog(cx *core.Scope) core.Node {
 				for _, f := range flat {
 					folder := f
 					rows = append(rows, core.View{
-						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(10, 12),
-							CornerRadius: 10, Background: colors.Inset(), BorderWidth: 1, BorderColor: colors.Border()},
+						Style: drawerRowStyle(colors),
 						OnPress: func(core.PressEvent) {
 							a.batchFolderOpen.Set(false)
 							a.runBatchAddFolder(cx, folder)
