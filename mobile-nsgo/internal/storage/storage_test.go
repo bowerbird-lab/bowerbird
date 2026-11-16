@@ -197,7 +197,7 @@ func TestPreferencesDefaultsNormalizeAndRoundTrip(t *testing.T) {
 		t.Fatalf("fresh preferences = %+v", prefs)
 	}
 
-	want := Preferences{ThemeMode: "dark", LightTheme: "sand-light", DarkTheme: "midnight-dark", SystemAccent: false, GridColumns: 4}
+	want := Preferences{ThemeMode: "dark", LightTheme: "sand-light", DarkTheme: "midnight-dark", SystemAccent: false, GridColumns: 4, GalleryLayout: LayoutGrid}
 	if err := local.SavePreferences(want); err != nil {
 		t.Fatal(err)
 	}
@@ -205,12 +205,20 @@ func TestPreferencesDefaultsNormalizeAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ThemeMode != want.ThemeMode || got.LightTheme != want.LightTheme || got.DarkTheme != want.DarkTheme || got.SystemAccent != want.SystemAccent || got.GridColumns != want.GridColumns || got.Version != PreferencesVersion {
+	if got.ThemeMode != want.ThemeMode || got.LightTheme != want.LightTheme || got.DarkTheme != want.DarkTheme || got.SystemAccent != want.SystemAccent || got.GridColumns != want.GridColumns || got.GalleryLayout != want.GalleryLayout || got.Version != PreferencesVersion {
 		t.Fatalf("loaded preferences = %+v", got)
 	}
 
-	bad := Preferences{ThemeMode: "sepia", LightTheme: "", DarkTheme: "", GridColumns: 1}.Normalize()
-	if bad.ThemeMode != "system" || bad.LightTheme != "default-light" || bad.DarkTheme != "default-dark" || bad.GridColumns != 3 {
+	bad := Preferences{ThemeMode: "sepia", LightTheme: "", DarkTheme: "", GridColumns: 1, GalleryLayout: "masonry"}.Normalize()
+	if bad.ThemeMode != "system" || bad.LightTheme != "default-light" || bad.DarkTheme != "default-dark" || bad.GridColumns != 3 || bad.GalleryLayout != LayoutAuto {
 		t.Fatalf("normalized = %+v", bad)
+	}
+
+	wf := Preferences{GridColumns: 5, GalleryLayout: LayoutWaterfall}.Normalize()
+	if wf.GridColumns != 3 || !IsWaterfallLayout(wf.GalleryLayout, wf.GridColumns) {
+		t.Fatalf("waterfall clamped = %+v", wf)
+	}
+	if !IsWaterfallLayout(LayoutAuto, 3) || IsWaterfallLayout(LayoutAuto, 4) || IsWaterfallLayout(LayoutGrid, 2) {
+		t.Fatal("IsWaterfallLayout mismatch")
 	}
 }

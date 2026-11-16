@@ -536,3 +536,43 @@ func TestPreviewMatchAnimatesAndCleansUp(t *testing.T) {
 		t.Fatal("expected detail.media without source bounds")
 	}
 }
+
+func TestGalleryLayoutModeSelectionAndColumnClamp(t *testing.T) {
+	dir := t.TempDir()
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node { return rootWithDir(cx, dir) }, nsgotest.Size(420, 900))
+	app.Press("id:connect.settings")
+	app.WaitFor("id:settings.layoutMode", 2*time.Second)
+
+	// Start in auto at 3 cols -> increase to 5 cols.
+	app.Press("id:settings.gridMore")
+	app.Press("id:settings.gridMore")
+	prefs, err := storage.NewLocal(dir).LoadPreferences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefs.GalleryLayout != storage.LayoutAuto || prefs.GridColumns != 5 {
+		t.Fatalf("after gridMore x2 = %+v", prefs)
+	}
+
+	// Switch to waterfall: columns clamp to 3.
+	app.Press("id:settings.layoutMode >> text:瀑布流")
+	prefs, err = storage.NewLocal(dir).LoadPreferences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefs.GalleryLayout != storage.LayoutWaterfall || prefs.GridColumns != 3 {
+		t.Fatalf("after waterfall = %+v", prefs)
+	}
+
+	// Switch to grid and decrease to 2 cols.
+	app.Press("id:settings.layoutMode >> text:网格")
+	app.Press("id:settings.gridLess")
+	prefs, err = storage.NewLocal(dir).LoadPreferences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefs.GalleryLayout != storage.LayoutGrid || prefs.GridColumns != 2 {
+		t.Fatalf("after grid + gridLess = %+v", prefs)
+	}
+}
+

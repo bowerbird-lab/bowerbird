@@ -13,6 +13,7 @@ import java.lang.ref.WeakReference
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /**
@@ -24,6 +25,7 @@ object ThumbLoader {
     private val pool = Executors.newFixedThreadPool(4) { r ->
         Thread(r, "bb-thumbs").apply { isDaemon = true }
     }
+    private val decodedAtPx = ConcurrentHashMap<String, Int>()
 
     private val memCache: LruCache<String, Bitmap> by lazy {
         val maxKb = (Runtime.getRuntime().maxMemory() / 1024L).toInt()
@@ -31,6 +33,11 @@ object ThumbLoader {
         object : LruCache<String, Bitmap>(cacheKb) {
             override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
         }
+    }
+
+    fun peekMemory(url: String): Bitmap? {
+        if (url.isBlank()) return null
+        return memCache.get(cacheKey(url))
     }
 
     fun load(context: Context, imageView: ImageView, url: String, targetPx: Int) {
@@ -41,17 +48,24 @@ object ThumbLoader {
         }
         val key = cacheKey(url)
         imageView.tag = key
-        memCache.get(key)?.let { cached ->
+        val sizePx = maxOf(targetPx, 240)
+        val cached = memCache.get(key)
+        if (cached != null) {
             imageView.setImageBitmap(cached)
-            return
+            val prevTarget = decodedAtPx[key] ?: 0
+            val maxDim = maxOf(cached.width, cached.height)
+            if (maxDim >= sizePx || prevTarget >= sizePx) {
+                return
+            }
+        } else {
+            imageView.setImageDrawable(null)
         }
-        imageView.setImageDrawable(null)
         val ref = WeakReference(imageView)
         val appCtx = context.applicationContext
-        val sizePx = maxOf(targetPx, 240)
         pool.execute {
             if (ref.get()?.tag != key) return@execute
             val bmp = loadOrFetch(appCtx, url, key, sizePx) ?: return@execute
+            decodedAtPx[key] = sizePx
             memCache.put(key, bmp)
             main.post {
                 val view = ref.get() ?: return@post

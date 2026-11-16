@@ -13,6 +13,7 @@ import (
 	appstate "github.com/owocc/bowerbird/mobile-nsgo/internal/app"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/query"
+	"github.com/owocc/bowerbird/mobile-nsgo/internal/storage"
 	apptheme "github.com/owocc/bowerbird/mobile-nsgo/internal/theme"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/transport"
 )
@@ -386,8 +387,7 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 				scrollSeq = a.searchScrollSeq.Get()
 			}
 			snap := g.Snapshot()
-			monthGrouped := !isSearch && a.sidebarView != SidebarTrash && a.sidebarView != SidebarHistory
-			entries := a.buildNativeGridEntries(snap.Items, monthGrouped, from)
+			entries := a.buildNativeGridEntries(snap.Items, false, from)
 			emptyText := ""
 			if len(snap.Items) == 0 {
 				if isSearch {
@@ -421,7 +421,8 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 				}
 			}
 			return map[string]any{
-				"cols":              a.gridCols.Get(),
+				"cols":              a.effectiveGridCols(),
+				"layoutMode":        a.galleryLayout.Get(),
 				"isDark":            cx.Env().Dark(),
 				"theme":             themeColors,
 				"emptyText":         emptyText,
@@ -448,11 +449,11 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 					a.loadMoreGalleryView(cx)
 				}
 			case "pinchCols":
-				if cols := nativeInt(m, "cols"); cols >= 2 && cols <= 5 && cols != a.gridCols.Get() {
+				layout := a.galleryLayout.Get()
+				cols := storage.ClampGridColumns(layout, nativeInt(m, "cols"))
+				if cols != a.gridCols.Get() {
 					a.gridCols.Set(cols)
 					a.savePreferences()
-					a.rebuildGalleryRows()
-					a.rebuildSearchRows()
 					a.bump()
 				}
 			case "press":
@@ -541,6 +542,8 @@ func (a *App) buildNativeGridEntries(items []model.ItemSummary, monthGrouped boo
 			"flatIndex":   idx,
 			"id":          item.ID,
 			"thumbUrl":    thumb,
+			"width":       item.Width,
+			"height":      item.Height,
 			"badge":       badge,
 			"shareMarked": a.isItemShareMarked(item.ID),
 			"selected":    multi && a.selectedIDs[item.ID],
@@ -671,7 +674,7 @@ func (a *App) galleryListRow(cx *core.Scope, isSearch bool, row core.ListRow, fr
 		Children: []core.Node{
 			core.Show{When: isHeader, Then: headerNode, Else: func(cx *core.Scope) core.Node {
 				return core.Dynamic(func(cx *core.Scope) core.Node {
-					cols := a.gridCols.Get()
+					cols := a.effectiveGridCols()
 					slots := make([]core.Node, 0, cols)
 					for slotIdx := 0; slotIdx < cols; slotIdx++ {
 						si := slotIdx
@@ -847,13 +850,7 @@ func (a *App) handlePinchDensity(cx *core.Scope, ev core.GestureEvent) {
 			delta = 1
 		}
 		if delta != 0 {
-			next := a.pinchBaseCols + delta
-			if next < 2 {
-				next = 2
-			}
-			if next > 5 {
-				next = 5
-			}
+			next := storage.ClampGridColumns(a.galleryLayout.Get(), a.pinchBaseCols+delta)
 			if next != a.pinchAppliedCols {
 				a.pinchAppliedCols = next
 				a.setGridColumns(cx, next)
@@ -864,29 +861,68 @@ func (a *App) handlePinchDensity(cx *core.Scope, ev core.GestureEvent) {
 	}
 }
 
+func (a *App) effectiveGridCols() int {
+	return storage.ClampGridColumns(a.galleryLayout.Get(), a.gridCols.Get())
+}
+
+func (a *App) maxGridCols() int {
+	if a.galleryLayout.Get() == storage.LayoutWaterfall {
+		return 3
+	}
+	return 5
+}
+
+func (a *App) layoutSummaryLabel() string {
+	cols := a.effectiveGridCols()
+	if storage.IsWaterfallLayout(a.galleryLayout.Get(), cols) {
+		return itoa(cols) + " 列 · 瀑布流"
+	}
+	return itoa(cols) + " 列 · 网格"
+}
+
+func (a *App) setGalleryLayout(cx *core.Scope, mode string) {
+	switch mode {
+	case storage.LayoutAuto, storage.LayoutWaterfall, storage.LayoutGrid:
+	default:
+		return
+	}
+	prevMode := a.galleryLayout.Get()
+	prevCols := a.gridCols.Get()
+	nextCols := storage.ClampGridColumns(mode, prevCols)
+	if prevMode == mode && nextCols == prevCols {
+		return
+	}
+	a.galleryLayout.Set(mode)
+	if nextCols != prevCols {
+		a.setGridColumns(cx, nextCols)
+		return
+	}
+	a.savePreferences()
+	a.bump()
+}
+
 func (a *App) setGridColumns(cx *core.Scope, next int) {
-	if next < 2 {
-		next = 2
-	}
-	if next > 5 {
-		next = 5
-	}
+	next = storage.ClampGridColumns(a.galleryLayout.Get(), next)
 	if next == a.gridCols.Get() {
 		return
 	}
 	// Preserve anchor item across density change.
 	var anchorID string
 	var anchorOffset core.Points
-	if pos, ok := a.galleryRef.ListPosition(); ok {
-		anchorID = FirstItemIDAtRow(a.galleryRows(), pos.Index)
-		anchorOffset = pos.Offset
+	if !a.env.HasHost {
+		if pos, ok := a.galleryRef.ListPosition(); ok {
+			anchorID = FirstItemIDAtRow(a.galleryRows(), pos.Index)
+			anchorOffset = pos.Offset
+		}
 	}
 	a.gridCols.Set(next)
 	a.savePreferences()
-	a.rebuildGalleryRows()
-	a.rebuildSearchRows()
+	if !a.env.HasHost {
+		a.rebuildGalleryRows()
+		a.rebuildSearchRows()
+	}
 	a.bump()
-	if anchorID != "" {
+	if !a.env.HasHost && anchorID != "" {
 		rowIdx := RowIndexForItemID(a.cachedRows, anchorID)
 		a.after(16*time.Millisecond, func() {
 			a.galleryRef.ScrollToIndexAt(rowIdx, 0, -anchorOffset, false)

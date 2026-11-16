@@ -71,8 +71,9 @@ type App struct {
 	historyIDs      []string
 	galleryFilter   query.Spec
 
-	// Grid density (2..5 columns) and cached layout rows (zero-alloc scroll)
+	// Grid density (2..5 columns), layout mode (auto/waterfall/grid), and cached layout rows (zero-alloc scroll)
 	gridCols         *core.Signal[int]
+	galleryLayout    *core.Signal[string]
 	pinchBaseCols    int
 	pinchAppliedCols int
 	galleryRev       *core.Signal[int]
@@ -263,6 +264,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		sheetDrag:            core.NewSignal(cx, core.Points(0)),
 		sheetDragging:        core.NewSignal(cx, false),
 		gridCols:             core.NewSignal(cx, prefs.GridColumns),
+		galleryLayout:        core.NewSignal(cx, prefs.GalleryLayout),
 		galleryRev:           core.NewSignal(cx, 0),
 		galleryScrollSeq:     core.NewSignal(cx, 0),
 		searchScrollSeq:      core.NewSignal(cx, 0),
@@ -347,10 +349,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 	}
 
 	cx.Effect(func() {
-		cols := a.gridCols.Get()
-		if cols < 2 {
-			cols = 2
-		}
+		cols := storage.ClampGridColumns(a.galleryLayout.Get(), a.gridCols.Get())
 		winW := cx.Env().Window().Width
 		if winW <= 0 {
 			winW = 390
@@ -588,18 +587,13 @@ func (a *App) bumpGallery()                     { a.galleryRev.Update(func(v int
 
 func (a *App) rebuildGalleryRows() {
 	snap := a.gallery.Snapshot()
-	cols := a.gridCols.Get()
-	if a.sidebarView == SidebarTrash || a.sidebarView == SidebarHistory {
-		a.cachedRows = BuildFlatRows(snap.Items, cols)
-	} else {
-		a.cachedRows = BuildMonthRows(snap.Items, cols)
-	}
+	a.cachedRows = BuildFlatRows(snap.Items, a.effectiveGridCols())
 	a.bumpGallery()
 }
 
 func (a *App) rebuildSearchRows() {
 	snap := a.searchGallery.Snapshot()
-	a.cachedSearchRows = BuildFlatRows(snap.Items, a.gridCols.Get())
+	a.cachedSearchRows = BuildFlatRows(snap.Items, a.effectiveGridCols())
 	a.bumpGallery()
 }
 

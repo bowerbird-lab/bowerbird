@@ -5,6 +5,8 @@ import (
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
 	nsui "github.com/nsgo-dev/nsgo/ui"
+
+	"github.com/owocc/bowerbird/mobile-nsgo/internal/storage"
 )
 
 func (a *App) menuDialog(cx *core.Scope) core.Node {
@@ -48,20 +50,32 @@ func (a *App) menuDialog(cx *core.Scope) core.Node {
 				if len(a.inboxEntries) > 0 {
 					inboxBadge = itoa(len(a.inboxEntries))
 				}
+				layoutOptions := []nsui.Option[string]{
+					{Value: storage.LayoutAuto, Label: "自动"},
+					{Value: storage.LayoutWaterfall, Label: "瀑布流"},
+					{Value: storage.LayoutGrid, Label: "网格"},
+				}
 				colRow := core.View{
-					Style: core.Style{Width: core.Pct(100), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
+					Style: core.Style{Width: core.Pct(100), Gap: 10,
 						Padding: core.Symmetric(10, 12), CornerRadius: 10,
 						BorderWidth: 1, BorderColor: colors.Border()},
 					Children: []core.Node{
-						core.View{Style: core.Style{FlexGrow: 1, Gap: 1}, Children: []core.Node{
-							core.Text{Content: "网格列数", Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})},
-							core.Text{ContentFunc: func() string { return itoa(a.gridCols.Get()) + " 列（支持双指捏合）" },
-								Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+						core.View{Style: core.Style{Gap: 6}, Children: []core.Node{
+							core.Text{Content: "排版模式", Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})},
+							nsui.Tabs[string]{Options: layoutOptions, Value: func() string { return a.galleryLayout.Get() },
+								Equal: true, OnChange: func(v string) { a.setGalleryLayout(cx, v) }, TestID: "menu.layoutMode"},
 						}},
-						nsui.Button{Text: "-", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.gridCols.Get() <= 2 },
-							OnPress: func() { a.setGridColumns(cx, a.gridCols.Get()-1) }},
-						nsui.Button{Text: "+", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.gridCols.Get() >= 5 },
-							OnPress: func() { a.setGridColumns(cx, a.gridCols.Get()+1) }},
+						core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
+							core.View{Style: core.Style{FlexGrow: 1, Gap: 1}, Children: []core.Node{
+								core.Text{Content: "列数密度", Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})},
+								core.Text{ContentFunc: func() string { return a.layoutSummaryLabel() + "（支持双指捏合）" },
+									Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+							}},
+							nsui.Button{Text: "-", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.effectiveGridCols() <= 2 },
+								OnPress: func() { a.setGridColumns(cx, a.effectiveGridCols()-1) }},
+							nsui.Button{Text: "+", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.effectiveGridCols() >= a.maxGridCols() },
+								OnPress: func() { a.setGridColumns(cx, a.effectiveGridCols()+1) }},
+						}},
 					},
 				}
 

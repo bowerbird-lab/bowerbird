@@ -656,30 +656,68 @@ func (l *Local) MarkMigration(step string, run func() error) (bool, error) {
 	return true, l.store.Save("migration.json", m, privateFile)
 }
 
+// Gallery layout modes.
+const (
+	LayoutAuto      = "auto"
+	LayoutWaterfall = "waterfall"
+	LayoutGrid      = "grid"
+)
+
 // Preferences is the app's local appearance settings. It mirrors the desktop's
 // theme preferences: one colour mode and one light and dark theme ID.
 type Preferences struct {
-	Version      int    `json:"version"`
-	ThemeMode    string `json:"themeMode"` // "system", "light" or "dark"
-	LightTheme   string `json:"lightTheme"`
-	DarkTheme    string `json:"darkTheme"`
-	SystemAccent bool   `json:"systemAccent"`
-	GridColumns  int    `json:"gridColumns"`
+	Version       int    `json:"version"`
+	ThemeMode     string `json:"themeMode"` // "system", "light" or "dark"
+	LightTheme    string `json:"lightTheme"`
+	DarkTheme     string `json:"darkTheme"`
+	SystemAccent  bool   `json:"systemAccent"`
+	GridColumns   int    `json:"gridColumns"`
+	GalleryLayout string `json:"galleryLayout"` // "auto", "waterfall" or "grid"
 }
 
 // PreferencesVersion is the current preferences document version.
-const PreferencesVersion = 2
+const PreferencesVersion = 3
 
 // DefaultPreferences are the values a fresh install and a corrupt document
 // fall back to.
 func DefaultPreferences() Preferences {
 	return Preferences{
-		Version:      PreferencesVersion,
-		ThemeMode:    "system",
-		LightTheme:   "default-light",
-		DarkTheme:    "default-dark",
-		SystemAccent: true,
-		GridColumns:  3,
+		Version:       PreferencesVersion,
+		ThemeMode:     "system",
+		LightTheme:    "default-light",
+		DarkTheme:     "default-dark",
+		SystemAccent:  true,
+		GridColumns:   3,
+		GalleryLayout: LayoutAuto,
+	}
+}
+
+// ClampGridColumns bounds cols to the range supported by layout (2..3 for
+// waterfall, 2..5 for auto and grid).
+func ClampGridColumns(layout string, cols int) int {
+	maxCols := 5
+	if layout == LayoutWaterfall {
+		maxCols = 3
+	}
+	if cols < 2 {
+		return 2
+	}
+	if cols > maxCols {
+		return maxCols
+	}
+	return cols
+}
+
+// IsWaterfallLayout reports whether the given layout mode and column count
+// render as a waterfall (masonry) layout rather than a square grid.
+func IsWaterfallLayout(layout string, cols int) bool {
+	switch layout {
+	case LayoutWaterfall:
+		return true
+	case LayoutGrid:
+		return false
+	default:
+		return ClampGridColumns(LayoutAuto, cols) <= 3
 	}
 }
 
@@ -703,9 +741,7 @@ func (l *Local) SavePreferences(prefs Preferences) error {
 // Normalize fills missing values and rejects an unknown colour mode.
 func (p Preferences) Normalize() Preferences {
 	def := DefaultPreferences()
-	if p.Version == 0 {
-		p.Version = PreferencesVersion
-	}
+	p.Version = PreferencesVersion
 	switch p.ThemeMode {
 	case "system", "light", "dark":
 	default:
@@ -717,8 +753,14 @@ func (p Preferences) Normalize() Preferences {
 	if strings.TrimSpace(p.DarkTheme) == "" {
 		p.DarkTheme = def.DarkTheme
 	}
+	switch p.GalleryLayout {
+	case LayoutAuto, LayoutWaterfall, LayoutGrid:
+	default:
+		p.GalleryLayout = def.GalleryLayout
+	}
 	if p.GridColumns < 2 || p.GridColumns > 5 {
 		p.GridColumns = def.GridColumns
 	}
+	p.GridColumns = ClampGridColumns(p.GalleryLayout, p.GridColumns)
 	return p
 }
