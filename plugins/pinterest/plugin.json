@@ -1,7 +1,7 @@
 {
   "id": "official.pinterest",
   "name": "Pinterest",
-  "version": "2.2.0",
+  "version": "1.0.0",
   "minAppVersion": "1.0.0",
   "main": "index.js",
   "description": "Resolve Pinterest pin links to the original image without a build step.",
@@ -32,7 +32,7 @@
   "priority": 55,
   "extensions": [],
   "mimePrefixes": [],
-  "builtin": true,
+  "builtin": false,
   "hooks": [
     "resolveUrl",
     "inspect",
@@ -59,5 +59,9 @@
     "^https?://(?:[a-z0-9-]+\\.)*pinterest\\.[a-z.]+/",
     "^https?://pin\\.it/[A-Za-z0-9]+",
     "^https?://i(?:-[a-z0-9]+)?\\.pinimg\\.com/"
+  ],
+  "platforms": [
+    "desktop",
+    "mobile"
   ]
 }

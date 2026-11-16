@@ -3,7 +3,10 @@ package ui
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	nsui "github.com/nsgo-dev/nsgo/ui"
 
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
+	"github.com/owocc/bowerbird/mobile-nsgo/internal/plugin"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/transport"
 )
 
@@ -866,7 +870,6 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 
 func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Node {
 	colors := nsui.ColorsOf(cx)
-	original := a.client.OriginalURL(item.ID)
 	if item.IsVideo() {
 		if msg := a.videoError.Get(); msg != "" {
 			return core.View{Style: core.Style{Gap: 10, AlignItems: core.AlignCenter, Padding: core.All(24)}, Children: []core.Node{
@@ -878,21 +881,175 @@ func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Nod
 				}},
 			}}
 		}
-		return core.Video{
-			Source:     original,
-			Controls:   true,
-			ResizeMode: core.Contain,
-			PausedFunc: func() bool {
-				return a.screen.Get() != screenDetail ||
-					cx.Env().Lifecycle() != core.LifecycleActive ||
-					a.videoPaused.Get() ||
-					a.metaOpen.Get()
+		a.ensureVideoCached(cx, item)
+		localPath := a.videoLocalPath.Get()
+		if localPath == "" {
+			return core.View{Style: core.Style{Gap: 10, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Padding: core.All(24)}, Children: []core.Node{
+				core.Text{Content: "正在缓冲视频...", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Muted)},
+			}}
+		}
+		return core.View{
+			Style: core.Style{Width: core.Pct(100), Height: core.Pct(100), Position: core.Relative},
+			Children: []core.Node{
+				core.Video{
+					Source:     "file://" + localPath,
+					Controls:   false,
+					ResizeMode: core.Contain,
+					Ref:        a.videoRef,
+					PausedFunc: func() bool {
+						return a.screen.Get() != screenDetail ||
+							cx.Env().Lifecycle() != core.LifecycleActive ||
+							a.videoPaused.Get() ||
+							a.metaOpen.Get()
+					},
+					MutedFunc: func() bool { return a.videoMuted.Get() },
+					RateFunc:  func() float32 { return a.videoRate.Get() },
+					OnProgress: func(pos, dur time.Duration) {
+						a.videoPos.Set(pos)
+						if dur > 0 {
+							a.videoDur.Set(dur)
+						}
+					},
+					OnError: func(err error) {
+						a.videoError.Set("不支持的编码格式或播放失败: " + err.Error())
+					},
+					Style:  core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+					TestID: "detail.video",
+				},
+				// Gesture overlay: Left (-10s), Center (Play/Pause), Right (+10s & LongPress 2x)
+				core.View{
+					Style: core.Style{
+						Position:  core.Absolute,
+						Top:       core.Pt(0),
+						Left:      core.Pt(0),
+						Right:     core.Pt(0),
+						Bottom:    core.Pt(64),
+						Direction: core.Row,
+					},
+					Children: []core.Node{
+						core.View{
+							Style: core.Style{FlexGrow: 1, Height: core.Pct(100)},
+							OnPress: func(core.PressEvent) {
+								next := a.videoPos.Get() - 10*time.Second
+								if next < 0 {
+									next = 0
+								}
+								a.videoRef.Seek(next)
+								a.showToast("后退 10 秒")
+							},
+						},
+						core.View{
+							Style: core.Style{FlexGrow: 1, Height: core.Pct(100)},
+							OnPress: func(core.PressEvent) {
+								a.videoPaused.Set(!a.videoPaused.Get())
+							},
+						},
+						core.View{
+							Style: core.Style{FlexGrow: 1, Height: core.Pct(100)},
+							OnPress: func(core.PressEvent) {
+								next := a.videoPos.Get() + 10*time.Second
+								if dur := a.videoDur.Get(); dur > 0 && next > dur {
+									next = dur
+								}
+								a.videoRef.Seek(next)
+								a.showToast("前进 10 秒")
+							},
+							OnLongPress: func(core.PressEvent) {
+								if a.videoRate.Get() > 1.5 {
+									a.videoRate.Set(1.0)
+									a.showToast("恢复 1.0x 正常速度")
+								} else {
+									a.videoRate.Set(2.0)
+									a.showToast("2.0x 快进中")
+								}
+							},
+						},
+					},
+				},
+				// Bottom player control bar: Play/Pause, Progress, Volume/Mute, Speed
+				core.View{
+					StyleFunc: func() core.Style {
+						return core.Style{
+							Position:       core.Absolute,
+							Left:           core.Pt(12),
+							Right:          core.Pt(12),
+							Bottom:         core.Pt(16),
+							Direction:      core.Row,
+							AlignItems:     core.AlignCenter,
+							Gap:            10,
+							Padding:        core.Symmetric(8, 12),
+							CornerRadius:   12,
+							Background:     colors.Surface(),
+							BorderWidth:    1,
+							BorderColor:    colors.Border(),
+						}
+					},
+					Children: []core.Node{
+						nsui.Button{
+							Text:    func() string { if a.videoPaused.Get() { return "播放" }; return "暂停" }(),
+							Variant: nsui.ButtonSecondary,
+							OnPress: func() { a.videoPaused.Set(!a.videoPaused.Get()) },
+						},
+						core.View{
+							Style: core.Style{FlexGrow: 1, Gap: 4},
+							Children: []core.Node{
+								core.View{
+									StyleFunc: func() core.Style {
+										return core.Style{
+											Width:        core.Pct(100),
+											Height:       core.Pt(4),
+											CornerRadius: 2,
+											Background:   colors.Inset(),
+										}
+									},
+									Children: []core.Node{
+										core.View{
+											StyleFunc: func() core.Style {
+												pct := float64(0)
+												if dur := a.videoDur.Get(); dur > 0 {
+													pct = float64(a.videoPos.Get()) / float64(dur) * 100
+													if pct > 100 {
+														pct = 100
+													}
+												}
+												return core.Style{
+													Width:        core.Pct(float32(pct)),
+													Height:       core.Pct(100),
+													CornerRadius: 2,
+													Background:   colors.Accent(),
+												}
+											},
+										},
+									},
+								},
+								core.Text{
+									ContentFunc: func() string {
+										return fmt.Sprintf("%s / %s", formatDur(a.videoPos.Get()), formatDur(a.videoDur.Get()))
+									},
+									Style:     nsui.TypeCaption,
+									StyleFunc: nsui.Colored(colors.Muted),
+								},
+							},
+						},
+						nsui.Button{
+							Text:    func() string { if a.videoMuted.Get() { return "静音" }; return "音量" }(),
+							Variant: nsui.ButtonSecondary,
+							OnPress: func() { a.videoMuted.Set(!a.videoMuted.Get()) },
+						},
+						nsui.Button{
+							Text:    func() string { return fmt.Sprintf("%.1fx", a.videoRate.Get()) }(),
+							Variant: nsui.ButtonGhost,
+							OnPress: func() {
+								if a.videoRate.Get() > 1.5 {
+									a.videoRate.Set(1.0)
+								} else {
+									a.videoRate.Set(2.0)
+								}
+							},
+						},
+					},
+				},
 			},
-			OnError: func(err error) {
-				a.videoError.Set("不支持的编码格式或播放失败: " + err.Error())
-			},
-			Style:  core.Style{Width: core.Pct(100), Height: core.Pct(100)},
-			TestID: "detail.video",
 		}
 	}
 	if item.IsAudio() {
@@ -1220,4 +1377,137 @@ func formatTime(ms int64) string {
 		return ""
 	}
 	return time.UnixMilli(ms).Format("2006-01-02 15:04")
+}
+
+func (a *App) ensureVideoCached(cx *core.Scope, item model.ItemSummary) {
+	if a.videoLocalID == item.ID {
+		return
+	}
+	a.videoLocalID = item.ID
+	a.videoLocalPath.Set("")
+	ext := filepath.Ext(item.Filename)
+	if ext == "" {
+		ext = ".mp4"
+	}
+	cachePath := filepath.Join(os.TempDir(), "bowerbird-video-"+item.ID+ext)
+	if info, err := os.Stat(cachePath); err == nil && info.Size() > 0 {
+		a.videoLocalPath.Set(cachePath)
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		resp, err := a.client.OpenOriginal(ctx, item.ID)
+		if err != nil {
+			if a.videoLocalID == item.ID {
+				a.videoError.Set("视频下载失败: " + err.Error())
+			}
+			return
+		}
+		defer resp.Body.Close()
+		tmpPath := cachePath + ".part"
+		f, err := os.Create(tmpPath)
+		if err != nil {
+			if a.videoLocalID == item.ID {
+				a.videoError.Set("无法创建缓存文件: " + err.Error())
+			}
+			return
+		}
+		_, copyErr := io.CopyBuffer(f, resp.Body, make([]byte, 1<<20))
+		closeErr := f.Close()
+		if copyErr != nil || closeErr != nil {
+			_ = os.Remove(tmpPath)
+			if a.videoLocalID == item.ID {
+				if copyErr != nil {
+					a.videoError.Set("视频缓冲失败: " + copyErr.Error())
+				} else {
+					a.videoError.Set("视频保存失败: " + closeErr.Error())
+				}
+			}
+			return
+		}
+		_ = os.Rename(tmpPath, cachePath)
+		if a.videoLocalID == item.ID {
+			a.videoLocalPath.Set(cachePath)
+		}
+	}()
+}
+
+func (a *App) renderPluginUI(cx *core.Scope, item model.ItemSummary, node plugin.UINode, videoSource string) core.Node {
+	colors := nsui.ColorsOf(cx)
+	switch node.Type {
+	case "video":
+		src := videoSource
+		if src == "" {
+			src = node.Source
+		}
+		return core.View{
+			Style: core.Style{Width: core.Pct(100), FlexGrow: 1, Background: colors.Background()},
+			Children: []core.Node{
+				core.Video{
+					Source:     src,
+					Controls:   true,
+					ResizeMode: core.Contain,
+					PausedFunc: func() bool {
+						return a.screen.Get() != screenDetail ||
+							cx.Env().Lifecycle() != core.LifecycleActive ||
+							a.videoPaused.Get() ||
+							a.metaOpen.Get()
+					},
+					OnError: func(err error) {
+						a.videoError.Set("不支持的编码格式或播放失败: " + err.Error())
+					},
+					Style:  core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+					TestID: "detail.video",
+				},
+			},
+		}
+	case "title":
+		return core.Text{
+			Content:   node.Text,
+			MaxLines:  2,
+			Style:     nsui.TypeTitle,
+			StyleFunc: nsui.Colored(colors.Text),
+		}
+	case "button":
+		action := node.Action
+		return nsui.Button{
+			Text:    node.Text,
+			Variant: nsui.ButtonSecondary,
+			OnPress: func() {
+				switch action {
+				case "download":
+					a.exportItem(cx, item, false)
+				case "openExternal":
+					a.exportItem(cx, item, true)
+				}
+			},
+		}
+	case "row":
+		var children []core.Node
+		for _, ch := range node.Children {
+			children = append(children, a.renderPluginUI(cx, item, ch, videoSource))
+		}
+		return core.View{
+			Style:    core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 8},
+			Children: children,
+		}
+	default: // "column"
+		var children []core.Node
+		for _, ch := range node.Children {
+			children = append(children, a.renderPluginUI(cx, item, ch, videoSource))
+		}
+		return core.View{
+			Style:    core.Style{Width: core.Pct(100), Height: core.Pct(100), Gap: 10, Padding: core.Symmetric(12, 12)},
+			Children: children,
+		}
+	}
+}
+
+func formatDur(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	sec := int(d.Seconds())
+	return fmt.Sprintf("%02d:%02d", sec/60, sec%60)
 }

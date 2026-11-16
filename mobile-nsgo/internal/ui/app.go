@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/app"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/platform"
+	"github.com/owocc/bowerbird/mobile-nsgo/internal/plugin"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/query"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/storage"
 	apptheme "github.com/owocc/bowerbird/mobile-nsgo/internal/theme"
@@ -179,8 +181,17 @@ type App struct {
 	detailChrome  *core.Signal[bool]
 	metaOpen      *core.Signal[bool]
 	confirmDel    *core.Signal[bool]
-	videoPaused   *core.Signal[bool]
-	videoError    *core.Signal[string]
+	videoPaused    *core.Signal[bool]
+	videoMuted     *core.Signal[bool]
+	videoRate      *core.Signal[float32]
+	videoPos       *core.Signal[time.Duration]
+	videoDur       *core.Signal[time.Duration]
+	videoRef       *core.Ref
+	videoError     *core.Signal[string]
+	videoLocalPath *core.Signal[string]
+	videoLocalID   string
+	pluginGlue     *plugin.PreviewGlue
+	pluginsSyncing *core.Signal[bool]
 	detailCache   map[string]model.ItemDetail
 	detailLoading map[string]bool
 	toast         *core.Signal[string]
@@ -307,7 +318,15 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		metaOpen:             core.NewSignal(cx, false),
 		confirmDel:           core.NewSignal(cx, false),
 		videoPaused:          core.NewSignal(cx, false),
+		videoMuted:           core.NewSignal(cx, false),
+		videoRate:            core.NewSignal(cx, float32(1.0)),
+		videoPos:             core.NewSignal(cx, time.Duration(0)),
+		videoDur:             core.NewSignal(cx, time.Duration(0)),
+		videoRef:             &core.Ref{},
 		videoError:           core.NewSignal(cx, ""),
+		videoLocalPath:       core.NewSignal(cx, ""),
+		pluginGlue:           plugin.NewPreviewGlue(os.TempDir()),
+		pluginsSyncing:       core.NewSignal(cx, false),
 		toast:                core.NewSignal(cx, ""),
 		sidebarView:          SidebarAll,
 		expandedFolders:      map[string]bool{},
@@ -457,6 +476,25 @@ func (a *App) Render(cx *core.Scope) core.Node {
 			core.Show{When: func() bool { return a.screen.Get() == screenSettings }, Then: a.settingsPage},
 			a.backGuard(cx),
 			a.previewMatchOverlay(cx),
+			core.Show{When: func() bool { return a.pluginsSyncing.Get() }, Then: func(cx *core.Scope) core.Node {
+				return core.View{
+					StyleFunc: func() core.Style {
+						return core.Style{
+							Position:       core.Absolute,
+							Top:            core.Pt(0),
+							Left:           core.Pt(0),
+							Right:          core.Pt(0),
+							Bottom:         core.Pt(0),
+							AlignItems:     core.AlignCenter,
+							JustifyContent: core.JustifyCenter,
+							Background:     colors.Background(),
+						}
+					},
+					Children: []core.Node{
+						core.Text{Content: "正在加载插件...", Style: nsui.TypeTitle, StyleFunc: nsui.Colored(colors.Text)},
+					},
+				}
+			}},
 			core.Show{When: func() bool { return a.toast.Get() != "" }, Then: func(cx *core.Scope) core.Node {
 				return core.View{
 					StyleFunc: func() core.Style {
@@ -770,6 +808,15 @@ func (a *App) loadSidebarData(cx *core.Scope) {
 		ctx, cancel := context.WithTimeout(a.rootCtx(), 15*time.Second)
 		defer cancel()
 		stats, statsErr := a.client.Stats(ctx)
+		if a.pluginGlue != nil {
+			a.pluginsSyncing.Set(true)
+			if bundle, err := a.client.PreviewPlugins(ctx); err == nil {
+				if a.pluginGlue.NeedsSync(bundle.Count, bundle.Hash) {
+					_ = a.pluginGlue.ApplyBundle(bundle)
+				}
+			}
+			a.pluginsSyncing.Set(false)
+		}
 		folders, foldersErr := a.client.Folders(ctx)
 		tags, tagsErr := a.client.Tags(ctx)
 		colors, colorsErr := a.client.Colors(ctx)

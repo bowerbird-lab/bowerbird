@@ -1,7 +1,7 @@
 {
   "id": "official.markdown-preview",
   "name": "Markdown Preview",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "minAppVersion": "1.0.0",
   "kind": "preview",
   "native": "markdown",
@@ -25,10 +25,18 @@
   "capabilities": [
     "preview"
   ],
-  "builtin": true,
+  "builtin": false,
   "permissions": {
     "network": [],
     "process": []
   },
-  "settings": []
+  "settings": [],
+  "platforms": [
+    "desktop",
+    "mobile"
+  ],
+  "preview": {
+    "renderer": "webview",
+    "entry": "view.html"
+  }
 }
