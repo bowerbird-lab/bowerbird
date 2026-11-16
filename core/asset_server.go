@@ -140,7 +140,7 @@ func (s *AssetServer) handleAssetRequest(w http.ResponseWriter, r *http.Request)
 			_ = json.NewEncoder(w).Encode(updated)
 			return
 		}
-		thumbPath := filepath.Join(itemDir, "thumbnail.jpg")
+		thumbPath := ResolveThumbnailPath(itemDir)
 		if _, err := os.Stat(thumbPath); err != nil {
 			item, err := s.manager.GetItem(itemID)
 			if err != nil || item == nil {
@@ -152,7 +152,11 @@ func (s *AssetServer) handleAssetRequest(w http.ResponseWriter, r *http.Request)
 			http.ServeFile(w, r, originalPath)
 			return
 		}
-		w.Header().Set("Content-Type", "image/jpeg")
+		if strings.HasSuffix(thumbPath, ".png") {
+			w.Header().Set("Content-Type", "image/png")
+		} else {
+			w.Header().Set("Content-Type", "image/jpeg")
+		}
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		http.ServeFile(w, r, thumbPath)
 		return

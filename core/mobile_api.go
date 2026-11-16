@@ -1692,10 +1692,14 @@ func (s *MobileServer) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	itemDir := filepath.Join(activePath, "items", itemID)
-	thumbPath := filepath.Join(itemDir, "thumbnail.jpg")
+	thumbPath := ResolveThumbnailPath(itemDir)
 
 	if _, err := os.Stat(thumbPath); err == nil {
-		w.Header().Set("Content-Type", "image/jpeg")
+		if strings.HasSuffix(thumbPath, ".png") {
+			w.Header().Set("Content-Type", "image/png")
+		} else {
+			w.Header().Set("Content-Type", "image/jpeg")
+		}
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		http.ServeFile(w, r, thumbPath)
 		return

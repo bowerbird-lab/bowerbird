@@ -753,12 +753,9 @@ func (a *App) slotTile(cx *core.Scope, slotAt func() (TileSlot, bool), from stri
 			size := a.cachedTileSize
 			st := core.Style{
 				Width: core.Pt(size), Height: core.Pt(size),
-				CornerRadius: 8, Overflow: core.Hidden,
 			}
-			if hasItem() {
+			if slot, ok := slotAt(); ok && a.client.MediaURL(slot.Item.ThumbnailURL) == "" && a.client.ThumbURL(slot.Item.ID) == "" {
 				st.Background = colors.Inset()
-				st.BorderWidth = 1
-				st.BorderColor = colors.Border()
 			}
 			return st
 		},
@@ -769,7 +766,7 @@ func (a *App) slotTile(cx *core.Scope, slotAt func() (TileSlot, bool), from stri
 					Style:  core.Style{Width: core.Pct(100), Height: core.Pct(100)},
 					Children: []core.Node{
 						core.Image{SourceFunc: source, ResizeMode: core.Cover, FadeDuration: time.Millisecond,
-							Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}},
+							Style: core.Style{Width: core.Pct(100), Height: core.Pct(100), CornerRadius: 8, Background: core.Transparent}},
 						core.Show{When: func() bool { return badgeText() != "" }, Then: func(cx *core.Scope) core.Node {
 							return core.View{
 								Style: core.Style{Position: core.Absolute, Right: core.Pt(5), Top: core.Pt(5),
