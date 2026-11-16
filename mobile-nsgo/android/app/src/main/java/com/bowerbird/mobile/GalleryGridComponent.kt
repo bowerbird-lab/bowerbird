@@ -70,6 +70,7 @@ class GalleryGridComponent(
     private var lastScrollTopSeq = 0
     private var topInsetDp = 0
     private var bottomInsetDp = 24
+    private var horizontalInsetDp = 8
     private var items: List<GridEntry> = emptyList()
     private var emptyMessage = ""
     private var loadMoreTriggeredForSize = -1
@@ -170,6 +171,7 @@ class GalleryGridComponent(
         )
 
         swipeRefresh.apply {
+            isEnabled = false
             addView(
                 rootContainer,
                 ViewGroup.LayoutParams(
@@ -177,9 +179,6 @@ class GalleryGridComponent(
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
             )
-            setOnRefreshListener {
-                events.emit("refresh", null)
-            }
         }
     }
 
@@ -246,13 +245,17 @@ class GalleryGridComponent(
                     applyTheme()
                 }
             }
-            "refreshing" -> {
-                swipeRefresh.isRefreshing = value == true
-            }
             "topInsetDp" -> {
                 val next = ((value as? Number)?.toInt() ?: 0).coerceAtLeast(0)
                 if (next != topInsetDp) {
                     topInsetDp = next
+                    applyInsets()
+                }
+            }
+            "horizontalInsetDp" -> {
+                val next = ((value as? Number)?.toInt() ?: 8).coerceAtLeast(0)
+                if (next != horizontalInsetDp) {
+                    horizontalInsetDp = next
                     applyInsets()
                 }
             }
@@ -332,7 +335,7 @@ class GalleryGridComponent(
     }
 
     private fun applyInsets() {
-        val pad = dp(8)
+        val pad = dp(horizontalInsetDp)
         recyclerView.setPadding(pad, dp(topInsetDp), pad, dp(bottomInsetDp))
         swipeRefresh.setProgressViewOffset(false, dp(topInsetDp), dp(topInsetDp + 56))
     }

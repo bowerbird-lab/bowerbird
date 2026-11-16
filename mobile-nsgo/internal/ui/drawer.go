@@ -98,18 +98,97 @@ func (a *App) bottomDrawer(cx *core.Scope, s bottomDrawerSpec) core.Node {
 }
 
 func (a *App) drawerWidth(cx *core.Scope) core.Points {
-	w := cx.Env().Window().Width
+	win := cx.Env().Window()
+	w, h := win.Width, win.Height
 	if w <= 0 {
 		w = 390
 	}
-	dw := w * 0.72
+	// Size from the short edge, not the current orientation width: the
+	// sidebar then keeps the same width when the phone rotates and its
+	// content is fully visible in landscape without covering the gallery.
+	short := min(w, h)
+	dw := short * 0.78
 	if dw < 260 {
 		dw = 260
 	}
-	if dw > 330 {
-		dw = 330
+	if dw > 360 {
+		dw = 360
 	}
 	return dw
+}
+
+// drawerPosition is the current visual offset of the main panel. While a
+// drag is active it follows drawerPos; otherwise it is simply open or shut.
+func (a *App) drawerPosition(cx *core.Scope) core.Points {
+	if a.drawerDragging.Get() {
+		return a.drawerPos.Get()
+	}
+	if a.drawerOpen.Get() {
+		return a.drawerWidth(cx)
+	}
+	return 0
+}
+
+// setDrawerOpen changes where the drawer is going. The open state changes at
+// once, so taps, the back button and the scrim stay in step while the style
+// transition animates the panel.
+func (a *App) setDrawerOpen(cx *core.Scope, open bool) {
+	wasOpen := a.drawerOpen.Get()
+	if wasOpen != open {
+		a.drawerOpen.Set(open)
+	}
+	if open && !wasOpen {
+		a.loadSidebarData(cx)
+	}
+	target := core.Points(0)
+	if open {
+		target = a.drawerWidth(cx)
+	}
+	a.drawerPos.Set(target)
+	a.drawerDragging.Set(false)
+}
+
+// drawerPan follows a horizontal drag on either the closed gallery, the
+// open drawer or its scrim. It updates a signal only while the finger acts;
+// release hands the panel to the style transition.
+func (a *App) drawerPan(cx *core.Scope) func(core.PanEvent) {
+	return func(ev core.PanEvent) {
+		dw := a.drawerWidth(cx)
+		switch ev.Phase {
+		case core.GestureBegan:
+			start := core.Points(0)
+			if a.drawerOpen.Get() {
+				start = dw
+			}
+			a.drawerDragStart = start
+			a.drawerPos.Set(start)
+			a.drawerDragging.Set(true)
+		case core.GestureChanged:
+			if !a.drawerDragging.Get() {
+				return
+			}
+			next := a.drawerDragStart + core.Points(ev.Translation.X)
+			if next < 0 {
+				next = 0
+			}
+			if next > dw {
+				next = dw
+			}
+			a.drawerPos.Set(next)
+		case core.GestureEnded:
+			pos := a.drawerPos.Get()
+			open := pos > dw/2
+			if ev.Velocity.X > 450 {
+				open = true
+			} else if ev.Velocity.X < -450 {
+				open = false
+			}
+			a.setDrawerOpen(cx, open)
+		case core.GestureCancelled:
+			open := a.drawerOpen.Get()
+			a.setDrawerOpen(cx, open)
+		}
+	}
 }
 
 // leftDrawerPanel renders Flutter's FolderDrawer as a left side panel with
@@ -141,7 +220,7 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 				}
 			},
 			OnPress: func(core.PressEvent) {
-				a.drawerOpen.Set(false)
+				a.setDrawerOpen(cx, false)
 				a.selectCollection(cx, view)
 			},
 			TestID: testID,
@@ -215,7 +294,7 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 					Padding: core.Symmetric(8, 10), CornerRadius: 8, Background: bg,
 				},
 				OnPress: func(core.PressEvent) {
-					a.drawerOpen.Set(false)
+					a.setDrawerOpen(cx, false)
 					a.selectFolder(cx, f.ID)
 				},
 				Children: []core.Node{
@@ -226,69 +305,70 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 				},
 			})
 		}
-		return core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0), Gap: 4}, Children: []core.Node{
+		return core.View{Style: core.Style{Gap: 4}, Children: []core.Node{
 			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Padding: core.Edges{Top: 12, Bottom: 2, Left: 4, Right: 4}}, Children: []core.Node{
 				core.Text{Content: "文件夹 (" + itoa(len(a.folders)) + ")", Style: nsui.TypeLabel.Merge(core.Style{Color: colors.Muted()})},
 			}},
-			core.Scroll{
-				Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
-				Children: []core.Node{
-					core.Show{When: func() bool { return len(folderNodes) == 0 }, Then: func(cx *core.Scope) core.Node {
-						return core.Text{Content: "暂无文件夹", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Faint(), Padding: core.Symmetric(16, 4)})}
-					}},
-					core.View{Style: core.Style{Gap: 2, Padding: core.Edges{Bottom: 20}}, Children: folderNodes},
-				},
-			},
+			core.Show{When: func() bool { return len(folderNodes) == 0 }, Then: func(cx *core.Scope) core.Node {
+				return core.Text{Content: "暂无文件夹", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Faint(), Padding: core.Symmetric(16, 4)})}
+			}},
+			core.View{Style: core.Style{Gap: 2, Padding: core.Edges{Bottom: 20}}, Children: folderNodes},
 		}}
 	})
 
 	return core.View{
+		TestID: "drawer.panel",
 		StyleFunc: func() core.Style {
 			dw := a.drawerWidth(cx)
 			safe := cx.Env().SafeArea()
-			tx := -dw
-			if a.drawerOpen.Get() {
-				tx = 0
-			}
 			return core.Style{
 				Position: core.Absolute, Left: core.Pt(0), Top: core.Pt(0), Bottom: core.Pt(0),
 				Width: core.Pt(dw), Background: themeRole(cx, "sidebar"),
 				Padding: core.Edges{Top: safe.Top + 10, Bottom: safe.Bottom + 8, Left: safe.Left + 12, Right: 12},
 				Gap:     2, ZIndex: 10,
-				Transform:  core.Transform{TranslateX: tx},
-				Transition: drawerSlideTransition,
-			}
-		},
-		PanActivation: core.PanActivation{ActiveOffsetX: 18, FailOffsetY: 16},
-		OnPan: func(ev core.PanEvent) {
-			if ev.Phase == core.GestureEnded && (ev.Translation.X < -40 || ev.Velocity.X < -300) {
-				a.drawerOpen.Set(false)
 			}
 		},
 		Children: []core.Node{
 			// Library switcher + Search row (matches Flutter FolderDrawer header)
-			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Edges{Bottom: 8}}, Children: []core.Node{
-				core.View{
-					TestID:  "drawer.library",
-					Style:   core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Symmetric(8, 6), CornerRadius: 10},
-					OnPress: func(core.PressEvent) { a.openLibraries(cx) },
-					Children: []core.Node{
-						core.Text{ContentFunc: func() string { a.rev.Get(); return a.libraryName() }, MaxLines: 1,
-							Style: nsui.TypeTitle.Merge(core.Style{FlexShrink: 1}), StyleFunc: nsui.Colored(colors.Text)},
-						core.Icon{SVG: lucide.ChevronDown(), Style: core.Style{FontSize: 16}, StyleFunc: nsui.Colored(colors.Muted)},
+			core.View{
+				Style:         core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Edges{Bottom: 8}},
+				PanActivation: core.PanActivation{ActiveOffsetX: 18, FailOffsetY: 8},
+				OnPan:         a.drawerPan(cx),
+				Children: []core.Node{
+					core.View{
+						TestID:  "drawer.library",
+						Style:   core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Symmetric(8, 6), CornerRadius: 10},
+						OnPress: func(core.PressEvent) { a.openLibraries(cx) },
+						Children: []core.Node{
+							core.Text{ContentFunc: func() string { a.rev.Get(); return a.libraryName() }, MaxLines: 1,
+								Style: nsui.TypeTitle.Merge(core.Style{FlexShrink: 1}), StyleFunc: nsui.Colored(colors.Text)},
+							core.Icon{SVG: lucide.ChevronDown(), Style: core.Style{FontSize: 16}, StyleFunc: nsui.Colored(colors.Muted)},
+						},
 					},
+					nsui.IconButton{Icon: lucide.Search, Label: "搜索", Size: 34, IconSize: 18, OnPress: func() {
+						a.setDrawerOpen(cx, false)
+						a.openSearchPage()
+					}},
 				},
-				nsui.IconButton{Icon: lucide.Search, Label: "搜索", Size: 34, IconSize: 18, OnPress: func() {
-					a.drawerOpen.Set(false)
-					a.openSearchPage()
-				}},
-			}},
-			collectionRow(lucide.Inbox, "全部素材", SidebarAll, func() string { a.rev.Get(); return statText(a.stats.Total) }, "drawer.all"),
-			collectionRow(lucide.Tag, "未打标签", SidebarUntagged, func() string { a.rev.Get(); return statText(a.stats.UntaggedCount) }, "drawer.untagged"),
-			collectionRow(lucide.FolderOpen, "未分类", SidebarUncategorized, func() string { a.rev.Get(); return statText(a.stats.UncategorizedCount) }, "drawer.uncategorized"),
-			collectionRow(lucide.Clock, "使用历史", SidebarHistory, func() string { a.rev.Get(); return itoa(len(a.historyIDs)) }, "drawer.history"),
-			collectionRow(lucide.Trash, "废纸篓", SidebarTrash, func() string { a.rev.Get(); return statText(a.stats.TrashCount) }, "drawer.trash"),
-			folderTree,
+			},
+			core.Scroll{
+				TestID: "drawer.scroll",
+				Style:  core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
+				Behavior: core.ScrollBehavior{
+					NoBounces:        true,
+					DecelerationRate: core.DecelerationFast,
+				},
+				Children: []core.Node{
+					core.View{Style: core.Style{Gap: 2}, Children: []core.Node{
+						collectionRow(lucide.Inbox, "全部素材", SidebarAll, func() string { a.rev.Get(); return statText(a.stats.Total) }, "drawer.all"),
+						collectionRow(lucide.Tag, "未打标签", SidebarUntagged, func() string { a.rev.Get(); return statText(a.stats.UntaggedCount) }, "drawer.untagged"),
+						collectionRow(lucide.FolderOpen, "未分类", SidebarUncategorized, func() string { a.rev.Get(); return statText(a.stats.UncategorizedCount) }, "drawer.uncategorized"),
+						collectionRow(lucide.Clock, "使用历史", SidebarHistory, func() string { a.rev.Get(); return itoa(len(a.historyIDs)) }, "drawer.history"),
+						collectionRow(lucide.Trash, "废纸篓", SidebarTrash, func() string { a.rev.Get(); return statText(a.stats.TrashCount) }, "drawer.trash"),
+						folderTree,
+					}},
+				},
+			},
 		},
 	}
 }

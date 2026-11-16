@@ -15,7 +15,11 @@ type appHeaderSpec struct {
 	// flush with the window (the gallery). A page inside the root's safe-area
 	// padding leaves it off so the inset is not applied twice.
 	InsetSafeArea bool
-	TestID        string
+	// OmitLeftSafeArea drops the leading safe-area inset when the header has
+	// been moved away from the window's left edge, as the gallery header is
+	// while the drawer is open.
+	OmitLeftSafeArea func() bool
+	TestID           string
 
 	// A page header's leading back button and title. Children replaces them
 	// for screens that draw their own row, such as the gallery.
@@ -30,6 +34,14 @@ type appHeaderSpec struct {
 // appHeader is the one header background container. Both the main gallery and
 // the settings page use it, so the safe-area padding, theme background and
 // floating/page treatment cannot drift apart again.
+// safeSideInset is the shared horizontal margin for the gallery header and
+// its content: the larger of the two landscape safe areas plus the normal
+// 12 point inset. Using one value keeps the header controls and the grid
+// aligned, and keeps both clear of a landscape notch.
+func safeSideInset(safe core.Edges) core.Points {
+	return max(safe.Left, safe.Right) + 12
+}
+
 func (a *App) appHeader(cx *core.Scope, spec appHeaderSpec) core.Node {
 	colors := nsui.ColorsOf(cx)
 
@@ -70,11 +82,20 @@ func (a *App) appHeader(cx *core.Scope, spec appHeaderSpec) core.Node {
 				safe := cx.Env().SafeArea()
 				st.Position = core.Absolute
 				st.Top, st.Left, st.Right = core.Pt(0), core.Pt(0), core.Pt(0)
+				left := safe.Left + 12
+				right := safe.Right + 12
+				if spec.OmitLeftSafeArea != nil && spec.OmitLeftSafeArea() {
+					// Landscape safe areas can differ on each side because of
+					// the notch. Use the larger inset for both margins so they
+					// match and neither control sits under the cutout.
+					pad := safeSideInset(safe)
+					left, right = pad, pad
+				}
 				st.Padding = core.Edges{
 					Top:    6,
 					Bottom: 10,
-					Left:   safe.Left + 12,
-					Right:  safe.Right + 12,
+					Left:   left,
+					Right:  right,
 				}
 				if spec.InsetSafeArea {
 					st.Padding.Top = safe.Top + 6

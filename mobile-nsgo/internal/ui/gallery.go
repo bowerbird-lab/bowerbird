@@ -27,13 +27,15 @@ var drawerSlideTransition = core.Transition{
 
 func (a *App) galleryPage(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
+	contentPad := safeSideInset(cx.Env().SafeArea())
 	a.post(func() { a.ensureLoaded(cx) })
 
 	// Floating simplified header (matches Flutter GalleryHeader + HeaderActionPill)
 	floatingHeader := a.appHeader(cx, appHeaderSpec{
-		Floating:      true,
-		InsetSafeArea: true,
-		TestID:        "gallery.header",
+		Floating:         true,
+		InsetSafeArea:    true,
+		OmitLeftSafeArea: func() bool { return true },
+		TestID:           "gallery.header",
 		Children: []core.Node{
 			core.Show{
 				When: func() bool { return a.multiSelect.Get() },
@@ -77,11 +79,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 									}
 								},
 								OnPress: func(core.PressEvent) {
-									next := !a.drawerOpen.Get()
-									a.drawerOpen.Set(next)
-									if next {
-										a.loadSidebarData(cx)
-									}
+									a.setDrawerOpen(cx, !a.drawerOpen.Get())
 								},
 								Children: []core.Node{nsui.Icon(lucide.Menu, 20, colors.Text)},
 							},
@@ -96,8 +94,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 											}
 										},
 										OnPress: func(core.PressEvent) {
-											a.drawerOpen.Set(true)
-											a.loadSidebarData(cx)
+											a.setDrawerOpen(cx, true)
 										},
 										Children: []core.Node{
 											core.Text{ContentFunc: func() string { a.rev.Get(); return a.currentViewTitle() },
@@ -163,8 +160,9 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 	bannerStack := core.View{
 		StyleFunc: func() core.Style {
 			safe := cx.Env().SafeArea()
+			pad := safeSideInset(safe)
 			return core.Style{
-				Position: core.Absolute, Top: core.Pt(safe.Top + 56), Left: core.Pt(12), Right: core.Pt(12),
+				Position: core.Absolute, Top: core.Pt(safe.Top + 56), Left: core.Pt(pad), Right: core.Pt(pad),
 				Gap: 6, ZIndex: 11,
 			}
 		},
@@ -225,14 +223,12 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 			Gap:           6,
 			EstimatedSize: a.cachedTileSize + 6,
 			OnLoadMore:    func() { a.loadMoreGalleryView(cx) },
-			OnRefresh:     func() { a.refreshGalleryView(cx, true) },
-			Refreshing:    func() bool { a.rev.Get(); return a.gallery.Snapshot().Loading },
 			Ref:           a.galleryRef,
 			Footer: core.Show{When: func() bool { a.rev.Get(); return a.gallery.Snapshot().LoadingMore }, Then: func(cx *core.Scope) core.Node {
 				return core.Text{Content: "加载更多…", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted(), TextAlign: core.TextAlignCenter, Padding: core.All(12)})}
 			}},
 			Empty: a.emptyState(cx),
-			Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0), Padding: core.Edges{Top: 56, Left: 12, Right: 12}},
+			Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0), Padding: core.Edges{Top: 56, Left: contentPad, Right: contentPad}},
 		}
 		gridNode = core.View{
 			Style:    core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
@@ -254,7 +250,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 				StyleFunc: func() core.Style {
 					safe := cx.Env().SafeArea()
 					return core.Style{
-						Position: core.Absolute, Right: core.Pt(safe.Right + 16), Bottom: core.Pt(safe.Bottom + 18),
+						Position: core.Absolute, Right: core.Pt(safeSideInset(safe)), Bottom: core.Pt(safe.Bottom + 18),
 						Width: core.Pt(52), Height: core.Pt(52), CornerRadius: 16,
 						AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
 						Background: colors.AccentFill(), ZIndex: 12,
@@ -267,43 +263,74 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 	}
 
 	scrim := core.Show{
-		When: func() bool { return a.drawerOpen.Get() },
+		When: func() bool { return a.drawerOpen.Get() || a.drawerDragging.Get() },
 		Then: func(cx *core.Scope) core.Node {
 			return core.View{
-				Style: core.Style{
-					Position: core.Absolute, Top: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0),
-					Background: themeRole(cx, "overlay"), ZIndex: 20,
-				},
-				OnPress:       func(core.PressEvent) { a.drawerOpen.Set(false) },
-				PanActivation: core.PanActivation{ActiveOffsetX: 14, FailOffsetY: 16},
-				OnPan: func(ev core.PanEvent) {
-					if ev.Phase == core.GestureEnded && (ev.Translation.X < -30 || ev.Velocity.X < -250) {
-						a.drawerOpen.Set(false)
+				StyleFunc: func() core.Style {
+					dw := a.drawerWidth(cx)
+					opacity := float32(0)
+					if dw > 0 {
+						opacity = float32(a.drawerPosition(cx)) / float32(dw)
+						if opacity > 1 {
+							opacity = 1
+						}
 					}
+					tr := drawerSlideTransition
+					if a.drawerDragging.Get() {
+						tr = core.Transition{}
+					}
+					return core.Style{
+						Position: core.Absolute, Top: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0), Left: core.Pt(0),
+						Background: themeRole(cx, "overlay"), ZIndex: 20, PointerEvents: core.PointerEventsAuto,
+						Opacity: core.Alpha(opacity), Transition: tr,
+					}
+				},
+				OnPress:       func(core.PressEvent) { a.setDrawerOpen(cx, false) },
+				PanActivation: core.PanActivation{ActiveOffsetX: 12, FailOffsetY: 16},
+				OnPan:         a.drawerPan(cx),
+			}
+		},
+	}
+
+	bottomFade := core.View{
+		StyleFunc: func() core.Style {
+			bg := colors.Background()
+			return core.Style{
+				Position: core.Absolute, Left: core.Pt(0), Right: core.Pt(0), Bottom: core.Pt(0),
+				Height: core.Pt(28), ZIndex: 11, PointerEvents: core.PointerEventsNone,
+				Gradients: []core.Gradient{
+					core.LinearGradient(180, nsui.Alpha(bg, 0), bg),
 				},
 			}
 		},
 	}
 
 	mainShift := core.View{
+		TestID: "gallery.main",
 		StyleFunc: func() core.Style {
-			var tx core.Points
-			var rad core.Points
-			if a.drawerOpen.Get() {
-				tx = a.drawerWidth(cx)
+			pos := a.drawerPosition(cx)
+			rad := core.Points(0)
+			if pos > 0 {
 				rad = 28
+			}
+			tr := drawerSlideTransition
+			if a.drawerDragging.Get() {
+				tr = core.Transition{}
 			}
 			return core.Style{
 				Width: core.Pct(100), Height: core.Pct(100),
 				Background: colors.Background(), Overflow: core.Hidden,
 				CornerRadii: core.Corners{TopLeft: rad, BottomLeft: rad},
-				Transform:   core.Transform{TranslateX: tx},
-				Transition:  drawerSlideTransition,
+				Transform:   core.Transform{TranslateX: pos},
+				Transition:  tr,
 				ZIndex:      15,
 			}
 		},
+		PanActivation: core.PanActivation{ActiveOffsetX: 12, FailOffsetY: 16},
+		OnPan:         a.drawerPan(cx),
 		Children: []core.Node{
 			gridNode,
+			bottomFade,
 			floatingHeader,
 			bannerStack,
 			uploadFAB,
@@ -313,7 +340,10 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 
 	return core.View{
 		StyleFunc: func() core.Style {
-			return core.Style{Width: core.Pct(100), Height: core.Pct(100), Overflow: core.Hidden, Background: colors.Background()}
+			// The rounded main panel slides over the sidebar. Its clipped
+			// corners expose this layer, which must match the drawer instead
+			// of the main content background.
+			return core.Style{Width: core.Pct(100), Height: core.Pct(100), Overflow: core.Hidden, Background: themeRole(cx, "sidebar")}
 		},
 		Children: []core.Node{
 			a.leftDrawerPanel(cx),
@@ -370,6 +400,7 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 			safe := cx.Env().SafeArea()
 			topDp := int(safe.Top) + 56
 			bottomDp := int(safe.Bottom) + 84
+			sideDp := int(safeSideInset(safe))
 			if isSearch {
 				topDp = 4
 				bottomDp = 24
@@ -385,15 +416,15 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 				}
 			}
 			return map[string]any{
-				"cols":          a.gridCols.Get(),
-				"isDark":        cx.Env().Dark(),
-				"theme":         themeColors,
-				"refreshing":    snap.Loading,
-				"emptyText":     emptyText,
-				"scrollTopSeq":  scrollSeq,
-				"topInsetDp":    topDp,
-				"bottomInsetDp": bottomDp,
-				"rows":          entries,
+				"cols":              a.gridCols.Get(),
+				"isDark":            cx.Env().Dark(),
+				"theme":             themeColors,
+				"emptyText":         emptyText,
+				"scrollTopSeq":      scrollSeq,
+				"topInsetDp":        topDp,
+				"bottomInsetDp":     bottomDp,
+				"horizontalInsetDp": sideDp,
+				"rows":              entries,
 			}
 		},
 		OnEvent: func(name string, data any) {

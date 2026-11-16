@@ -127,7 +127,29 @@ func TestPairingToGalleryDrawerFilterAndDetailFlow(t *testing.T) {
 	app.Press("id:gallery.drawer")
 	app.WaitFor("id:drawer.all >> text:不可用", 2*time.Second)
 	app.WaitFor("text:Design", 2*time.Second)
+
+	// Drag the main panel left to close the drawer, then right to reopen it.
+	app.Pan("id:gallery.main", core.Point{X: -40}, core.Point{X: -420})
+	app.Advance(600 * time.Millisecond)
+	if tx := app.Find("id:gallery.main").Style.Transform.TranslateX; tx > 1 {
+		t.Fatalf("drawer closed by drag at x=%v, want 0", tx)
+	}
+	app.Pan("id:gallery.main", core.Point{X: 40}, core.Point{X: 360})
+	app.Advance(600 * time.Millisecond)
+	drawerWidth := core.Points(420 * 0.78)
+	if tx := app.Find("id:gallery.main").Style.Transform.TranslateX; tx < drawerWidth-2 || tx > drawerWidth+2 {
+		t.Fatalf("drawer opened by drag at x=%v, want %v", tx, drawerWidth)
+	}
+
+	// Pulling past the open position must spring back without leaving the
+	// main panel stuck at an accumulated overscroll offset.
+	app.Pan("id:gallery.main", core.Point{X: 40}, core.Point{X: 200})
+	app.Advance(600 * time.Millisecond)
+	if tx := app.Find("id:gallery.main").Style.Transform.TranslateX; tx < drawerWidth-2 || tx > drawerWidth+2 {
+		t.Fatalf("drawer overscroll settled at x=%v, want %v", tx, drawerWidth)
+	}
 	app.Back()
+	app.Advance(400 * time.Millisecond)
 
 	// Open detail (immersive by default), single-tap to show header, then open metadata sheet.
 	app.WaitFor("id:gallery.tile", 2*time.Second)
