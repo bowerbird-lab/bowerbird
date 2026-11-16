@@ -166,7 +166,7 @@ func (a *App) librariesDialog(cx *core.Scope) core.Node {
 					rows = append(rows, core.View{
 						Style: drawerRowStyle(colors),
 						OnPress: func(core.PressEvent) {
-							if !a.libsBusy.Get() {
+							if !a.libsBusy.Get() && !lib.IsActive {
 								a.switchLibrary(cx, lib)
 							}
 						},
@@ -175,11 +175,6 @@ func (a *App) librariesDialog(cx *core.Scope) core.Node {
 								core.Text{Content: lib.Name + " · " + itoa(int(lib.ItemCount)) + " 项", MaxLines: 1,
 									Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})},
 								core.Text{Content: subtitle, MaxLines: 1, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
-							}},
-							core.Show{When: func() bool { return !lib.IsActive }, Then: func(cx *core.Scope) core.Node {
-								return nsui.Button{Text: "切换", Variant: nsui.ButtonSecondary,
-									Disabled: func() bool { return a.libsBusy.Get() },
-									OnPress:  func() { a.switchLibrary(cx, lib) }}
 							}},
 						},
 					})
