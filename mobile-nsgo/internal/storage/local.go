@@ -664,10 +664,11 @@ type Preferences struct {
 	LightTheme   string `json:"lightTheme"`
 	DarkTheme    string `json:"darkTheme"`
 	SystemAccent bool   `json:"systemAccent"`
+	GridColumns  int    `json:"gridColumns"`
 }
 
 // PreferencesVersion is the current preferences document version.
-const PreferencesVersion = 1
+const PreferencesVersion = 2
 
 // DefaultPreferences are the values a fresh install and a corrupt document
 // fall back to.
@@ -678,6 +679,7 @@ func DefaultPreferences() Preferences {
 		LightTheme:   "default-light",
 		DarkTheme:    "default-dark",
 		SystemAccent: true,
+		GridColumns:  3,
 	}
 }
 
@@ -714,6 +716,9 @@ func (p Preferences) Normalize() Preferences {
 	}
 	if strings.TrimSpace(p.DarkTheme) == "" {
 		p.DarkTheme = def.DarkTheme
+	}
+	if p.GridColumns < 2 || p.GridColumns > 5 {
+		p.GridColumns = def.GridColumns
 	}
 	return p
 }

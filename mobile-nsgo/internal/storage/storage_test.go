@@ -197,7 +197,7 @@ func TestPreferencesDefaultsNormalizeAndRoundTrip(t *testing.T) {
 		t.Fatalf("fresh preferences = %+v", prefs)
 	}
 
-	want := Preferences{ThemeMode: "dark", LightTheme: "sand-light", DarkTheme: "midnight-dark", SystemAccent: false}
+	want := Preferences{ThemeMode: "dark", LightTheme: "sand-light", DarkTheme: "midnight-dark", SystemAccent: false, GridColumns: 4}
 	if err := local.SavePreferences(want); err != nil {
 		t.Fatal(err)
 	}
@@ -205,12 +205,12 @@ func TestPreferencesDefaultsNormalizeAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ThemeMode != want.ThemeMode || got.LightTheme != want.LightTheme || got.DarkTheme != want.DarkTheme || got.SystemAccent != want.SystemAccent || got.Version != PreferencesVersion {
+	if got.ThemeMode != want.ThemeMode || got.LightTheme != want.LightTheme || got.DarkTheme != want.DarkTheme || got.SystemAccent != want.SystemAccent || got.GridColumns != want.GridColumns || got.Version != PreferencesVersion {
 		t.Fatalf("loaded preferences = %+v", got)
 	}
 
-	bad := Preferences{ThemeMode: "sepia", LightTheme: "", DarkTheme: ""}.Normalize()
-	if bad.ThemeMode != "system" || bad.LightTheme != "default-light" || bad.DarkTheme != "default-dark" {
+	bad := Preferences{ThemeMode: "sepia", LightTheme: "", DarkTheme: "", GridColumns: 1}.Normalize()
+	if bad.ThemeMode != "system" || bad.LightTheme != "default-light" || bad.DarkTheme != "default-dark" || bad.GridColumns != 3 {
 		t.Fatalf("normalized = %+v", bad)
 	}
 }

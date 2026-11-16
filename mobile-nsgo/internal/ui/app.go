@@ -232,7 +232,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		drawerOpen:           core.NewSignal(cx, false),
 		drawerDragging:       core.NewSignal(cx, false),
 		drawerPos:            core.NewSignal(cx, core.Points(0)),
-		gridCols:             core.NewSignal(cx, 3),
+		gridCols:             core.NewSignal(cx, prefs.GridColumns),
 		galleryRev:           core.NewSignal(cx, 0),
 		galleryScrollSeq:     core.NewSignal(cx, 0),
 		searchScrollSeq:      core.NewSignal(cx, 0),
@@ -455,7 +455,7 @@ func (a *App) Render(cx *core.Scope) core.Node {
 					Background: themeRole(cx, "preview"), Color: themeRole(cx, "onBadge"),
 				}
 			}
-			if a.screen.Get() == screenGallery {
+			if a.screen.Get() == screenGallery || a.screen.Get() == screenSettings {
 				return core.Style{
 					Width: core.Pct(100), Height: core.Pct(100),
 					Background: colors.Background(), Color: colors.Text(),

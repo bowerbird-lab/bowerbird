@@ -445,6 +445,7 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 			case "pinchCols":
 				if cols := nativeInt(m, "cols"); cols >= 2 && cols <= 5 && cols != a.gridCols.Get() {
 					a.gridCols.Set(cols)
+					a.savePreferences()
 					a.rebuildGalleryRows()
 					a.rebuildSearchRows()
 					a.bump()
@@ -837,6 +838,7 @@ func (a *App) setGridColumns(cx *core.Scope, next int) {
 		anchorOffset = pos.Offset
 	}
 	a.gridCols.Set(next)
+	a.savePreferences()
 	a.rebuildGalleryRows()
 	a.rebuildSearchRows()
 	a.bump()

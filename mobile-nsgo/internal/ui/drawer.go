@@ -320,18 +320,28 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 		TestID: "drawer.panel",
 		StyleFunc: func() core.Style {
 			dw := a.drawerWidth(cx)
-			safe := cx.Env().SafeArea()
 			return core.Style{
 				Position: core.Absolute, Left: core.Pt(0), Top: core.Pt(0), Bottom: core.Pt(0),
 				Width: core.Pt(dw), Background: themeRole(cx, "sidebar"),
-				Padding: core.Edges{Top: safe.Top + 10, Bottom: safe.Bottom + 8, Left: safe.Left + 12, Right: 12},
-				Gap:     2, ZIndex: 10,
+				ZIndex: 10,
 			}
 		},
 		Children: []core.Node{
 			// Library switcher + Search row (matches Flutter FolderDrawer header)
 			core.View{
-				Style:         core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Edges{Bottom: 8}},
+				StyleFunc: func() core.Style {
+					safe := cx.Env().SafeArea()
+					bg := themeRole(cx, "sidebar")
+					return core.Style{
+						Position: core.Absolute, Left: core.Pt(0), Right: core.Pt(0), Top: core.Pt(0),
+						Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6,
+						Padding: core.Edges{Top: safe.Top + 10, Left: safe.Left + 12, Bottom: 8, Right: 12},
+						ZIndex:  2,
+						Gradients: []core.Gradient{
+							core.LinearGradient(180, bg, nsui.Alpha(bg, 0)),
+						},
+					}
+				},
 				PanActivation: core.PanActivation{ActiveOffsetX: 18, FailOffsetY: 8},
 				OnPan:         a.drawerPan(cx),
 				Children: []core.Node{
@@ -359,7 +369,12 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 					DecelerationRate: core.DecelerationFast,
 				},
 				Children: []core.Node{
-					core.View{Style: core.Style{Gap: 2}, Children: []core.Node{
+					core.View{StyleFunc: func() core.Style {
+						safe := cx.Env().SafeArea()
+						return core.Style{Gap: 2, Padding: core.Edges{
+							Top: safe.Top + 56, Bottom: safe.Bottom + 8, Left: safe.Left + 12, Right: 12,
+						}}
+					}, Children: []core.Node{
 						collectionRow(lucide.Inbox, "全部素材", SidebarAll, func() string { a.rev.Get(); return statText(a.stats.Total) }, "drawer.all"),
 						collectionRow(lucide.Tag, "未打标签", SidebarUntagged, func() string { a.rev.Get(); return statText(a.stats.UntaggedCount) }, "drawer.untagged"),
 						collectionRow(lucide.FolderOpen, "未分类", SidebarUncategorized, func() string { a.rev.Get(); return statText(a.stats.UncategorizedCount) }, "drawer.uncategorized"),

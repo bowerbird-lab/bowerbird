@@ -250,19 +250,21 @@ func TestSettingsScreenSelectsAndPersistsThemes(t *testing.T) {
 	app.WaitForGone("id:settings.themePicker", 2*time.Second)
 	app.FastForward(400 * time.Millisecond)
 
+	app.Press("id:settings.gridMore")
+
 	prefs, err := storage.NewLocal(dir).LoadPreferences()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prefs.ThemeMode != "dark" || prefs.LightTheme != "sand-light" || prefs.DarkTheme != "midnight-dark" {
+	if prefs.ThemeMode != "dark" || prefs.LightTheme != "sand-light" || prefs.DarkTheme != "midnight-dark" || prefs.GridColumns != 4 {
 		t.Fatalf("persisted preferences = %+v", prefs)
 	}
 
 	// The settings screen returns to the connect screen it was opened from.
-	app.Press("id:settings.header >> text:完成")
+	app.Press("id:settings.back")
 	app.WaitFor("id:connect.address", 2*time.Second)
 	if app.Exists("id:settings.header") {
-		t.Fatal("settings stayed open after 完成")
+		t.Fatal("settings stayed open after back")
 	}
 }
 
@@ -273,6 +275,8 @@ func TestThemeSettingsResetAndReloadKeepDefaults(t *testing.T) {
 	app.WaitFor("id:settings.themes.reset", 2*time.Second)
 	app.Press("id:settings.themes.reset")
 	app.Press("id:settings.themes.reload")
+	app.Press("id:settings.gridMore")
+
 	prefs, err := storage.NewLocal(dir).LoadPreferences()
 	if err != nil {
 		t.Fatal(err)

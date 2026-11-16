@@ -238,6 +238,7 @@ func (a *App) savePreferences() {
 		LightTheme:   a.settingsLightTheme.Get(),
 		DarkTheme:    a.settingsDarkTheme.Get(),
 		SystemAccent: a.settingsSystemAccent.Get(),
+		GridColumns:  a.gridCols.Get(),
 	}
 	if err := a.local.SavePreferences(prefs); err != nil {
 		log.Printf("[Settings] saving preferences: %v", err)
@@ -637,7 +638,12 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 			core.Scroll{
 				Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
 				Children: []core.Node{
-					core.View{Style: core.Style{Gap: 10, Padding: core.Edges{Top: 54, Bottom: 20}}, Children: []core.Node{
+					core.View{StyleFunc: func() core.Style {
+						safe := cx.Env().SafeArea()
+						return core.Style{Gap: 10, Padding: core.Edges{
+							Top: safe.Top + 56, Bottom: safe.Bottom + 20, Left: safe.Left + 12, Right: safe.Right + 12,
+						}}
+					}, Children: []core.Node{
 						card("外观",
 							core.View{Style: core.Style{Gap: 8}, Children: []core.Node{
 								core.Text{Content: "颜色模式", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
@@ -717,11 +723,30 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 				},
 			},
 			a.appHeader(cx, appHeaderSpec{
-				Floating: true,
-				TestID:   "settings.header",
-				Title:    "设置",
-				OnBack:   a.closeSettings,
-				Trailing: []core.Node{nsui.Button{Text: "完成", Variant: nsui.ButtonGhost, OnPress: a.closeSettings}},
+				Floating:         true,
+				InsetSafeArea:    true,
+				OmitLeftSafeArea: func() bool { return true },
+				TestID:           "settings.header",
+				Children: []core.Node{
+					core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
+						core.View{
+							TestID: "settings.back",
+							StyleFunc: func() core.Style {
+								return core.Style{
+									Width: core.Pt(42), Height: core.Pt(42), CornerRadius: 21,
+									AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+									Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+								}
+							},
+							OnPress:  func(core.PressEvent) { a.closeSettings() },
+							Children: []core.Node{nsui.Icon(lucide.ChevronLeft, 20, colors.Text)},
+						},
+						core.Text{Content: "设置", Role: core.RoleHeader,
+							Style:     nsui.TypeTitle.Merge(core.Style{FlexGrow: 1, TextAlign: core.TextAlignCenter}),
+							StyleFunc: nsui.Colored(colors.Text)},
+						core.View{Style: core.Style{Width: core.Pt(42)}},
+					}},
+				},
 			}),
 			a.themePickerSheet(cx),
 		},

@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/coder/websocket v1.8.14
-	github.com/nsgo-dev/nsgo v0.0.0-20261115143443-330763d1c121
+	github.com/nsgo-dev/nsgo v0.1.0
 )
 
 require (
