@@ -176,6 +176,8 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 		var dominantColor string
 		var palette []string
 		var imgMeta *ImageMeta
+		var trashedAt int64
+		var inTrash bool
 
 		if hasMetaFile {
 			if raw, rErr := os.ReadFile(filepath.Join(itemDir, itemMetadataName)); rErr == nil {
@@ -195,6 +197,10 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 					}
 					if meta.ImportedAt > 0 {
 						importedAt = meta.ImportedAt
+					}
+					if meta.TrashedAt > 0 {
+						trashedAt = meta.TrashedAt
+						inTrash = true
 					}
 					width = meta.Width
 					height = meta.Height
@@ -268,6 +274,8 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 			Meta:          imgMeta,
 			Tags:          []string{},
 			Folders:       []string{},
+			InTrash:       inTrash,
+			TrashedAt:     trashedAt,
 			CreatedAt:     createdAt,
 			ImportedAt:    importedAt,
 			UpdatedAt:     updatedAt,
@@ -302,8 +310,8 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin rescan transaction: %w", err)
 	}
-	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO items (id, hex, name, extension, filename, size, mime_type, width, height, has_thumbnail, dominant_color, palette, meta_json, tags, created_at, imported_at, updated_at)
-	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO items (id, hex, name, extension, filename, size, mime_type, width, height, has_thumbnail, dominant_color, palette, meta_json, tags, in_trash, trashed_at, created_at, imported_at, updated_at)
+	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, fmt.Errorf("failed to prepare rescan insert: %w", err)
@@ -311,9 +319,13 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 
 	var addedItems []Item
 	for _, d := range discovered {
+		inTrashInt := 0
+		if d.item.InTrash {
+			inTrashInt = 1
+		}
 		res, execErr := stmt.Exec(
 			d.item.ID, d.item.Hex, d.item.Name, d.item.Extension, d.item.Filename, d.item.Size, d.item.MimeType,
-			d.item.Width, d.item.Height, d.hasThumb, d.item.DominantColor, d.paletteStr, d.metaJSON, "", d.item.CreatedAt, d.item.ImportedAt, d.item.UpdatedAt,
+			d.item.Width, d.item.Height, d.hasThumb, d.item.DominantColor, d.paletteStr, d.metaJSON, "", inTrashInt, d.item.TrashedAt, d.item.CreatedAt, d.item.ImportedAt, d.item.UpdatedAt,
 		)
 		if execErr != nil {
 			continue
@@ -330,7 +342,25 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 
 	if len(addedItems) > 0 {
 		m.upsertItemsInCache(addedItems, "")
-		m.emit("library-items-upserted", addedItems)
+		var activeAdded []Item
+		var trashedAdded []Item
+		for _, it := range addedItems {
+			if it.InTrash {
+				trashedAdded = append(trashedAdded, it)
+			} else {
+				activeAdded = append(activeAdded, it)
+			}
+		}
+		if len(trashedAdded) > 0 {
+			m.cacheMu.Lock()
+			if m.cacheLoaded {
+				m.trashDesc = append(trashedAdded, m.trashDesc...)
+			}
+			m.cacheMu.Unlock()
+		}
+		if len(activeAdded) > 0 {
+			m.emit("library-items-upserted", activeAdded)
+		}
 		m.notifyItemsUpdated()
 	}
 

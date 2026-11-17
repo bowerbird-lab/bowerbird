@@ -52,6 +52,17 @@ func TestRescanLibraryRestoresMissingItemsSafely(t *testing.T) {
 		t.Fatalf("ImportSingleFileWithTagsAndFolder: %v", err)
 	}
 
+	// 1b. Import another item and move it to trash so we verify existing trashed items stay in trash.
+	trashedSrc := filepath.Join(srcDir, "already-trashed.png")
+	writeRescanTestPNG(t, trashedSrc, 24, 24, color.RGBA{R: 120, G: 120, B: 120, A: 255})
+	existingTrashed, err := mgr.ImportSingleFileWithTagsAndFolder(trashedSrc, nil, "")
+	if err != nil {
+		t.Fatalf("ImportSingleFile(trashed): %v", err)
+	}
+	if err := mgr.MoveToTrash(existingTrashed.ID); err != nil {
+		t.Fatalf("MoveToTrash: %v", err)
+	}
+
 	// 2. Create an orphaned item directory WITH an existing thumbnail.png and metadata.json
 	//    (simulating an interrupted cloud sync where files exist on disk but SQLite missed them).
 	orphan1ID := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -86,13 +97,30 @@ func TestRescanLibraryRestoresMissingItemsSafely(t *testing.T) {
 	}
 	writeRescanTestPNG(t, filepath.Join(orphan2Dir, "orphan-two.png"), 40, 40, color.RGBA{R: 40, G: 180, B: 90, A: 255})
 
+	// 3b. Create a third orphaned item whose metadata.json indicates it was in Trash.
+	orphanTrashedID := "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+	orphanTrashedDir := filepath.Join(info.Path, "items", orphanTrashedID)
+	if err := os.MkdirAll(orphanTrashedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRescanTestPNG(t, filepath.Join(orphanTrashedDir, "orphan-trashed.png"), 20, 20, color.RGBA{R: 90, G: 90, B: 90, A: 255})
+	trashedMetaBytes, _ := json.Marshal(ItemMetadata{
+		ID:        orphanTrashedID,
+		Hex:       orphanTrashedID,
+		Name:      "Orphan Trashed",
+		TrashedAt: 1700000123,
+	})
+	if err := os.WriteFile(filepath.Join(orphanTrashedDir, "metadata.json"), trashedMetaBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	// 4. Run RescanLibrary.
 	added, err := mgr.RescanLibrary()
 	if err != nil {
 		t.Fatalf("RescanLibrary: %v", err)
 	}
-	if added != 2 {
-		t.Fatalf("RescanLibrary added = %d, want 2", added)
+	if added != 3 {
+		t.Fatalf("RescanLibrary added = %d, want 3", added)
 	}
 
 	// 5. Verify existing item kept its tags and folders untouched.
@@ -122,6 +150,24 @@ func TestRescanLibraryRestoresMissingItemsSafely(t *testing.T) {
 		if !it.HasThumbnail {
 			t.Fatalf("rescanned item %s should have HasThumbnail=true", id)
 		}
+	}
+
+	// 5b. Verify existing trashed item stayed in trash.
+	gotExistingTrashed, err := mgr.GetItem(existingTrashed.ID)
+	if err != nil || gotExistingTrashed == nil {
+		t.Fatalf("GetItem(existingTrashed): %v", err)
+	}
+	if !gotExistingTrashed.InTrash || gotExistingTrashed.TrashedAt == 0 {
+		t.Fatalf("existing trashed item left trash: InTrash=%v TrashedAt=%d", gotExistingTrashed.InTrash, gotExistingTrashed.TrashedAt)
+	}
+
+	// 6b. Verify orphaned trashed item was restored into trash, not All.
+	gotOrphanTrashed, err := mgr.GetItem(orphanTrashedID)
+	if err != nil || gotOrphanTrashed == nil {
+		t.Fatalf("GetItem(orphanTrashed): %v", err)
+	}
+	if !gotOrphanTrashed.InTrash || gotOrphanTrashed.TrashedAt != 1700000123 {
+		t.Fatalf("orphan trashed item = (InTrash=%v, TrashedAt=%d), want (true, 1700000123)", gotOrphanTrashed.InTrash, gotOrphanTrashed.TrashedAt)
 	}
 
 	// 7. Verify existing thumbnail file on disk was NOT overwritten.
