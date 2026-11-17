@@ -29,16 +29,20 @@ func (a *App) attachURLDropTarget(el ui.Element) {
 	}
 	if drop, ok := ui.DropData(el, opts); ok {
 		folder := a.takeDropFolder()
-		// Finder/Explorer drags also advertise a URI list. Route their file
-		// URLs through the normal native-drop path instead of swallowing them.
-		if files, err := drop.Data.Files(); err == nil && len(files) > 0 {
-			a.handleDroppedFiles(files, folder)
-			return
-		}
-		urls, referer := a.dropURLsFromData(drop.Data)
-		if len(urls) > 0 {
-			a.handleURLDropsToFolder(urls, referer, folder)
-		}
+		a.handleDropDataToFolder(drop.Data, folder)
+	}
+}
+
+func (a *App) handleDropDataToFolder(data transfer.Data, folder string) {
+	// Finder/Explorer drags also advertise a URI list. Route their file
+	// URLs through the normal native-drop path instead of swallowing them.
+	if files, err := data.Files(); err == nil && len(files) > 0 {
+		a.handleDroppedFiles(files, folder)
+		return
+	}
+	urls, referer := a.dropURLsFromData(data)
+	if len(urls) > 0 {
+		a.handleURLDropsToFolder(urls, referer, folder)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"bowerbird/core"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -135,7 +136,13 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 	// folders to reorder or nest. The middle of a sibling row nests the
 	// dragged folder; its top/bottom quarter inserts before/after it.
 	dragged, dropOver := ui.DragOver[sidebarDrag](b)
-	itemDropOver := dropOver && len(dragged.ItemIDs) > 0
+	fileDropOpts := transfer.DropOptions{
+		Formats:    []transfer.Format{transfer.FileList, transfer.URIList, transfer.Text, transfer.HTML},
+		Operations: transfer.Copy | transfer.Move,
+	}
+	_, dataOver := ui.DataDragOver(b, fileDropOpts)
+	nativeOver := dataOver || b.FileDragOver()
+	itemDropOver := (dropOver && len(dragged.ItemIDs) > 0) || nativeOver
 	folderDropOver := dropOver && dragged.FolderID != "" && dragged.FolderID != f.ID
 	dropZone := folderDropInto
 	if folderDropOver {
@@ -154,7 +161,7 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 		bg = p.hover
 	}
 	b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
-	if b.Hovered() {
+	if b.Hovered() || nativeOver {
 		a.dropFolderID = f.ID
 	}
 	b.Children(func() {
@@ -193,7 +200,7 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 	if dropped, ok := ui.Drop[sidebarDrag](b); ok {
 		switch {
 		case len(dropped.ItemIDs) > 0:
-			a.addItemsToFolder(dropped.ItemIDs, f.ID)
+			a.moveItemsToFolder(dropped.ItemIDs, f.ID)
 		case dropped.FolderID != "" && dropped.FolderID != f.ID:
 			zone := folderDropInto
 			if _, y, ok := b.PointerPosition(); ok {
@@ -205,6 +212,9 @@ func (a *App) folderRow(c *ui.Context, f core.Folder, depth int) {
 				a.moveFolderToParent(dropped.FolderID, f.ID)
 			}
 		}
+	}
+	if drop, ok := ui.DropData(b, fileDropOpts); ok {
+		a.handleDropDataToFolder(drop.Data, f.ID)
 	}
 	b.ContextMenu(func(m *ui.Menu) {
 		a.folderContextMenu(m, f)
