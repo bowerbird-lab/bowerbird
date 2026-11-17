@@ -146,6 +146,25 @@ func (s *UserDataStore) GetRecentLibraries() []string {
 	return existing
 }
 
+// RemoveRecentLibrary removes a library path from the recent list and saves atomically.
+func (s *UserDataStore) RemoveRecentLibrary(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	filtered := make([]string, 0, len(s.data.RecentLibraries))
+	for _, p := range s.data.RecentLibraries {
+		if p != path {
+			filtered = append(filtered, p)
+		}
+	}
+	s.data.RecentLibraries = filtered
+	if s.data.ActiveLibraryPath == path {
+		s.data.ActiveLibraryPath = ""
+	}
+	s.data.UpdatedAt = time.Now().Unix()
+	return s.saveLocked()
+}
+
 // GetTheme returns the persisted colour mode (may be empty on first run).
 func (s *UserDataStore) GetTheme() string {
 	s.mu.RLock()

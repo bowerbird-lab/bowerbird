@@ -11,6 +11,8 @@ type WindowSpec struct {
 	Height          int
 	MinWidth        int
 	MinHeight       int
+	MaxWidth        int
+	MaxHeight       int
 	BackgroundColor string
 	TitleBarHidden  bool
 	TitleBarHeight  int

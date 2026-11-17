@@ -1,6 +1,7 @@
 package app
 
 import (
+	"runtime"
 	"time"
 
 	"bowerbird/core"
@@ -29,7 +30,11 @@ func (a *App) viewSidebar(c *ui.Context) {
 		// The sidebar toggle lives in the workspace header for every view, so
 		// this strip only drags the window and clears the traffic lights.
 		bar := c.TitleBar()
-		ui.Row(c).Height(headerHeight).FillWidth().Padding(0, 8, 0, bar.Left+gallerySidePadding).DragWindow()
+		var sidebarHeaderHeight float32 = headerHeight
+		if runtime.GOOS == "windows" {
+			sidebarHeaderHeight = 12
+		}
+		ui.Row(c).Height(sidebarHeaderHeight).FillWidth().Padding(0, 8, 0, bar.Left+gallerySidePadding).DragWindow()
 		a.sidebarLibrarySwitcher(c)
 		ui.Scroll(c).Grow(1).Shrink(1).Padding(4, 10, 12, 10).Children(func() {
 			a.navRow(c, NavAll, iconAll, a.t("sidebar.allItems"), a.stats.Total)
