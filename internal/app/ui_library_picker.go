@@ -293,6 +293,27 @@ func (a *App) libraryPickerRow(c *ui.Context, ref core.LibraryRef, canReorder bo
 	if row.Clicked() {
 		a.openLibraryRef(ref)
 	}
+	row.ContextMenu(func(m *ui.Menu) {
+		if m.Item(a.t("sidebar.removeLibrary")).Chosen() {
+			if err := a.svc.RemoveRecentLibrary(ref.Path); err != nil {
+				a.showToast(err.Error())
+				return
+			}
+			a.recent = a.svc.GetRecentLibraryRefs()
+			if active {
+				if len(a.recent) > 0 {
+					a.openLibraryRef(a.recent[0])
+				} else {
+					a.libraryPickerOpen = false
+					go func() {
+						if err := a.svc.CloseLibrary(); err != nil {
+							a.post(func() { a.showToast(err.Error()) })
+						}
+					}()
+				}
+			}
+		}
+	})
 }
 
 func (a *App) libraryPickerAction(c *ui.Context, key string, icon *ui.SVG, label string, onClick func()) {

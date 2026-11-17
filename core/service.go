@@ -77,8 +77,8 @@ func (s *Service) CreateLibrary(parentDir string, libName string) (*LibraryInfo,
 		return nil, WrapAppError(ErrCodeCreateLibDirFailed, err)
 	}
 	s.emit(LibraryOpenedEvent, info)
-	_ = s.CloseSetupWindow()
 	s.openMainWindow()
+	_ = s.CloseSetupWindow()
 	return info, nil
 }
 
@@ -91,8 +91,8 @@ func (s *Service) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 		return nil, WrapAppError(ErrCodeInvalidLibDir, err)
 	}
 	s.emit(LibraryOpenedEvent, info)
-	_ = s.CloseSetupWindow()
 	s.openMainWindow()
+	_ = s.CloseSetupWindow()
 	return info, nil
 }
 
@@ -143,10 +143,10 @@ func (s *Service) CloseLibrary() error {
 	s.emit(LibraryClosedEvent, "")
 	// The main window goes away with the library. Only the setup window stays,
 	// and picking a library there creates a fresh main window.
+	_ = s.OpenSetupWindow()
 	if h := s.getHost(); h != nil {
 		h.CloseMainWindow()
 	}
-	_ = s.OpenSetupWindow()
 	return nil
 }
 
@@ -376,6 +376,14 @@ type LibraryRef struct {
 	// show both without opening every library in the list.
 	Name string `json:"name,omitempty"`
 	Icon string `json:"icon,omitempty"`
+}
+
+// RemoveRecentLibrary removes a library from the recent libraries list.
+func (s *Service) RemoveRecentLibrary(path string) error {
+	if s.mgr == nil || s.mgr.GetUserDataStore() == nil {
+		return ErrCoreNotInitialized
+	}
+	return s.mgr.GetUserDataStore().RemoveRecentLibrary(path)
 }
 
 // GetRecentLibraryRefs returns the recent libraries with their stable IDs.

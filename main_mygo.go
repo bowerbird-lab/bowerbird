@@ -412,6 +412,8 @@ func (h *appHost) windowOptions(spec core.WindowSpec) mygo.WindowOptions {
 		Height:          spec.Height,
 		MinWidth:        spec.MinWidth,
 		MinHeight:       spec.MinHeight,
+		MaxWidth:        spec.MaxWidth,
+		MaxHeight:       spec.MaxHeight,
 		Transparent:     true,
 		BackgroundColor: h.views.WindowBackgroundColor(),
 		// Every window is created with the material, even while the switch is
@@ -427,6 +429,7 @@ func (h *appHost) windowOptions(spec core.WindowSpec) mygo.WindowOptions {
 		opts.Content = h.views.LogsContent()
 	case "setup":
 		opts.Content = h.views.SetupContent()
+		opts.Frameless = true
 	default:
 		opts.Content = h.views.MainContent()
 	}

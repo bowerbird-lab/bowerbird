@@ -829,6 +829,7 @@
     "noFoldersHint": "Drag items here to organize",
     "noLibrariesFound": "No libraries found",
     "openLibrary": "Open Library...",
+    "removeLibrary": "Remove from List",
     "renameMenu": "Rename...",
     "searchLibraryPlaceholder": "Search library...",
     "tags": "All Tags",

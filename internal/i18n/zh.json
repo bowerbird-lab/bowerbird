@@ -829,6 +829,7 @@
     "noFoldersHint": "拖拽素材到此处进行归类整理",
     "noLibrariesFound": "未找到资源库",
     "openLibrary": "打开资源库…",
+    "removeLibrary": "从列表中移除",
     "renameMenu": "重命名…",
     "searchLibraryPlaceholder": "搜索资源库…",
     "tags": "标签列表",
