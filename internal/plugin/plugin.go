@@ -941,6 +941,15 @@ func (h *Host) urlCandidates(rawURL string) ([]*Plugin, bool) {
 	return fallback, len(fallback) > 0
 }
 
+// CanResolve reports whether an enabled plugin claims the given URL.
+func (h *Host) CanResolve(rawURL string) bool {
+	if h == nil {
+		return false
+	}
+	_, matched := h.urlCandidates(rawURL)
+	return matched
+}
+
 // Resolve asks the first matching plugin to resolve the URL. Host and regex
 // indexes pick candidates before any worker starts; the first non-empty result
 // wins and later plugins are not invoked.

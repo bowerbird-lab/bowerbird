@@ -388,6 +388,12 @@ func TestPinterestBuiltinResolvesDirectImage(t *testing.T) {
 	h := NewHost(t.TempDir())
 	h.SetLocalDirs(root)
 	h.RegisterBuiltin(OfficialManifests()...)
+	if !h.CanResolve("https://www.pinterest.com/pin/123456/") {
+		t.Fatal("expected CanResolve to be true for pinterest pin URL")
+	}
+	if h.CanResolve("https://example.com/post/42") {
+		t.Fatal("expected CanResolve to be false for unrelated URL")
+	}
 	res, id, err := h.Resolve("https://i.pinimg.com/originals/a/b/c.jpg")
 	if err != nil {
 		t.Fatal(err)
