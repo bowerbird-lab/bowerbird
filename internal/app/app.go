@@ -434,6 +434,7 @@ const (
 	dialogDeleteLastFolder
 	dialogFolderPicker
 	dialogTagPicker
+	dialogRescanLibrary
 )
 
 type settingsGroup struct {

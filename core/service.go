@@ -150,6 +150,16 @@ func (s *Service) CloseLibrary() error {
 	return nil
 }
 
+// RescanLibrary scans the active library's items directory for orphaned asset
+// folders that are missing from SQLite and adds them to "All" without
+// modifying existing records, folders, tags, or files.
+func (s *Service) RescanLibrary() (int, error) {
+	if s.mgr == nil {
+		return 0, ErrCoreNotInitialized
+	}
+	return s.mgr.RescanLibrary()
+}
+
 // openMainWindow brings the main window back after a library is chosen.
 func (s *Service) openMainWindow() {
 	if h := s.getHost(); h != nil {

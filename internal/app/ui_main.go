@@ -542,6 +542,11 @@ func (a *App) viewDialog(c *ui.Context) {
 		a.viewFolderPickerDialog(c, &open)
 	case dialogTagPicker:
 		a.viewTagPickerDialog(c, &open)
+	case dialogRescanLibrary:
+		show(a.t("sidebar.rescanLibraryTitle"), func() {
+			p := a.palette(c)
+			ui.Text(c, a.tf("sidebar.rescanLibraryConfirm", map[string]any{"name": a.dialogValue})).FontSize(12).TextColor(p.muted).Wrap()
+		}, a.t("common.confirm"), a.rescanLibraryFromDialog)
 	}
 	if !open {
 		if a.dialog == dialogNewFolder {
