@@ -36,6 +36,7 @@ type Nav string
 
 const (
 	NavAll           Nav = "all"
+	NavRecent        Nav = "recent"
 	NavUntagged      Nav = "untagged"
 	NavUncategorized Nav = "uncategorized"
 	NavTags          Nav = "tags"
@@ -154,6 +155,7 @@ type App struct {
 	tags                []core.Tag
 	stats               core.WorkspaceStats
 	trashCount          int
+	recentUsedCount     int
 	nav                 Nav
 	folderID            string
 	expanded            map[string]bool
@@ -746,7 +748,7 @@ func (a *App) refreshAll() {
 	request := workspaceRequest{
 		context: loadContext,
 		query:   a.queryString(), scope: a.folderScope(), sort: a.sortOrder,
-		unrated: a.filters.Unrated, trash: a.nav == NavTrash, activeID: a.activeItemID,
+		unrated: a.filters.Unrated, trash: a.nav == NavTrash, recent: a.nav == NavRecent, activeID: a.activeItemID,
 	}
 	go func() {
 		lib, _ := a.svc.GetActiveLibrary()
@@ -759,6 +761,7 @@ func (a *App) refreshAll() {
 			stats = *statsPtr
 		}
 		trash, _ := a.svc.GetTrashCount()
+		recentUsedIDs, _ := a.svc.GetRecentlyUsedIDs()
 		recent := a.svc.GetRecentLibraryRefs()
 		plugins, _ := a.svc.ListInstalledPlugins()
 		folderPreviews := a.fetchFolderPreviews(folderLookup, previewNav, previewFolder, previewSort)
@@ -784,6 +787,7 @@ func (a *App) refreshAll() {
 			a.tags = tags
 			a.stats = stats
 			a.trashCount = trash
+			a.recentUsedCount = len(recentUsedIDs)
 			a.recent = recent
 			a.setWorkspaceItems(items, total, totalSize)
 			a.loading = false
@@ -951,6 +955,7 @@ func (a *App) navigate(nav Nav, folderID string) {
 	}
 	a.nav = nav
 	a.folderID = folderID
+	a.galleryScroll.Y = 0
 	a.selected = map[string]bool{}
 	a.selectedAt = -1
 	a.activeItemID = ""

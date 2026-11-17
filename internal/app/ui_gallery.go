@@ -850,6 +850,18 @@ func (a *App) moveItemsToFolder(ids []string, targetFolderID string) {
 // selection; dragging any other item carries just that item.
 func (a *App) itemDragData(item core.Item) transfer.Data {
 	ids := a.itemDragIDs(item)
+	if a.svc != nil && len(ids) > 0 {
+		copied := append([]string(nil), ids...)
+		go func() {
+			if err := a.svc.RecordRecentlyUsed(copied); err == nil {
+				if recentIDs, err := a.svc.GetRecentlyUsedIDs(); err == nil {
+					a.post(func() {
+						a.recentUsedCount = len(recentIDs)
+					})
+				}
+			}
+		}()
+	}
 	urls := make([]string, 0, len(ids))
 	wanted := make(map[string]bool, len(ids))
 	for _, id := range ids {

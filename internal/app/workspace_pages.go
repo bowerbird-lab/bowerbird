@@ -17,6 +17,7 @@ type workspaceRequest struct {
 	scope    []string
 	unrated  bool
 	trash    bool
+	recent   bool
 	activeID string
 }
 
@@ -109,6 +110,35 @@ func (a *App) setWorkspaceItems(items []core.Item, total int, totalSize int64) {
 func (a *App) fetchWorkspace(request workspaceRequest) ([]core.Item, int, int64, *core.Item, error) {
 	if request.context == nil {
 		request.context = context.Background()
+	}
+	if request.recent {
+		var active *core.Item
+		if request.activeID != "" {
+			active, _ = a.svc.GetItem(request.activeID)
+		}
+		recentIDs, err := a.svc.GetRecentlyUsedIDs()
+		if err != nil || len(recentIDs) == 0 {
+			return nil, 0, 0, active, err
+		}
+		items, err := a.svc.GetWorkspaceCards(recentIDs)
+		if err != nil {
+			return nil, 0, 0, active, err
+		}
+		byID := make(map[string]core.Item, len(items))
+		for _, item := range items {
+			byID[item.ID] = item
+		}
+		ordered := make([]core.Item, 0, len(recentIDs))
+		var totalSize int64
+		for _, id := range recentIDs {
+			item, ok := byID[id]
+			if !ok {
+				continue
+			}
+			ordered = append(ordered, item)
+			totalSize += item.Size
+		}
+		return ordered, len(ordered), totalSize, active, nil
 	}
 	page, err := a.svc.QueryWorkspaceIndexContext(request.context, request.query, request.sort, request.scope, request.unrated, request.trash)
 	if err != nil || page == nil {

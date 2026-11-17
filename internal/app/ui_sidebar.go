@@ -39,6 +39,7 @@ func (a *App) viewSidebar(c *ui.Context) {
 		a.sidebarLibrarySwitcher(c)
 		ui.Scroll(c).Grow(1).Shrink(1).Padding(4, 10, 12, 10).Children(func() {
 			a.navRow(c, NavAll, iconAll, a.t("sidebar.allItems"), a.stats.Total)
+			a.navRow(c, NavRecent, iconRecent, a.t("sidebar.recent"), a.recentUsedCount)
 			a.navRow(c, NavUntagged, iconInbox, a.t("sidebar.untagged"), a.stats.UntaggedCount)
 			a.navRow(c, NavUncategorized, iconUncategorized, a.t("sidebar.uncategorized"), a.stats.UncategorizedCount)
 			a.navRow(c, NavTags, iconTag, a.t("sidebar.tags"), len(a.tags))

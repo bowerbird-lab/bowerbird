@@ -26,6 +26,7 @@ var (
 	iconTag             = strokeIcon(`<path d="M20 12 12 20 3 11V4h7z"/><circle cx="7.5" cy="7.5" r="1"/>`)
 	iconTrash           = strokeIcon(`<path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"/>`)
 	iconAll             = strokeIcon(`<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>`)
+	iconRecent          = strokeIcon(`<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/>`)
 	iconInbox           = strokeIcon(`<path d="M3 13h5l2 3h4l2-3h5"/><path d="M5 5h14l2 8v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z"/>`)
 	iconUncategorized   = strokeIcon(`<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v4m0 3v.5"/>`)
 	iconStar            = strokeIcon(`<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"/>`)
