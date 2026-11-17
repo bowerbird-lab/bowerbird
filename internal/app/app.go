@@ -948,6 +948,32 @@ func (a *App) clearWorkspaceSelection() {
 	a.closePreview()
 }
 
+// ReleaseLightweightMemory drops cached workspace data and UI state when
+// entering lightweight mode so the Go GC can reclaim memory.
+func (a *App) ReleaseLightweightMemory() {
+	if a == nil {
+		return
+	}
+	if a.loadCancel != nil {
+		a.loadCancel()
+		a.loadCancel = nil
+	}
+	a.items = nil
+	a.totalSize = 0
+	a.itemPages = nil
+	a.activeItem = nil
+	a.activeItemID = ""
+	a.selected = map[string]bool{}
+	a.selectedAt = -1
+	a.folders = nil
+	a.folderPreviews = nil
+	a.tags = nil
+	a.history = nil
+	a.historyAt = -1
+	a.previewOpen = false
+	a.loading = false
+}
+
 // navigate switches the workspace scope and reloads.
 func (a *App) navigate(nav Nav, folderID string) {
 	if nav == NavFolder && folderID == "" {
