@@ -85,12 +85,15 @@ func (a *App) viewMain(c *ui.Context) {
 					}
 					if (previewOK && ev.Mods == previewMods && ev.Key == previewKey) ||
 						(dismissOK && ev.Mods == dismissMods && ev.Key == dismissKey) {
+						if ev.Repeat {
+							return true
+						}
 						a.closePreview()
 						return true
 					}
 					return false
 				})
-				if previewOK && overlay.OverlayShortcut(previewMods, previewKey) {
+				if previewOK && (overlay.Shortcut(previewMods, previewKey) || overlay.OverlayShortcut(previewMods, previewKey)) && !c.ShortcutRepeated() {
 					a.closePreview()
 				}
 				if dismissOK && overlay.OverlayShortcut(dismissMods, dismissKey) {
@@ -223,7 +226,7 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 			a.clearSelection()
 		}
 	}
-	if matched(core.ShortcutTogglePreview) {
+	if matched(core.ShortcutTogglePreview) && !c.ShortcutRepeated() {
 		if a.previewOpen {
 			a.closePreview()
 		} else {
