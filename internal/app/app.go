@@ -319,9 +319,10 @@ type App struct {
 	previewSeq        uint64
 
 	// Settings values.
-	themeValue    string
-	languageValue string
-	vibrancyValue bool
+	themeValue      string
+	languageValue   string
+	vibrancyValue   bool
+	importModeValue string
 	network       core.NetworkSettings
 	shortcuts     core.ShortcutSettings
 	shortcutPairs map[string]uiShortcut

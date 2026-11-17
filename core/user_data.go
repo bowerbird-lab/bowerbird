@@ -18,6 +18,9 @@ type UserData struct {
 	// Theme is the persisted colour mode: "dark", "light" or "system".
 	Theme    string `json:"theme,omitempty"`
 	Language string `json:"language,omitempty"`
+	// ImportMode controls whether local files are copied or moved into the
+	// library: "copy" (default) or "move".
+	ImportMode string `json:"importMode,omitempty"`
 	// LightweightModeEnabled, when true, destroys webview windows after the
 	// main window has been hidden for a minute (or immediately from the tray).
 	LightweightModeEnabled bool `json:"lightweightModeEnabled,omitempty"`
@@ -195,6 +198,27 @@ func (s *UserDataStore) SetLanguage(language string) error {
 	defer s.mu.Unlock()
 
 	s.data.Language = language
+	s.data.UpdatedAt = time.Now().Unix()
+	return s.saveLocked()
+}
+
+// GetImportMode returns the persisted import mode ("copy" or "move"),
+// defaulting to "copy".
+func (s *UserDataStore) GetImportMode() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.data.ImportMode == ImportModeMove {
+		return ImportModeMove
+	}
+	return ImportModeCopy
+}
+
+// SetImportMode persists the import mode and saves atomically.
+func (s *UserDataStore) SetImportMode(mode string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.data.ImportMode = mode
 	s.data.UpdatedAt = time.Now().Unix()
 	return s.saveLocked()
 }

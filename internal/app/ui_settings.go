@@ -34,6 +34,10 @@ func (a *App) refreshSettings() {
 		a.languageValue = i18n.Resolve(a.languageValue)
 	}
 	a.vibrancyValue = a.svc.GetVibrancyEnabled()
+	a.importModeValue = a.svc.GetImportMode()
+	if a.importModeValue == "" {
+		a.importModeValue = core.ImportModeCopy
+	}
 	a.network = a.svc.GetNetworkSettings()
 	a.shortcuts = a.svc.GetShortcutSettings()
 	a.rebuildShortcutPairs()
@@ -274,6 +278,23 @@ func (a *App) settingsGeneral(c *ui.Context) {
 		})
 	})
 	a.settingsCard(c, a.t("settings.behavior"), func() {
+		importMode := a.importModeValue
+		if importMode == "" {
+			importMode = core.ImportModeCopy
+		}
+		a.settingsRowInfo(c, a.t("settings.importMode.title"), a.t("settings.importMode.description"), func() {
+			options := []SelectOption{
+				{Value: core.ImportModeCopy, Label: a.t("settings.importMode.copy")},
+				{Value: core.ImportModeMove, Label: a.t("settings.importMode.move")},
+			}
+			if mode, changed := a.dropdown(c, "settings-import-mode", importMode, options); changed {
+				if err := a.svc.SetImportMode(mode); err != nil {
+					a.showToast(err.Error())
+					return
+				}
+				a.importModeValue = mode
+			}
+		})
 		enabled := a.svc.GetLightweightModeEnabled()
 		a.settingsRowInfo(c, a.t("settings.lightweight.title"), a.t("settings.lightweight.description"), func() {
 			on := enabled

@@ -393,3 +393,103 @@ func TestNativeDropImportsIntoFolder(t *testing.T) {
 		}
 	}
 }
+
+func TestImportModeCopyKeepsSourceAndMoveDeletesSource(t *testing.T) {
+	mgr := newRaceLibrary(t, "ImportMode")
+	svc := core.NewService(mgr)
+	if got := svc.GetImportMode(); got != core.ImportModeCopy {
+		t.Fatalf("default import mode = %q, want %q", got, core.ImportModeCopy)
+	}
+
+	srcDir := t.TempDir()
+	copySrc := filepath.Join(srcDir, "keep-me.txt")
+	if err := os.WriteFile(copySrc, []byte("copy mode content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Copy mode (default): source remains after import.
+	copied, err := mgr.ImportFiles([]string{copySrc})
+	if err != nil || len(copied) != 1 {
+		t.Fatalf("ImportFiles(copy) = %d, err=%v", len(copied), err)
+	}
+	if _, err := os.Stat(copySrc); err != nil {
+		t.Fatalf("copy mode removed source file: %v", err)
+	}
+
+	// Switch to move mode.
+	if err := svc.SetImportMode(core.ImportModeMove); err != nil {
+		t.Fatalf("SetImportMode(move): %v", err)
+	}
+
+	// Single file import in move mode deletes source.
+	moveSingle := filepath.Join(srcDir, "move-single.txt")
+	if err := os.WriteFile(moveSingle, []byte("move single content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	moved1, err := mgr.ImportFiles([]string{moveSingle})
+	if err != nil || len(moved1) != 1 {
+		t.Fatalf("ImportFiles(move single) = %d, err=%v", len(moved1), err)
+	}
+	if _, err := os.Stat(moveSingle); !os.IsNotExist(err) {
+		t.Fatalf("move mode kept single source file %s (err=%v)", moveSingle, err)
+	}
+	if _, err := os.Stat(moved1[0].FilePath); err != nil {
+		t.Fatalf("moved payload missing in library: %v", err)
+	}
+
+	// Batch import in move mode deletes all imported sources.
+	moveBatchA := filepath.Join(srcDir, "move-a.txt")
+	moveBatchB := filepath.Join(srcDir, "move-b.txt")
+	if err := os.WriteFile(moveBatchA, []byte("move batch A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moveBatchB, []byte("move batch B"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	movedBatch, err := mgr.ImportFiles([]string{moveBatchA, moveBatchB})
+	if err != nil || len(movedBatch) != 2 {
+		t.Fatalf("ImportFiles(move batch) = %d, err=%v", len(movedBatch), err)
+	}
+	for _, p := range []string{moveBatchA, moveBatchB} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("move mode kept batch source file %s (err=%v)", p, err)
+		}
+	}
+
+	// Duplicate content in move mode also removes the source file.
+	moveDup := filepath.Join(srcDir, "move-dup.txt")
+	if err := os.WriteFile(moveDup, []byte("move single content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dupItems, err := mgr.ImportFiles([]string{moveDup})
+	if err != nil || len(dupItems) != 1 {
+		t.Fatalf("ImportFiles(move dup) = %d, err=%v", len(dupItems), err)
+	}
+	if _, err := os.Stat(moveDup); !os.IsNotExist(err) {
+		t.Fatalf("move mode kept duplicate source file %s (err=%v)", moveDup, err)
+	}
+
+	// Folder import in move mode removes imported files in the folder.
+	folderSrc := filepath.Join(srcDir, "folder-to-move")
+	if err := os.Mkdir(folderSrc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	moveInFolder := filepath.Join(folderSrc, "inside.txt")
+	if err := os.WriteFile(moveInFolder, []byte("folder move content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.ImportFolderRecursively(folderSrc, ""); err != nil {
+		t.Fatalf("ImportFolderRecursively(move): %v", err)
+	}
+	if _, err := os.Stat(moveInFolder); !os.IsNotExist(err) {
+		t.Fatalf("move mode kept folder file %s (err=%v)", moveInFolder, err)
+	}
+
+	// Re-importing an active library payload in move mode must never delete it.
+	if _, err := mgr.ImportFiles([]string{moved1[0].FilePath}); err != nil {
+		t.Fatalf("ImportFiles(active payload): %v", err)
+	}
+	if _, err := os.Stat(moved1[0].FilePath); err != nil {
+		t.Fatalf("active library payload was deleted: %v", err)
+	}
+}

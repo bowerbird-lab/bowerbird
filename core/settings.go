@@ -23,6 +23,24 @@ const ThemeChangedEvent = "theme-changed"
 // open window (main + settings) can update its translations immediately.
 const LanguageChangedEvent = "language-changed"
 
+// Import modes control whether local files are copied or moved into the library.
+const (
+	ImportModeCopy = "copy"
+	ImportModeMove = "move"
+)
+
+// ImportModeChangedEvent is broadcast whenever the import mode changes.
+const ImportModeChangedEvent = "import-mode-changed"
+
+func isValidImportMode(mode string) bool {
+	switch mode {
+	case ImportModeCopy, ImportModeMove:
+		return true
+	default:
+		return false
+	}
+}
+
 func isValidLanguage(lang string) bool {
 	switch lang {
 	case "system", "en", "zh", "zh-CN":
@@ -101,6 +119,34 @@ func (s *Service) SetLanguage(language string) error {
 	}
 
 	s.emit(LanguageChangedEvent, language)
+	return nil
+}
+
+// GetImportMode returns the persisted import mode ("copy" or "move"),
+// defaulting to "copy".
+func (s *Service) GetImportMode() string {
+	if s.mgr == nil || s.mgr.userData == nil {
+		return ImportModeCopy
+	}
+	mode := s.mgr.userData.GetImportMode()
+	if !isValidImportMode(mode) {
+		return ImportModeCopy
+	}
+	return mode
+}
+
+// SetImportMode validates and persists the import mode, then broadcasts the
+// change to every open window.
+func (s *Service) SetImportMode(mode string) error {
+	if !isValidImportMode(mode) {
+		return NewAppError(ErrCodeInvalidImportMode, "invalid import mode: "+mode)
+	}
+	if s.mgr != nil && s.mgr.userData != nil {
+		if err := s.mgr.userData.SetImportMode(mode); err != nil {
+			return WrapAppError(ErrCodeInvalidImportMode, err)
+		}
+	}
+	s.emit(ImportModeChangedEvent, mode)
 	return nil
 }
 

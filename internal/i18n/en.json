@@ -689,6 +689,12 @@
       "title": "Record source URL",
       "description": "After downloading a media URL, save the resolved page/source URL into the item metadata. This is an application setting and is not controlled by plugins."
     },
+    "importMode": {
+      "title": "Import mode",
+      "description": "Choose whether importing local files copies them into the library or moves them from their original location (leaving no file behind).",
+      "copy": "Copy",
+      "move": "Move"
+    },
     "themes": {
       "selection": "Theme selection",
       "light": "Light theme",
