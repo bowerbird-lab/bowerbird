@@ -53,8 +53,8 @@ type thumbRequest struct {
 
 func newThumbCache() *thumbCache {
 	return &thumbCache{
-		entries: map[string]*thumbEntry{}, limit: 96,
-		maxBytes: 64 << 20, workers: 2, decode: decodePath,
+		entries: map[string]*thumbEntry{}, limit: 256,
+		maxBytes: 128 << 20, workers: 2, decode: decodePath,
 	}
 }
 

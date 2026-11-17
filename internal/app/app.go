@@ -207,12 +207,25 @@ type App struct {
 	galleryScroll     ui.ScrollState
 	scrollTop         float32
 
+	// Rendered gallery row anchor sampled from DrawOver so hit-testing and
+	// marquee selection match the list's actual layout instead of relying on
+	// ListState's estimated scrollY.
+	galleryBoxRect             ui.Rect
+	galleryPaintSampleOK       bool
+	galleryPaintSampleIdx      int
+	galleryPaintSampleY        float32
+	galleryLayoutSampleOK      bool
+	galleryLayoutSampleIdx     int
+	galleryLayoutSampleRelY    float32
+	galleryLayoutSampleScrollY float32
+
 	// Gallery rubber-band selection.
-	marqueeActive   bool
-	marqueeStartX   float32
-	marqueeStartY   float32
-	marqueeCurX     float32
-	marqueeCurY     float32
+	marqueeActive        bool
+	marqueeStartX        float32
+	marqueeStartY        float32
+	marqueeStartContentY float32
+	marqueeCurX          float32
+	marqueeCurY          float32
 	marqueeBase     map[string]bool
 	marqueeAdditive bool
 	// Inputs and popover state.
@@ -1009,6 +1022,8 @@ func (a *App) goHistory(delta int) {
 func (a *App) rebuildRows() {
 	a.rowsKey = a.galleryLayoutKey()
 	a.rows = nil
+	a.galleryLayoutSampleOK = false
+	a.galleryPaintSampleOK = false
 	width := 900
 	if a.win != nil {
 		if w, _ := a.win.ContentSize(); w > 0 {

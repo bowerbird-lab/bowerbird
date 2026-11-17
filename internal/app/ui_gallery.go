@@ -98,6 +98,7 @@ func (a *App) viewGallery(c *ui.Context) {
 	top := float32(mainHeaderHeight + galleryTopPadding)
 	bottom := float32(24)
 	p := a.palette(c)
+	a.galleryPaintSampleOK = false
 
 	container := ui.Box(c.Key("gallery-container")).Fill().Clip().Bind(&a.galleryBox)
 	a.galleryShortcuts(container)
@@ -119,6 +120,7 @@ func (a *App) viewGallery(c *ui.Context) {
 				a.galleryBox.Focus(c)
 				a.marqueeActive = true
 				a.marqueeStartX, a.marqueeStartY = ev.X, ev.Y
+				a.marqueeStartContentY = ev.Y - a.galleryRowsOriginY(top)
 				a.marqueeCurX, a.marqueeCurY = ev.X, ev.Y
 				additive := ev.Mods&ui.Cmd != 0 || ev.Mods&ui.Ctrl != 0 || ev.Mods&ui.Shift != 0
 				a.marqueeAdditive = additive
@@ -142,11 +144,18 @@ func (a *App) viewGallery(c *ui.Context) {
 		case ui.InputPointerMove:
 			if a.marqueeActive {
 				a.marqueeCurX, a.marqueeCurY = ev.X, ev.Y
-				// 自动边缘滚动: 拖选拉到最下方时跟随向下滚动
-				if ev.Y > 500 {
-					a.galleryScroll.Y += (ev.Y - 500) * 0.15
-				} else if ev.Y < 40 && a.galleryScroll.Y > 0 {
-					a.galleryScroll.Y -= (40 - ev.Y) * 0.15
+				// 自动边缘滚动: 拖选拉到最下方或最上方时跟随滚动
+				bottomEdge := float32(500)
+				if a.galleryBoxRect.H > 120 {
+					bottomEdge = a.galleryBoxRect.H - 40
+				}
+				if ev.Y > bottomEdge {
+					a.galleryScroll.Y += (ev.Y - bottomEdge) * 0.15
+					if a.galleryScroll.MaxY > 0 && a.galleryScroll.Y > a.galleryScroll.MaxY {
+						a.galleryScroll.Y = a.galleryScroll.MaxY
+					}
+				} else if ev.Y < top && a.galleryScroll.Y > 0 {
+					a.galleryScroll.Y -= (top - ev.Y) * 0.15
 					if a.galleryScroll.Y < 0 {
 						a.galleryScroll.Y = 0
 					}
@@ -159,8 +168,9 @@ func (a *App) viewGallery(c *ui.Context) {
 			}
 		case ui.InputPointerUp:
 			if a.marqueeActive {
+				startY := a.galleryRowsOriginY(top) + a.marqueeStartContentY
 				dx := a.marqueeCurX - a.marqueeStartX
-				dy := a.marqueeCurY - a.marqueeStartY
+				dy := a.marqueeCurY - startY
 				if dx*dx+dy*dy < 16 && !a.marqueeAdditive {
 					clickedItem := a.itemAtPoint(ev.X, ev.Y, top)
 					if clickedItem >= 0 {
@@ -196,7 +206,7 @@ func (a *App) viewGallery(c *ui.Context) {
 			if row < 0 || row >= len(a.rows) {
 				return
 			}
-			a.galleryRow(c, a.rows[row])
+			a.galleryRow(c, row, a.rows[row])
 		}).FillWidth().Grow(1).Shrink(1).TrackScroll(&a.galleryScroll).Gap(a.galleryGap()).Padding(top, gallerySidePadding, bottom, gallerySidePadding).ScrollbarInsets(top, 0, bottom, 0)
 		if list.Clicked() && len(a.selected) > 0 {
 			a.clearSelection()
@@ -208,10 +218,20 @@ func (a *App) viewGallery(c *ui.Context) {
 	container.ContextMenu(a.viewContextMenu)
 
 	container.DrawOver(func(pt *ui.Painter, r ui.Rect) {
+		a.galleryBoxRect = r
+		if a.galleryPaintSampleOK {
+			a.galleryLayoutSampleOK = true
+			a.galleryLayoutSampleIdx = a.galleryPaintSampleIdx
+			a.galleryLayoutSampleRelY = a.galleryPaintSampleY - r.Y
+			a.galleryLayoutSampleScrollY = a.galleryScroll.Y
+		} else {
+			a.galleryLayoutSampleOK = false
+		}
 		if !a.marqueeActive {
 			return
 		}
-		x0, y0 := a.marqueeStartX, a.marqueeStartY
+		x0 := a.marqueeStartX
+		y0 := a.galleryRowsOriginY(top) + a.marqueeStartContentY
 		x1, y1 := a.marqueeCurX, a.marqueeCurY
 		bx := minF(x0, x1)
 		by := minF(y0, y1)
@@ -225,11 +245,41 @@ func (a *App) viewGallery(c *ui.Context) {
 		pt.Stroke(boxRect, p.accent.Alpha(0.85), 3, 1)
 	})
 }
+
+func (a *App) galleryRowTopOffset(targetRow int) float32 {
+	if targetRow <= 0 || len(a.rows) == 0 {
+		return 0
+	}
+	if targetRow > len(a.rows) {
+		targetRow = len(a.rows)
+	}
+	gap := a.galleryGap()
+	var y float32
+	for i := 0; i < targetRow; i++ {
+		if len(a.rows[i]) == 0 {
+			continue
+		}
+		y += float32(a.rows[i][0].height) + gap
+	}
+	return y
+}
+
+// galleryRowsOriginY returns the Y coordinate of row 0's top edge in
+// galleryBox-local coordinates. When a rendered row was sampled during paint,
+// it anchors to that row's actual painted position instead of ListState's
+// estimated scrollY, which drifts from the sum of row heights on large lists.
+func (a *App) galleryRowsOriginY(padTop float32) float32 {
+	if a.galleryLayoutSampleOK && a.galleryLayoutSampleIdx >= 0 && a.galleryLayoutSampleIdx < len(a.rows) {
+		return a.galleryLayoutSampleRelY - a.galleryRowTopOffset(a.galleryLayoutSampleIdx) - (a.galleryScroll.Y - a.galleryLayoutSampleScrollY)
+	}
+	return padTop - a.galleryScroll.Y
+}
+
 func (a *App) itemAtPoint(x, y, padTop float32) int {
 	targetY := y
 	gap := a.galleryGap()
 	padLeft := float32(gallerySidePadding)
-	curY := padTop - a.galleryScroll.Y
+	curY := a.galleryRowsOriginY(padTop)
 
 	for _, row := range a.rows {
 		if len(row) == 0 {
@@ -260,7 +310,8 @@ func (a *App) itemAtPoint(x, y, padTop float32) int {
 }
 
 func (a *App) updateMarqueeSelection(padTop float32) {
-	x0, y0 := a.marqueeStartX, a.marqueeStartY
+	x0 := a.marqueeStartX
+	y0 := a.galleryRowsOriginY(padTop) + a.marqueeStartContentY
 	x1, y1 := a.marqueeCurX, a.marqueeCurY
 	boxLeft := minF(x0, x1)
 	boxRight := maxF(x0, x1)
@@ -270,7 +321,7 @@ func (a *App) updateMarqueeSelection(padTop float32) {
 	hit := make(map[string]bool)
 	gap := a.galleryGap()
 	padLeft := float32(gallerySidePadding)
-	curY := padTop - a.galleryScroll.Y
+	curY := a.galleryRowsOriginY(padTop)
 
 	for _, row := range a.rows {
 		if len(row) == 0 {
@@ -345,16 +396,28 @@ func (a *App) updateMarqueeSelection(padTop float32) {
 		a.selectedAt = -1
 	}
 }
-func (a *App) galleryRow(c *ui.Context, row []galleryCell) {
+func (a *App) recordGalleryRowPaint(rowIdx int, r ui.Rect) {
+	if !a.galleryPaintSampleOK || rowIdx < a.galleryPaintSampleIdx {
+		a.galleryPaintSampleOK = true
+		a.galleryPaintSampleIdx = rowIdx
+		a.galleryPaintSampleY = r.Y
+	}
+}
+
+func (a *App) galleryRow(c *ui.Context, rowIdx int, row []galleryCell) {
 	if len(row) == 0 {
 		return
 	}
 	if row[0].folderHeader {
-		a.folderSectionHeader(c, row[0].width)
+		a.folderSectionHeader(c, rowIdx, row[0].width)
 		return
 	}
 	height := float32(row[0].height)
-	ui.Row(c).FillWidth().Height(height).Gap(a.galleryGap()).PassThrough().Children(func() {
+	rowEl := ui.Row(c).FillWidth().Height(height).Gap(a.galleryGap()).PassThrough()
+	rowEl.DrawOver(func(_ *ui.Painter, r ui.Rect) {
+		a.recordGalleryRowPaint(rowIdx, r)
+	})
+	rowEl.Children(func() {
 		for _, cell := range row {
 			if cell.folderID != "" {
 				a.folderCard(c, cell.folderID, float32(cell.width), float32(cell.height))
@@ -382,7 +445,7 @@ func (a *App) folderSectionRows(width int) [][]galleryCell {
 		return nil
 	}
 	rows := [][]galleryCell{{
-		{index: -2, width: width, height: 32, folderHeader: true},
+		{index: -2, width: width, height: 30, folderHeader: true},
 	}}
 	if a.subfoldersCollapsed {
 		return rows
@@ -412,10 +475,13 @@ func (a *App) folderSectionRows(width int) [][]galleryCell {
 	return rows
 }
 
-func (a *App) folderSectionHeader(c *ui.Context, width int) {
+func (a *App) folderSectionHeader(c *ui.Context, rowIdx int, width int) {
 	p := a.palette(c)
 	children := a.folderIndex().children[a.folderID]
 	b := ui.ButtonBase(c.Key("subfolders-toggle")).Width(float32(width)).Height(30).PaddingX(4).Radius(6).FocusRing(false).AlignItems(ui.Center).Gap(6)
+	b.DrawOver(func(_ *ui.Painter, r ui.Rect) {
+		a.recordGalleryRowPaint(rowIdx, r)
+	})
 	bg := ui.Transparent
 	if b.Hovered() {
 		bg = p.hover
@@ -441,12 +507,18 @@ func (a *App) folderCard(c *ui.Context, folderID string, w, h float32) {
 	}
 	p := a.palette(c)
 	card := ui.ButtonBase(c.Key("folder-card-"+f.ID)).Width(w).Height(h).Padding(6).Radius(10).Border(1, p.hairline).FocusRing(false).Column().Gap(6)
+	fileDropOpts := transfer.DropOptions{
+		Formats:    []transfer.Format{transfer.FileList, transfer.URIList, transfer.Text, transfer.HTML},
+		Operations: transfer.Copy | transfer.Move,
+	}
+	_, dataOver := ui.DataDragOver(card, fileDropOpts)
+	nativeOver := dataOver || card.FileDragOver()
 	bg := p.surface
-	if card.Hovered() {
+	if card.Hovered() || nativeOver {
 		bg = p.hover
 		a.dropFolderID = f.ID
 	}
-	if dragged, over := ui.DragOver[sidebarDrag](card); over && len(dragged.ItemIDs) > 0 {
+	if dragged, over := ui.DragOver[sidebarDrag](card); (over && len(dragged.ItemIDs) > 0) || nativeOver {
 		bg = p.press
 	}
 	card.Background(card.AnimateColor("bg", bg, ui.Animation{Duration: 110 * time.Millisecond}))
@@ -503,7 +575,10 @@ func (a *App) folderCard(c *ui.Context, folderID string, w, h float32) {
 		a.folderContextMenu(m, f)
 	})
 	if dropped, ok := ui.Drop[sidebarDrag](card); ok && len(dropped.ItemIDs) > 0 {
-		a.addItemsToFolder(dropped.ItemIDs, f.ID)
+		a.moveItemsToFolder(dropped.ItemIDs, f.ID)
+	}
+	if drop, ok := ui.DropData(card, fileDropOpts); ok {
+		a.handleDropDataToFolder(drop.Data, f.ID)
 	}
 }
 
@@ -753,14 +828,19 @@ func (a *App) itemDragIDs(item core.Item) []string {
 	return ids
 }
 
-// addItemsToFolder links dropped items to a folder. Items keep every folder
-// they already belong to; this is classification, not a move between folders.
-func (a *App) addItemsToFolder(ids []string, folderID string) {
-	if a.svc == nil || folderID == "" {
+// moveItemsToFolder moves dropped items into targetFolderID, removing them
+// from the currently viewed folder (or replacing all folder memberships when
+// dragged from a non-folder view).
+func (a *App) moveItemsToFolder(ids []string, targetFolderID string) {
+	if a.svc == nil || targetFolderID == "" {
 		return
 	}
+	fromFolderID := ""
+	if a.nav == NavFolder {
+		fromFolderID = a.folderID
+	}
 	for _, id := range ids {
-		_ = a.svc.AddItemToFolder(id, folderID)
+		_ = a.svc.MoveItemToFolder(id, fromFolderID, targetFolderID)
 	}
 	a.refreshAll()
 }

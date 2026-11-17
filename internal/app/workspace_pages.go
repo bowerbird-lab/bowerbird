@@ -8,7 +8,7 @@ import (
 )
 
 const workspacePageSize = 96
-const workspacePageLimit = 4
+const workspacePageLimit = 8
 
 type workspaceRequest struct {
 	context  context.Context
@@ -186,11 +186,11 @@ func (a *App) requestItemPage(page int) {
 			if sequence != a.loadSeq {
 				return
 			}
+			delete(a.itemPagePending, page)
 			if err != nil {
 				a.showToast(err.Error())
 				return
 			}
-			delete(a.itemPagePending, page)
 			a.storeItemPage(page, items)
 		})
 	}()
