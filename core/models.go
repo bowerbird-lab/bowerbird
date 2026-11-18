@@ -72,7 +72,7 @@ type Item struct {
 	CreatedAt     int64      `json:"createdAt"`
 	ImportedAt    int64      `json:"importedAt"`
 	UpdatedAt     int64      `json:"updatedAt"`
-	ItemPath      string     `json:"itemPath"`     // local disk path of item directory (items/<HEX>)
+	ItemPath      string     `json:"itemPath"`     // local disk path of item directory (items/<ID>)
 	FilePath      string     `json:"filePath"`     // absolute local path to physical file
 	ShellPath     string     `json:"shellPath"`    // shell-escaped path with backslash spaces
 	FileURL       string     `json:"fileUrl"`      // file:// URI with spaces %20-encoded
@@ -81,7 +81,7 @@ type Item struct {
 	DownloadURL   string     `json:"downloadUrl"`  // HTTP download URL for OS drag-out
 }
 
-// ItemMetadata is serialized inside <item_hex>/metadata.json.
+// ItemMetadata is serialized inside items/<id>/metadata.json.
 type ItemMetadata struct {
 	ID             string     `json:"id"`
 	Hex            string     `json:"hex"`
@@ -141,4 +141,15 @@ type MobileLibraryEntry struct {
 	Path      string `json:"path"`
 	ItemCount int64  `json:"itemCount"`
 	IsActive  bool   `json:"isActive"`
+}
+
+// LibraryIndexProgressEvent is emitted while initializing or rescanning the
+// library's SQLite hex index.
+const LibraryIndexProgressEvent = "library-index-progress"
+
+// LibraryIndexProgress reports progress for library hex index initialization or rescanning.
+type LibraryIndexProgress struct {
+	Active  bool `json:"active"`
+	Current int  `json:"current"`
+	Total   int  `json:"total"`
 }

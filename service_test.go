@@ -108,8 +108,8 @@ func TestLibraryServiceEndToEnd(t *testing.T) {
 	if item.Hex == "" || item.Hex != strings.ToUpper(item.Hex) || len(item.Hex) != 64 {
 		t.Errorf("Expected 64-char uppercase hex, got %s", item.Hex)
 	}
-	if item.ID != item.Hex {
-		t.Errorf("Expected item.ID to equal item.Hex, got ID=%s Hex=%s", item.ID, item.Hex)
+	if item.ID == "" || item.ID != strings.ToUpper(item.ID) || item.ID == item.Hex {
+		t.Errorf("Expected uppercase random item.ID distinct from Hex, got ID=%s Hex=%s", item.ID, item.Hex)
 	}
 	if item.FilePath != filepath.Join(itemDir, "sample.png") {
 		t.Errorf("Expected FilePath %s, got %s", filepath.Join(itemDir, "sample.png"), item.FilePath)

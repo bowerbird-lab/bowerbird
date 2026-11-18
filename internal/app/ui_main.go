@@ -122,6 +122,7 @@ func (a *App) viewMain(c *ui.Context) {
 		a.viewToast(c)
 		a.viewDialog(c)
 		a.viewCropDialog(c)
+		a.viewIndexProgressDialog(c)
 	})
 }
 
@@ -658,6 +659,56 @@ func (a *App) dialogPanelActions(c *ui.Context, panel ui.Element, title string, 
 			ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Children(actions)
 		})
 	})
+}
+
+func (a *App) viewIndexProgressDialog(c *ui.Context) {
+	if !a.indexProgressActive {
+		return
+	}
+	open := true
+	p := a.palette(c)
+	current := a.indexProgressCurrent
+	total := a.indexProgressTotal
+	var ratio float32
+	percent := 0
+	if total > 0 {
+		if current > total {
+			current = total
+		}
+		ratio = float32(current) / float32(total)
+		percent = int(ratio * 100)
+	}
+	ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
+		backdrop.Background(p.overlay)
+		panel.Width(400).Padding(22).Radius(14).Background(p.surface).Border(1, p.hairline).Shadow(0, 26, 64, -18, p.cardShade).Children(func() {
+			ui.Column(c).FillWidth().Gap(12).Children(func() {
+				ui.Text(c, a.t("sidebar.indexingTitle")).FontSize(16).FontWeight(650).TextColor(p.text)
+				ui.Text(c, a.t("sidebar.indexingDescription")).FontSize(12).TextColor(p.muted).Wrap()
+				ui.Box(c).FillWidth().Height(8).Radius(4).Draw(func(pt *ui.Painter, r ui.Rect) {
+					pt.Fill(r, p.hairline, 4)
+					if ratio > 0 {
+						fillW := r.W * ratio
+						if fillW < 6 {
+							fillW = 6
+						}
+						if fillW > r.W {
+							fillW = r.W
+						}
+						pt.Fill(ui.Rect{X: r.X, Y: r.Y, W: fillW, H: r.H}, p.accent, 4)
+					}
+				})
+				ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+					ui.Text(c, a.tf("sidebar.indexingProgress", map[string]any{
+						"current": current,
+						"total":   total,
+						"percent": percent,
+					})).FontSize(11.5).TextColor(p.muted)
+				})
+			})
+		})
+	})
+	// Keep modal open until indexing completes.
+	_ = open
 }
 
 func (a *App) closePreview() {

@@ -406,6 +406,11 @@ type App struct {
 	toast      string
 	toastUntil time.Time
 
+	// Library hex index initialization / rescan progress modal.
+	indexProgressActive  bool
+	indexProgressCurrent int
+	indexProgressTotal   int
+
 	// Drop target. The host reports where a native drop landed; the sidebar
 	// sets this while the pointer is over a folder row.
 	dropFolderID string
@@ -682,6 +687,14 @@ func (a *App) HandleEvent(name string, payload any) {
 		// committed items. Without this the gallery only updates after the
 		// library is reopened.
 		a.post(func() { a.refreshAll() })
+	case core.LibraryIndexProgressEvent:
+		if prog, ok := payload.(core.LibraryIndexProgress); ok {
+			a.post(func() {
+				a.indexProgressActive = prog.Active
+				a.indexProgressCurrent = prog.Current
+				a.indexProgressTotal = prog.Total
+			})
+		}
 	case core.MobileShareSavedEvent:
 		a.post(func() { a.refreshAll() })
 		if payload, ok := payload.(core.MobileShareSavedPayload); ok {

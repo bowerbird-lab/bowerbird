@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"bowerbird/core"
 )
@@ -491,5 +494,188 @@ func TestImportModeCopyKeepsSourceAndMoveDeletesSource(t *testing.T) {
 	}
 	if _, err := os.Stat(moved1[0].FilePath); err != nil {
 		t.Fatalf("active library payload was deleted: %v", err)
+	}
+}
+
+func isUppercaseAlnum(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestRandomItemDirAndModifiedFileReimport(t *testing.T) {
+	mgr := newRaceLibrary(t, "ModifiedReimport")
+
+	srcDir := t.TempDir()
+	v1 := []byte("original psd v1 content")
+	v2 := []byte("edited psd v2 content in photoshop")
+	psd1 := filepath.Join(srcDir, "psd1.txt")
+	psd2 := filepath.Join(srcDir, "psd2.txt")
+	if err := os.WriteFile(psd1, v1, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(psd2, v1, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Import psd1: directory name must be random uppercase alphanumeric, not 64-char hex.
+	imp1, err := mgr.ImportFiles([]string{psd1})
+	if err != nil || len(imp1) != 1 {
+		t.Fatalf("ImportFiles(psd1) = %d, err=%v", len(imp1), err)
+	}
+	item1 := imp1[0]
+	if !isUppercaseAlnum(item1.ID) || item1.ID == item1.Hex || len(item1.ID) == 64 {
+		t.Fatalf("expected random uppercase alphanumeric ID distinct from hex, got id=%q hex=%q", item1.ID, item1.Hex)
+	}
+	if filepath.Base(item1.ItemPath) != item1.ID {
+		t.Fatalf("itemDir %q does not match id %q", item1.ItemPath, item1.ID)
+	}
+
+	// 2. Edit psd1 in-place inside the library (simulating external editor save).
+	if err := os.WriteFile(item1.FilePath, v2, 0o644); err != nil {
+		t.Fatalf("edit item1 in-place: %v", err)
+	}
+
+	// 3. Import psd2 (which still has the original v1 hash).
+	// It must NOT be ignored; item1's hex must hot-update to v2, and psd2 must import cleanly.
+	imp2, err := mgr.ImportFiles([]string{psd2})
+	if err != nil || len(imp2) != 1 {
+		t.Fatalf("ImportFiles(psd2) = %d, err=%v", len(imp2), err)
+	}
+	item2 := imp2[0]
+	if item2.ID == item1.ID {
+		t.Fatalf("psd2 reused item1's ID %q", item1.ID)
+	}
+	if !isUppercaseAlnum(item2.ID) || item2.ID == item2.Hex {
+		t.Fatalf("expected random uppercase alphanumeric ID for psd2, got id=%q hex=%q", item2.ID, item2.Hex)
+	}
+
+	items, err := mgr.GetItems("", "desc")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("GetItems = %d, err=%v; want 2", len(items), err)
+	}
+
+	got1, err := mgr.GetItem(item1.ID)
+	if err != nil {
+		t.Fatalf("GetItem(item1): %v", err)
+	}
+	if got1.Hex != core.ComputeBytesSHA256(v2) {
+		t.Fatalf("item1 hex not hot-updated: got %s, want %s", got1.Hex, core.ComputeBytesSHA256(v2))
+	}
+	if item2.Hex != core.ComputeBytesSHA256(v1) {
+		t.Fatalf("item2 hex = %s, want %s", item2.Hex, core.ComputeBytesSHA256(v1))
+	}
+
+	// 4. Importing psd2 again while unmodified must deduplicate.
+	imp2Again, err := mgr.ImportFiles([]string{psd2})
+	if err != nil || len(imp2Again) != 1 || imp2Again[0].ID != item2.ID {
+		t.Fatalf("re-import unmodified psd2: got %+v, err=%v", imp2Again, err)
+	}
+	items, _ = mgr.GetItems("", "desc")
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items after duplicate import, got %d", len(items))
+	}
+
+	// 5. Deleting item1 must not delete item2.
+	if err := mgr.DeleteItem(item1.ID); err != nil {
+		t.Fatalf("DeleteItem(item1): %v", err)
+	}
+	if _, err := mgr.GetItem(item2.ID); err != nil {
+		t.Fatalf("item2 disappeared after deleting item1: %v", err)
+	}
+}
+
+func TestLegacyLibraryHexIndexInitAndCompat(t *testing.T) {
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
+	mgr := core.NewLibraryManager()
+	t.Cleanup(func() { _ = mgr.CloseLibrary() })
+
+	libRoot := t.TempDir()
+	info, err := mgr.CreateLibrary(libRoot, "LegacyLib")
+	if err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	libPath := info.Path
+
+	// Build a legacy 64-char hex item directory and insert a row with empty hex,
+	// clearing hex_index_initialized to simulate opening an existing pre-migration library.
+	legacyPayload := []byte("legacy file payload v1")
+	legacyHex := core.ComputeBytesSHA256(legacyPayload)
+	legacyDir := filepath.Join(libPath, "items", legacyHex)
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyFile := filepath.Join(legacyDir, "legacy.txt")
+	if err := os.WriteFile(legacyFile, legacyPayload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CloseLibrary(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := sql.Open("sqlite", filepath.Join(libPath, "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	if _, err := db.Exec(`INSERT INTO items (id, hex, name, extension, filename, size, mime_type, created_at, imported_at) VALUES (?, '', 'legacy', 'txt', 'legacy.txt', ?, 'text/plain', ?, ?)`,
+		legacyHex, len(legacyPayload), now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM library_meta WHERE key = 'hex_index_initialized'`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	// Re-open the legacy library: OpenLibrary must initialize the hex index once.
+	if _, err := mgr.OpenLibrary(libPath); err != nil {
+		t.Fatalf("OpenLibrary: %v", err)
+	}
+
+	gotLegacy, err := mgr.GetItem(legacyHex)
+	if err != nil {
+		t.Fatalf("GetItem(legacyHex): %v", err)
+	}
+	if gotLegacy.Hex != legacyHex {
+		t.Fatalf("legacy item hex = %q, want %q", gotLegacy.Hex, legacyHex)
+	}
+
+	// Importing a copy of the legacy file must deduplicate against the legacy item.
+	dupSrc := filepath.Join(t.TempDir(), "copy.txt")
+	if err := os.WriteFile(dupSrc, legacyPayload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	impDup, err := mgr.ImportFiles([]string{dupSrc})
+	if err != nil || len(impDup) != 1 || impDup[0].ID != legacyHex {
+		t.Fatalf("expected deduplication against legacy item %s, got %+v, err=%v", legacyHex, impDup, err)
+	}
+
+	// Modify legacy file in-place, then import dupSrc again:
+	// legacy item's hex hot-updates, and dupSrc is imported into a new random directory!
+	editedLegacy := []byte("legacy file payload v2 edited")
+	if err := os.WriteFile(legacyFile, editedLegacy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	impNew, err := mgr.ImportFiles([]string{dupSrc})
+	if err != nil || len(impNew) != 1 {
+		t.Fatalf("ImportFiles(dupSrc after legacy edit) = %d, err=%v", len(impNew), err)
+	}
+	if impNew[0].ID == legacyHex || !isUppercaseAlnum(impNew[0].ID) {
+		t.Fatalf("expected new random uppercase alphanumeric ID, got %q", impNew[0].ID)
+	}
+
+	// Deleting the legacy item (whose id == legacyHex) must NOT delete the newly imported item (whose hex == legacyHex).
+	if err := mgr.DeleteItem(legacyHex); err != nil {
+		t.Fatalf("DeleteItem(legacyHex): %v", err)
+	}
+	if _, err := mgr.GetItem(impNew[0].ID); err != nil {
+		t.Fatalf("new item disappeared after deleting legacy item: %v", err)
 	}
 }
