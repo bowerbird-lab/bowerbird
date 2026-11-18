@@ -585,9 +585,10 @@ func (pm *PluginManager) InstallPluginFromURL(pluginURL string) (*InstalledPlugi
 		if pID := extractPluginIDFromURL(pluginURL); pID != "" {
 			RecordLog("info", "plugin", fmt.Sprintf("Primary download failed for %s (%v), attempting fallback from official GitHub releases...", pID, err), "", 0)
 			fallbackCandidates := []string{
-				fmt.Sprintf("https://github.com/owocc/bowerbird-plugins/releases/download/plugins-latest/%s-v1.0.0.zip", pID),
-				fmt.Sprintf("https://github.com/owocc/bowerbird-plugins/releases/download/plugins-latest/%s-v1.0.0-alpha.zip", pID),
-				fmt.Sprintf("https://raw.githubusercontent.com/owocc/bowerbird-plugins/main/repo/%s/manifest.json", pID),
+				fmt.Sprintf("https://github.com/bowerbird-lab/plugins/releases/download/plugins-latest/%s-v1.1.0.zip", pID),
+				fmt.Sprintf("https://github.com/bowerbird-lab/plugins/releases/download/plugins-latest/%s-v1.0.0.zip", pID),
+				fmt.Sprintf("https://github.com/bowerbird-lab/plugins/releases/download/plugins-latest/%s-v1.0.0-alpha.zip", pID),
+				fmt.Sprintf("https://raw.githubusercontent.com/bowerbird-lab/plugins/repo/repo/%s/manifest.json", pID),
 			}
 			for _, candURL := range fallbackCandidates {
 				if fbManifest, fbErr := pm.downloadAndExtract(candURL, stagingDir); fbErr == nil {
@@ -858,7 +859,7 @@ func (pm *PluginManager) downloadAssetToStaging(baseURL *url.URL, relativePath s
 	dlDuration := time.Since(dlStart).Milliseconds()
 	if err != nil {
 		if strings.HasPrefix(pluginID, "official.") {
-			fallbackURL := fmt.Sprintf("https://raw.githubusercontent.com/owocc/bowerbird-plugins/main/repo/%s/%s", pluginID, relativePath)
+			fallbackURL := fmt.Sprintf("https://raw.githubusercontent.com/bowerbird-lab/plugins/repo/repo/%s/%s", pluginID, relativePath)
 			RecordLog("info", "plugin", fmt.Sprintf("Asset download failed, trying official GitHub fallback: %s", fallbackURL), "", 0)
 			if fbErr := pm.downloadDirectFile(fallbackURL, destPath); fbErr == nil {
 				RecordLog("info", "plugin", fmt.Sprintf("Downloaded %s successfully from GitHub fallback", relativePath), "", 0)
@@ -873,7 +874,7 @@ func (pm *PluginManager) downloadAssetToStaging(baseURL *url.URL, relativePath s
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if strings.HasPrefix(pluginID, "official.") {
-			fallbackURL := fmt.Sprintf("https://raw.githubusercontent.com/owocc/bowerbird-plugins/main/repo/%s/%s", pluginID, relativePath)
+			fallbackURL := fmt.Sprintf("https://raw.githubusercontent.com/bowerbird-lab/plugins/repo/repo/%s/%s", pluginID, relativePath)
 			RecordLog("info", "plugin", fmt.Sprintf("Asset HTTP %d, trying official GitHub fallback: %s", resp.StatusCode, fallbackURL), "", 0)
 			if fbErr := pm.downloadDirectFile(fallbackURL, destPath); fbErr == nil {
 				RecordLog("info", "plugin", fmt.Sprintf("Downloaded %s successfully from GitHub fallback", relativePath), "", 0)

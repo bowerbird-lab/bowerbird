@@ -58,7 +58,7 @@ Dragging a file from a webview normally only publishes text formats, so Bowerbir
 ### Extend it
 
 - **Preview plugins are first-class.** Declare a native renderer for any extension and it shows up in both the modal and the inspector — see [Native Plugin Architecture](#native-plugin-architecture).
-- **A plugin store with a dual-channel repository** (`owocc/bowerbird-plugins`): a compact metadata index on `main`, release zips on GitHub Releases, resolved by the marketplace without a proxy in between.
+- **A plugin store with a dual-channel repository** (`bowerbird-lab/plugins`): source code on `main`, a compact metadata index on the orphan `repo` branch, release zips on GitHub Releases, resolved by the marketplace without a proxy in between.
 - **Built-in plugins are listed and disableable** from Settings, next to installed ones; only the internal fallback plugin is always on.
 
 ### Storage you can actually hold
@@ -200,12 +200,12 @@ Bowerbird enforces a strict physical separation between **User Libraries** and *
 
 ### Plugin Ecosystem & Distribution Specification
 
-1. **Native source layout**:
+1. **Native source layout** (`bowerbird-lab/plugins` `main` branch):
    - Official plugins live in `plugins/<plugin-id>/` as `plugin.json` plus an optional zero-build `index.js`.
    - Preview plugins declare a host renderer (`"native": "markdown"`); they ship no React components and need no Vite/Rollup output.
 2. **Dual-channel distribution**:
-   - Metadata is published to `owocc/bowerbird-plugins`.
-   - **`main` branch**: compact index metadata and `repo/<id>/plugin.json`.
+   - Build artifacts are published from `bowerbird-lab/plugins` (`main` -> `repo` orphan branch + GitHub Releases).
+   - **`repo` orphan branch**: compact index metadata (`index.min.json`, `registry.json`) and `repo/<id>/plugin.json`.
    - **GitHub Releases**: packaged zip bundles (`<plugin-id>-v<version>.zip`).
 3. **Marketplace & edge resolution**:
    - The marketplace reads `PLUGIN_REPO_INDEX_URL` and downloads releases from `PLUGIN_RELEASE_BASE_URL` without proxying.

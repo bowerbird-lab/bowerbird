@@ -3,9 +3,9 @@ import fs from "node:fs";
 import { INITIAL_OFFICIAL_PLUGINS, mergeBuiltinPlugins } from "../data/plugins";
 
 export const DEFAULT_REPO_INDEX_URL =
-  "https://raw.githubusercontent.com/owocc/bowerbird-plugins/main/index.min.json";
+  "https://raw.githubusercontent.com/bowerbird-lab/plugins/repo/index.min.json";
 export const DEFAULT_RELEASE_BASE_URL =
-  "https://github.com/owocc/bowerbird-plugins/releases/download/plugins-latest";
+  "https://github.com/bowerbird-lab/plugins/releases/download/plugins-latest";
 export interface PluginIndexItem {
   id: string;
   name: string;
