@@ -238,58 +238,6 @@ func TestOfficialManifestsDeclareCapabilitiesAndDenyJS(t *testing.T) {
 	}
 }
 
-func TestRepositoryPluginsDeclareHooksAndPermissions(t *testing.T) {
-	root, err := filepath.Abs("../../plugins")
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := 0
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		dir := filepath.Join(root, entry.Name())
-		if _, err := os.Stat(filepath.Join(dir, "plugin.json")); err != nil {
-			continue
-		}
-		p, err := loadPlugin(dir)
-		if err != nil {
-			t.Fatalf("%s: %v", entry.Name(), err)
-		}
-		found++
-		if p.Manifest.Main != "" {
-			if len(p.Manifest.Hooks) == 0 {
-				t.Fatalf("%s: JavaScript plugin has no declared hooks", p.Manifest.ID)
-			}
-			for _, hook := range p.Manifest.Hooks {
-				if !hasHook(p.Manifest, hook) {
-					t.Fatalf("%s: hook %s not normalized", p.Manifest.ID, hook)
-				}
-			}
-		}
-	}
-	if found < 5 {
-		t.Fatalf("only %d repository plugins validated", found)
-	}
-	pinterest, err := loadPlugin(filepath.Join(root, "pinterest"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantHooks := []string{"resolveUrl", "inspect", "actions", "runAction"}
-	for _, hook := range wantHooks {
-		if !hasHook(pinterest.Manifest, hook) {
-			t.Fatalf("pinterest missing declared hook %s", hook)
-		}
-	}
-	if len(pinterest.Manifest.Permissions.Network) == 0 || len(pinterest.Manifest.Permissions.Process) != 0 {
-		t.Fatalf("pinterest permissions = %+v", pinterest.Manifest.Permissions)
-	}
-}
-
 func TestUndeclaredHookIsDenied(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "undeclared")
@@ -380,13 +328,30 @@ func TestOfficialBuiltinsMatchTheirSelectors(t *testing.T) {
 	}
 }
 
-func TestPinterestBuiltinResolvesDirectImage(t *testing.T) {
-	root, err := filepath.Abs("../../plugins")
-	if err != nil {
+func TestResolverPluginResolvesMatchingURL(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "pinterest")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h := NewHost(t.TempDir())
-	h.SetLocalDirs(root)
+	manifest := `{
+		"id": "official.pinterest",
+		"name": "Pinterest",
+		"version": "1.0.0",
+		"kind": "resolver",
+		"main": "index.js",
+		"hooks": ["resolveUrl"],
+		"urlHosts": ["pinterest.com", "*.pinterest.com", "i.pinimg.com"]
+	}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code := `export function resolveUrl(input) { return { url: input.url }; }`
+	if err := os.WriteFile(filepath.Join(pluginDir, "index.js"), []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHost(filepath.Join(dir, "installed"))
+	h.SetLocalDirs(dir)
 	h.RegisterBuiltin(OfficialManifests()...)
 	if !h.CanResolve("https://www.pinterest.com/pin/123456/") {
 		t.Fatal("expected CanResolve to be true for pinterest pin URL")

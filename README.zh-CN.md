@@ -58,7 +58,7 @@ BowerBird 是一个跨平台桌面应用，使用 **mygo（Go）的 GPU 原生 U
 ### 可扩展
 
 - **预览插件是一等公民。** 为任意扩展名声明原生渲染器，它就会同时出现在弹窗与检查器中——见 [原生插件架构](#原生插件架构)。
-- **插件商店与双通道分发**（`owocc/bowerbird-plugins`）：`main` 分支存放精简的元数据索引，GitHub Releases 存放打包好的 zip，由市场端直接解析，中间不经过任何代理。
+- **插件商店与双通道分发**（`bowerbird-lab/plugins`）：`main` 分支维护插件源码，孤儿分支 `repo` 存放精简的元数据索引，GitHub Releases 存放打包好的 zip，由市场端直接解析，中间不经过任何代理。
 - **内置插件同样列在插件商店里并可禁用**（与已安装的插件同列），只有内部兜底插件始终启用。
 
 ### 真正握在自己手里的存储
@@ -188,12 +188,12 @@ BowerBird 在 **用户素材库** 与 **应用状态数据** 之间执行严格�
 
 ### 插件生态与分发规范
 
-1. **原生源码布局**：
+1. **原生源码布局**（`bowerbird-lab/plugins` 的 `main` 分支）：
    - 官方插件位于 `plugins/<plugin-id>/`，由 `plugin.json` 和可选的免构建 `index.js` 组成。
    - 预览插件声明宿主渲染器（如 `"native": "markdown"`），不再包含 React 组件，也不需要 Vite/Rollup 构建产物。
 2. **双通道分发仓库**：
-   - 分发元数据发布到专用仓库 `owocc/bowerbird-plugins`。
-   - **`main` 分支**：精简索引元数据与 `repo/<id>/plugin.json`。
+   - 构建产物由 `bowerbird-lab/plugins` 自动发布到孤儿分支 `repo` 与 GitHub Releases。
+   - **`repo` 孤儿分支**：精简索引元数据（`index.min.json`、`registry.json`）与 `repo/<id>/plugin.json`。
    - **GitHub Releases**：打包好的发布 zip（`<plugin-id>-v<version>.zip`）。
 3. **市场与边缘解析**：
    - 插件商店读取 `PLUGIN_REPO_INDEX_URL`，发布包直接从 `PLUGIN_RELEASE_BASE_URL` 下载，不经过代理。
