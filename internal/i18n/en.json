@@ -689,6 +689,12 @@
       "title": "Record source URL",
       "description": "After downloading a media URL, save the resolved page/source URL into the item metadata. This is an application setting and is not controlled by plugins."
     },
+    "importMode": {
+      "title": "Import mode",
+      "description": "Choose whether importing local files copies them into the library or moves them from their original location (leaving no file behind).",
+      "copy": "Copy",
+      "move": "Move"
+    },
     "themes": {
       "selection": "Theme selection",
       "light": "Light theme",
@@ -830,6 +836,12 @@
     "noLibrariesFound": "No libraries found",
     "openLibrary": "Open Library...",
     "removeLibrary": "Remove from List",
+    "rescanLibrary": "Rescan Library...",
+    "rescanLibraryTitle": "Rescan Library",
+    "rescanLibraryConfirm": "Scan the items directory of \"{{name}}\" and add any files missing from the database to All? Existing records, folders, tags, and original files will not be modified.",
+    "rescanningLibrary": "Rescanning library...",
+    "rescanLibraryAdded": "Rescan complete: added {{count}} items",
+    "rescanLibraryNone": "Rescan complete: no missing items found",
     "renameMenu": "Rename...",
     "searchLibraryPlaceholder": "Search library...",
     "tags": "All Tags",
@@ -837,6 +849,7 @@
     "uncategorized": "Uncategorized",
     "untagged": "Untagged",
     "allItems": "All",
+    "recent": "Recent",
     "noLibrary": "No library"
   },
   "tags": {

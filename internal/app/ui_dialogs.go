@@ -130,6 +130,29 @@ func (a *App) installPluginFromDialog() {
 	}()
 }
 
+func (a *App) rescanLibraryFromDialog() {
+	a.dialog = dialogNone
+	if a.svc == nil {
+		return
+	}
+	a.showToast(a.t("sidebar.rescanningLibrary"))
+	go func() {
+		added, err := a.svc.RescanLibrary()
+		a.post(func() {
+			if err != nil {
+				a.showToast(err.Error())
+				return
+			}
+			if added > 0 {
+				a.showToast(a.tf("sidebar.rescanLibraryAdded", map[string]any{"count": added}))
+			} else {
+				a.showToast(a.t("sidebar.rescanLibraryNone"))
+			}
+			a.refreshAll()
+		})
+	}()
+}
+
 // Workspace mutations shared by the context menu and inspector.
 
 func (a *App) writeFilesToClipboard(paths []string) error {

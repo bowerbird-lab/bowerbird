@@ -114,3 +114,50 @@ func TestVibrancyDefaultsOnAndPersists(t *testing.T) {
 		t.Fatal("disabled native blur material was not persisted")
 	}
 }
+
+func TestImportModeDefaultsToCopyAndPersists(t *testing.T) {
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
+
+	store, err := NewUserDataStore()
+	if err != nil {
+		t.Fatalf("NewUserDataStore: %v", err)
+	}
+	if got := store.GetImportMode(); got != ImportModeCopy {
+		t.Fatalf("default import mode = %q, want %q", got, ImportModeCopy)
+	}
+
+	if err := store.SetImportMode(ImportModeMove); err != nil {
+		t.Fatalf("SetImportMode(move): %v", err)
+	}
+	reopened, err := NewUserDataStore()
+	if err != nil {
+		t.Fatalf("reopen user data: %v", err)
+	}
+	if got := reopened.GetImportMode(); got != ImportModeMove {
+		t.Fatalf("persisted import mode = %q, want %q", got, ImportModeMove)
+	}
+}
+
+func TestSetImportModeValidatesAndBroadcasts(t *testing.T) {
+	t.Setenv("BOWERBIRD_USER_DATA_DIR", t.TempDir())
+
+	host := &recordingHost{}
+	svc := NewService(nil)
+	AttachHost(svc, host)
+
+	if got := svc.GetImportMode(); got != ImportModeCopy {
+		t.Fatalf("default service import mode = %q, want %q", got, ImportModeCopy)
+	}
+	if err := svc.SetImportMode(ImportModeMove); err != nil {
+		t.Fatalf("SetImportMode(move): %v", err)
+	}
+	if host.count(ImportModeChangedEvent) != 1 {
+		t.Fatalf("import-mode-changed events = %d, want 1", host.count(ImportModeChangedEvent))
+	}
+	if err := svc.SetImportMode("invalid-mode"); err == nil {
+		t.Fatal("SetImportMode(invalid-mode) succeeded")
+	}
+	if host.count(ImportModeChangedEvent) != 1 {
+		t.Fatalf("invalid import mode emitted event: %d", host.count(ImportModeChangedEvent))
+	}
+}

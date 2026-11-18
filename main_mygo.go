@@ -7,9 +7,11 @@ import (
 	"image"
 	"image/png"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -145,6 +147,11 @@ func (h *appHost) newWindow(spec core.WindowSpec) *mygo.Window {
 }
 
 func (h *appHost) OpenWindow(spec core.WindowSpec) error {
+	if h.liteActive.Swap(false) {
+		debug.SetGCPercent(100)
+		debug.SetMemoryLimit(math.MaxInt64)
+		mygo.App.Dock.Show()
+	}
 	h.mu.Lock()
 	if existing, ok := h.windows[spec.Name]; ok {
 		h.mu.Unlock()
@@ -197,6 +204,11 @@ func (h *appHost) CloseWindow(name string) {
 }
 
 func (h *appHost) FocusMainWindow() {
+	if h.liteActive.Swap(false) {
+		debug.SetGCPercent(100)
+		debug.SetMemoryLimit(math.MaxInt64)
+		mygo.App.Dock.Show()
+	}
 	h.CancelLightweightIdle()
 	w := h.mainWindow()
 	if w == nil {
@@ -345,7 +357,14 @@ func (h *appHost) EnterLightweightMode() {
 			w.Destroy()
 		}
 	}
-	log.Printf("[Lightweight] webview windows destroyed; Go process still running")
+	if h.views != nil {
+		h.views.ReleaseLightweightMemory()
+	}
+	mygo.App.Dock.Hide()
+	debug.SetGCPercent(30)
+	debug.SetMemoryLimit(128 << 20)
+	debug.FreeOSMemory()
+	log.Printf("[Lightweight] webview windows destroyed and dock icon hidden; Go process still running")
 }
 
 func (h *appHost) OpenDirectory(title string) (string, error) {

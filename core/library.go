@@ -1373,17 +1373,28 @@ func (m *LibraryManager) runConcurrentImportJobs(jobs []importJob, onProgress Pr
 	return imported, nil
 }
 
+func (m *LibraryManager) isMoveImportMode() bool {
+	if m == nil || m.userData == nil {
+		return false
+	}
+	return m.userData.GetImportMode() == ImportModeMove
+}
+
 func (m *LibraryManager) commitImportBatch(batch []preparedImportResult, emitDesktopBatch bool) {
 	m.mu.RLock()
 	db := m.db
+	var activePath string
+	if m.activeLib != nil {
+		activePath = filepath.Clean(m.activeLib.Path)
+	}
 	m.mu.RUnlock()
 	if db == nil || len(batch) == 0 {
 		return
 	}
 
 	tCommitStart := time.Now()
-	tx, err := db.Begin()
-	if err == nil {
+	tx, commitErr := db.Begin()
+	if commitErr == nil {
 		itemStmt, itemStmtErr := tx.Prepare(`INSERT INTO items (id, hex, name, extension, filename, size, mime_type, width, height, has_thumbnail, dominant_color, palette, meta_json, tags, created_at, imported_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
@@ -1433,9 +1444,23 @@ func (m *LibraryManager) commitImportBatch(batch []preparedImportResult, emitDes
 		if folderStmt != nil {
 			_ = folderStmt.Close()
 		}
-		_ = tx.Commit()
+		commitErr = tx.Commit()
 	}
 	sqliteMs := time.Since(tCommitStart).Milliseconds()
+
+	if commitErr == nil && m.isMoveImportMode() {
+		for _, r := range batch {
+			if r.item == nil || r.err != nil || r.srcPath == "" {
+				continue
+			}
+			if activePath != "" && pathIsWithin(activePath, r.srcPath) {
+				continue
+			}
+			if rmErr := os.Remove(r.srcPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				LogDragTrace("move-import-remove-failed", fmt.Sprintf("%s: %v", r.srcPath, rmErr))
+			}
+		}
+	}
 
 	// Update in-memory cache in a single O(N) pass for the entire batch
 	tCacheStart := time.Now()

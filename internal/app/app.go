@@ -36,6 +36,7 @@ type Nav string
 
 const (
 	NavAll           Nav = "all"
+	NavRecent        Nav = "recent"
 	NavUntagged      Nav = "untagged"
 	NavUncategorized Nav = "uncategorized"
 	NavTags          Nav = "tags"
@@ -154,6 +155,7 @@ type App struct {
 	tags                []core.Tag
 	stats               core.WorkspaceStats
 	trashCount          int
+	recentUsedCount     int
 	nav                 Nav
 	folderID            string
 	expanded            map[string]bool
@@ -207,12 +209,25 @@ type App struct {
 	galleryScroll     ui.ScrollState
 	scrollTop         float32
 
+	// Rendered gallery row anchor sampled from DrawOver so hit-testing and
+	// marquee selection match the list's actual layout instead of relying on
+	// ListState's estimated scrollY.
+	galleryBoxRect             ui.Rect
+	galleryPaintSampleOK       bool
+	galleryPaintSampleIdx      int
+	galleryPaintSampleY        float32
+	galleryLayoutSampleOK      bool
+	galleryLayoutSampleIdx     int
+	galleryLayoutSampleRelY    float32
+	galleryLayoutSampleScrollY float32
+
 	// Gallery rubber-band selection.
-	marqueeActive   bool
-	marqueeStartX   float32
-	marqueeStartY   float32
-	marqueeCurX     float32
-	marqueeCurY     float32
+	marqueeActive        bool
+	marqueeStartX        float32
+	marqueeStartY        float32
+	marqueeStartContentY float32
+	marqueeCurX          float32
+	marqueeCurY          float32
 	marqueeBase     map[string]bool
 	marqueeAdditive bool
 	// Inputs and popover state.
@@ -319,9 +334,10 @@ type App struct {
 	previewSeq        uint64
 
 	// Settings values.
-	themeValue    string
-	languageValue string
-	vibrancyValue bool
+	themeValue      string
+	languageValue   string
+	vibrancyValue   bool
+	importModeValue string
 	network       core.NetworkSettings
 	shortcuts     core.ShortcutSettings
 	shortcutPairs map[string]uiShortcut
@@ -433,6 +449,7 @@ const (
 	dialogDeleteLastFolder
 	dialogFolderPicker
 	dialogTagPicker
+	dialogRescanLibrary
 )
 
 type settingsGroup struct {
@@ -731,7 +748,7 @@ func (a *App) refreshAll() {
 	request := workspaceRequest{
 		context: loadContext,
 		query:   a.queryString(), scope: a.folderScope(), sort: a.sortOrder,
-		unrated: a.filters.Unrated, trash: a.nav == NavTrash, activeID: a.activeItemID,
+		unrated: a.filters.Unrated, trash: a.nav == NavTrash, recent: a.nav == NavRecent, activeID: a.activeItemID,
 	}
 	go func() {
 		lib, _ := a.svc.GetActiveLibrary()
@@ -744,6 +761,7 @@ func (a *App) refreshAll() {
 			stats = *statsPtr
 		}
 		trash, _ := a.svc.GetTrashCount()
+		recentUsedIDs, _ := a.svc.GetRecentlyUsedIDs()
 		recent := a.svc.GetRecentLibraryRefs()
 		plugins, _ := a.svc.ListInstalledPlugins()
 		folderPreviews := a.fetchFolderPreviews(folderLookup, previewNav, previewFolder, previewSort)
@@ -769,6 +787,7 @@ func (a *App) refreshAll() {
 			a.tags = tags
 			a.stats = stats
 			a.trashCount = trash
+			a.recentUsedCount = len(recentUsedIDs)
 			a.recent = recent
 			a.setWorkspaceItems(items, total, totalSize)
 			a.loading = false
@@ -929,6 +948,32 @@ func (a *App) clearWorkspaceSelection() {
 	a.closePreview()
 }
 
+// ReleaseLightweightMemory drops cached workspace data and UI state when
+// entering lightweight mode so the Go GC can reclaim memory.
+func (a *App) ReleaseLightweightMemory() {
+	if a == nil {
+		return
+	}
+	if a.loadCancel != nil {
+		a.loadCancel()
+		a.loadCancel = nil
+	}
+	a.items = nil
+	a.totalSize = 0
+	a.itemPages = nil
+	a.activeItem = nil
+	a.activeItemID = ""
+	a.selected = map[string]bool{}
+	a.selectedAt = -1
+	a.folders = nil
+	a.folderPreviews = nil
+	a.tags = nil
+	a.history = nil
+	a.historyAt = -1
+	a.previewOpen = false
+	a.loading = false
+}
+
 // navigate switches the workspace scope and reloads.
 func (a *App) navigate(nav Nav, folderID string) {
 	if nav == NavFolder && folderID == "" {
@@ -936,6 +981,7 @@ func (a *App) navigate(nav Nav, folderID string) {
 	}
 	a.nav = nav
 	a.folderID = folderID
+	a.galleryScroll.Y = 0
 	a.selected = map[string]bool{}
 	a.selectedAt = -1
 	a.activeItemID = ""
@@ -1007,6 +1053,8 @@ func (a *App) goHistory(delta int) {
 func (a *App) rebuildRows() {
 	a.rowsKey = a.galleryLayoutKey()
 	a.rows = nil
+	a.galleryLayoutSampleOK = false
+	a.galleryPaintSampleOK = false
 	width := 900
 	if a.win != nil {
 		if w, _ := a.win.ContentSize(); w > 0 {

@@ -54,6 +54,7 @@ const (
 
 	ErrCodeInvalidTheme               = "ERR_INVALID_THEME"
 	ErrCodeInvalidLanguage            = "ERR_INVALID_LANGUAGE"
+	ErrCodeInvalidImportMode          = "ERR_INVALID_IMPORT_MODE"
 
 	ErrCodePluginNotFound             = "ERR_PLUGIN_NOT_FOUND"
 	ErrCodeInvalidManifest            = "ERR_INVALID_MANIFEST"

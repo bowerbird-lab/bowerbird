@@ -2369,3 +2369,102 @@ func TestColorWheelRendersAndAppliesHues(t *testing.T) {
 		t.Fatalf("the wheel applied %q, which is not green", a.filters.Colors[0])
 	}
 }
+
+func TestLargeJustifiedGalleryMarqueeAndClickAfterScroll(t *testing.T) {
+	a := seededApp(t)
+	a.prefs.LayoutMode = "justified"
+	a.prefs.ShowNames = false
+	a.items = nil
+	dims := [][2]int{{800, 1600}, {1600, 800}, {1000, 1000}, {900, 1400}, {1800, 900}}
+	for i := 0; i < 2000; i++ {
+		d := dims[i%len(dims)]
+		a.items = append(a.items, core.Item{
+			ID: fmt.Sprintf("item-%d", i), Name: fmt.Sprintf("Item %d", i),
+			Extension: "jpg", MimeType: "image/jpeg", Width: d[0], Height: d[1],
+		})
+	}
+	a.total = len(a.items)
+	a.activeItem = nil
+	a.selected = map[string]bool{}
+	a.rebuildRows()
+
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.Frame()
+	if a.galleryScroll.MaxY <= 0 {
+		t.Fatal("gallery has no scroll range")
+	}
+
+	// Jump to ~50% of the gallery so unmeasured rows above have varying heights.
+	a.galleryScroll.Y = a.galleryScroll.MaxY * 0.5
+	tester.Frame()
+	if !a.galleryLayoutSampleOK {
+		t.Fatal("gallery paint sample was not recorded")
+	}
+
+	firstRow, lastRow := a.galleryList.Visible()
+	if lastRow <= firstRow+2 {
+		t.Fatalf("expected multiple visible rows, got first=%d last=%d", firstRow, lastRow)
+	}
+	top := float32(mainHeaderHeight + galleryTopPadding)
+	targetRow := -1
+	var rowLocalY float32
+	for r := firstRow; r <= lastRow; r++ {
+		if len(a.rows[r]) < 2 {
+			continue
+		}
+		y := a.galleryRowsOriginY(top) + a.galleryRowTopOffset(r)
+		if y >= top && y+float32(a.rows[r][0].height) <= a.galleryBoxRect.H {
+			targetRow = r
+			rowLocalY = y
+			break
+		}
+	}
+	if targetRow < 0 {
+		t.Fatalf("no fully visible row found in [%d, %d]", firstRow, lastRow)
+	}
+	row := a.rows[targetRow]
+	if len(row) < 2 {
+		t.Fatalf("target row %d has fewer than 2 cells (%d)", targetRow, len(row))
+	}
+
+	rowH := float32(row[0].height)
+	midY := a.galleryBoxRect.Y + rowLocalY + rowH*0.5
+
+	// 1. Clicking a card in targetRow must select that exact card.
+	firstCell := row[0]
+	clickX := a.galleryBoxRect.X + float32(gallerySidePadding) + float32(firstCell.width)*0.5
+	tester.Press(clickX, midY)
+	tester.Release(clickX, midY)
+	tester.Frame()
+	wantID := a.items[firstCell.index].ID
+	if !a.selected[wantID] || len(a.selected) != 1 {
+		t.Fatalf("click on row %d selected %v, want only %s", targetRow, a.selected, wantID)
+	}
+
+	// 2. Marquee-selecting across targetRow from the left margin must select
+	//    only items in targetRow, not the row below it.
+	a.clearSelection()
+	startX := a.galleryBoxRect.X + 4
+	endX := a.galleryBoxRect.X + float32(gallerySidePadding) + float32(firstCell.width) + a.galleryGap() + float32(row[1].width)*0.5
+	tester.Press(startX, a.galleryBoxRect.Y+rowLocalY+4)
+	tester.Move(endX, a.galleryBoxRect.Y+rowLocalY+rowH-4)
+	tester.Release(endX, a.galleryBoxRect.Y+rowLocalY+rowH-4)
+	tester.Frame()
+
+	for id := range a.selected {
+		inTargetRow := false
+		for _, cell := range row {
+			if a.items[cell.index].ID == id {
+				inTargetRow = true
+				break
+			}
+		}
+		if !inTargetRow {
+			t.Fatalf("marquee on row %d selected item %s from another row (selected=%v)", targetRow, id, a.selected)
+		}
+	}
+	if !a.selected[a.items[row[0].index].ID] || !a.selected[a.items[row[1].index].ID] {
+		t.Fatalf("marquee on row %d missed: y=%v h=%v sx=%v ex=%v sel=%v", targetRow, rowLocalY, rowH, startX, endX, a.selected)
+	}
+}
+

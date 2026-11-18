@@ -29,16 +29,20 @@ func (a *App) attachURLDropTarget(el ui.Element) {
 	}
 	if drop, ok := ui.DropData(el, opts); ok {
 		folder := a.takeDropFolder()
-		// Finder/Explorer drags also advertise a URI list. Route their file
-		// URLs through the normal native-drop path instead of swallowing them.
-		if files, err := drop.Data.Files(); err == nil && len(files) > 0 {
-			a.handleDroppedFiles(files, folder)
-			return
-		}
-		urls, referer := urlsFromDropData(drop.Data)
-		if len(urls) > 0 {
-			a.handleURLDropsToFolder(urls, referer, folder)
-		}
+		a.handleDropDataToFolder(drop.Data, folder)
+	}
+}
+
+func (a *App) handleDropDataToFolder(data transfer.Data, folder string) {
+	// Finder/Explorer drags also advertise a URI list. Route their file
+	// URLs through the normal native-drop path instead of swallowing them.
+	if files, err := data.Files(); err == nil && len(files) > 0 {
+		a.handleDroppedFiles(files, folder)
+		return
+	}
+	urls, referer := a.dropURLsFromData(data)
+	if len(urls) > 0 {
+		a.handleURLDropsToFolder(urls, referer, folder)
 	}
 }
 
@@ -53,27 +57,79 @@ func (a *App) takeDropFolder() string {
 	return folder
 }
 
-// urlsFromDropData extracts import URLs from a browser drag. The HTML
-// representation is read first because a dragged <img> often carries the real
-// image URL there while the URI list only holds the page it is linked to. It
-// also returns the page URL to use as a Referer for hotlink-protected media.
+func (a *App) dropURLsFromData(data transfer.Data) ([]string, string) {
+	var canResolve func(string) bool
+	if a.pluginHost != nil {
+		canResolve = a.pluginHost.CanResolve
+	}
+	return urlsFromDropDataWithResolver(data, canResolve)
+}
+
+// urlsFromDropData extracts import URLs from a browser drag, preferring
+// URIList/Text and only falling back to HTML <img> extraction when no plugin
+// claims the URL and no direct media URL is already present.
 func urlsFromDropData(data transfer.Data) ([]string, string) {
-	var raw []string
+	return urlsFromDropDataWithResolver(data, nil)
+}
+
+func urlsFromDropDataWithResolver(data transfer.Data, canResolve func(string) bool) ([]string, string) {
+	var primaryRaw []string
+	if urls, err := data.URLs(); err == nil {
+		primaryRaw = append(primaryRaw, urls...)
+	}
+	if text, err := data.Read(transfer.Text); err == nil {
+		primaryRaw = append(primaryRaw, strings.Split(string(text), "\n")...)
+	}
+	primary := normalizeDroppedURLs(primaryRaw)
+
+	hasPluginMatch := false
+	hasMediaURL := false
+	if canResolve != nil {
+		for _, u := range primary {
+			if canResolve(u) {
+				hasPluginMatch = true
+				break
+			}
+		}
+	}
+	for _, u := range primary {
+		if looksLikeMediaURL(u) {
+			hasMediaURL = true
+			break
+		}
+	}
+
 	referer := ""
-	if markup, err := data.Read(transfer.HTML); err == nil && len(markup) > 0 {
-		media, page := core.ExtractMediaFromHTML("", markup)
-		raw = append(raw, media...)
+	var urls []string
+
+	// Only fall back to scraping <img> tags from the drag's HTML fragment when
+	// no plugin claims the dropped URL(s) and the drop didn't already carry a
+	// direct media URL. Otherwise a site with a resolver plugin (e.g.
+	// Pinterest) would import both the resolved original and the HTML thumbnail.
+	if len(primary) == 0 || (!hasPluginMatch && !hasMediaURL) {
+		if markup, err := data.Read(transfer.HTML); err == nil && len(markup) > 0 {
+			media, page := core.ExtractMediaFromHTML("", markup)
+			if page != "" {
+				referer = page
+			}
+			if page != "" && canResolve != nil && canResolve(page) {
+				urls = normalizeDroppedURLs([]string{page})
+			} else if htmlMedia := normalizeDroppedURLs(media); len(htmlMedia) > 0 {
+				urls = htmlMedia
+			}
+		}
+	} else if markup, err := data.Read(transfer.HTML); err == nil && len(markup) > 0 {
+		// Still recover the source page URL as Referer for hotlink-protected media.
+		_, page := core.ExtractMediaFromHTML("", markup)
 		if page != "" {
 			referer = page
 		}
 	}
-	if urls, err := data.URLs(); err == nil {
-		raw = append(raw, urls...)
+
+	if len(urls) == 0 {
+		urls = primary
 	}
-	if text, err := data.Read(transfer.Text); err == nil {
-		raw = append(raw, strings.Split(string(text), "\n")...)
-	}
-	urls := normalizeDroppedURLs(raw)
+
 	if referer == "" {
 		// A page URL next to a media URL is the image's source page, which is
 		// exactly what hosts with hotlink protection expect in Referer.
