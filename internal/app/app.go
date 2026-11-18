@@ -516,6 +516,7 @@ func New(svc *core.Service) *App {
 	a.pluginHost.RegisterBuiltin(plugin.OfficialManifests()...)
 	a.syncPluginHTTPClient()
 	a.rebuildShortcutPairs()
+	a.registerMobileURLImporter()
 	return a
 }
 
@@ -675,12 +676,17 @@ func (a *App) HandleEvent(name string, payload any) {
 		a.syncPluginHTTPClient()
 	case core.LogEntryEvent, core.LogsClearedEvent:
 		a.logRefresh.request(a.refreshLogs)
-	case "import-completed":
+	case "import-completed", "library-items-upserted":
 		// Native drops and other import entry points return before their
 		// background work finishes, so refresh once the pipeline reports the
 		// committed items. Without this the gallery only updates after the
 		// library is reopened.
 		a.post(func() { a.refreshAll() })
+	case core.MobileShareSavedEvent:
+		a.post(func() { a.refreshAll() })
+		if payload, ok := payload.(core.MobileShareSavedPayload); ok {
+			a.notifyMobileShareSaved(payload)
+		}
 	case "import-error":
 		if message, ok := payload.(string); ok {
 			a.post(func() {
@@ -727,7 +733,48 @@ func (a *App) syncLanguage() {
 
 // SyncLanguage re-reads the persisted language. The desktop entry point calls
 // it after attaching the manager so the menu bar and tray start translated.
-func (a *App) SyncLanguage() { a.syncLanguage() }
+func (a *App) SyncLanguage() {
+	a.syncLanguage()
+	a.registerMobileURLImporter()
+}
+
+func (a *App) registerMobileURLImporter() {
+	if a.svc == nil {
+		return
+	}
+	a.svc.SetMobileURLImporter(func(rawURL, folderID string) ([]core.Item, error) {
+		ptrs, err := a.importURLItems(rawURL, "", folderID)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]core.Item, 0, len(ptrs))
+		for _, p := range ptrs {
+			if p != nil {
+				out = append(out, *p)
+			}
+		}
+		return out, nil
+	})
+}
+
+func (a *App) notifyMobileShareSaved(payload core.MobileShareSavedPayload) {
+	if a.svc == nil || !a.svc.IsMobileShareNotifyEnabled() || payload.Count <= 0 {
+		return
+	}
+	title := a.t("mobile.shareNotifyTitle")
+	var body string
+	if payload.Count == 1 && strings.TrimSpace(payload.FirstName) != "" {
+		body = a.tf("mobile.shareNotifyBodySingle", map[string]any{"name": payload.FirstName})
+	} else {
+		body = a.tf("mobile.shareNotifyBodyCount", map[string]any{"count": payload.Count})
+	}
+	go func() {
+		_ = mygo.NewNotification(mygo.NotificationOptions{
+			Title: title,
+			Body:  body,
+		}).Show()
+	}()
+}
 
 // refreshAll reloads the library-wide data and the current page.
 func (a *App) refreshAll() {

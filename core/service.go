@@ -1119,3 +1119,34 @@ func (s *Service) RevokeMobileDevice(id string) error {
 	RecordLog("info", "mobile", fmt.Sprintf("Revoked token %s", entry.DeviceName), "", 0)
 	return nil
 }
+
+// IsMobileShareNotifyEnabled reports whether desktop notifications are shown
+// when mobile shares are saved.
+func (s *Service) IsMobileShareNotifyEnabled() bool {
+	if s.mgr == nil || s.mgr.userData == nil {
+		return true
+	}
+	return !s.mgr.userData.GetMobileSettings().ShareNotifyDisabled
+}
+
+// SetMobileShareNotifyEnabled persists whether desktop notifications are shown
+// when mobile shares are saved.
+func (s *Service) SetMobileShareNotifyEnabled(enabled bool) error {
+	if s.mgr == nil || s.mgr.userData == nil {
+		return ErrCoreNotInitialized
+	}
+	ms := s.mgr.userData.GetMobileSettings()
+	ms.ShareNotifyDisabled = !enabled
+	return s.mgr.userData.SetMobileSettings(ms)
+}
+
+// SetMobileURLImporter registers the desktop URL resolver/importer callback used
+// when mobile shares a URL or text containing a URL.
+func (s *Service) SetMobileURLImporter(fn func(rawURL, folderID string) ([]Item, error)) {
+	if s.mgr == nil {
+		return
+	}
+	if server := s.mgr.GetMobileServer(); server != nil {
+		server.SetURLImporter(fn)
+	}
+}

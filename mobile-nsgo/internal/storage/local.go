@@ -108,13 +108,22 @@ const (
 	UsageVersion       = 1
 	InboxVersion       = 1
 	ShareTagsVersion   = 1
+	SaveHistoryVersion = 1
 	MigrationVersion   = 1
 
 	MaxConnections = 10
 	MaxUsage       = 500
 	MaxShareTags   = 2000
+	MaxSaveHistory = 300
 	MaxProcessed   = 300
 )
+
+// SaveHistory keeps recently saved item IDs from mobile shares per stable
+// library scope, newest first, capped at 300 IDs.
+type SaveHistory struct {
+	Version int                 `json:"version"`
+	Scopes  map[string][]string `json:"scopes"`
+}
 
 // Local wraps a Store with the documented document names and their limits.
 type Local struct {
@@ -661,18 +670,22 @@ const (
 	LayoutAuto      = "auto"
 	LayoutWaterfall = "waterfall"
 	LayoutGrid      = "grid"
+
+	ShareModeAuto   = "auto"
+	ShareModeChoose = "choose"
 )
 
-// Preferences is the app's local appearance settings. It mirrors the desktop's
-// theme preferences: one colour mode and one light and dark theme ID.
+// Preferences is the app's local appearance and share settings.
 type Preferences struct {
-	Version       int    `json:"version"`
-	ThemeMode     string `json:"themeMode"` // "system", "light" or "dark"
-	LightTheme    string `json:"lightTheme"`
-	DarkTheme     string `json:"darkTheme"`
-	SystemAccent  bool   `json:"systemAccent"`
-	GridColumns   int    `json:"gridColumns"`
-	GalleryLayout string `json:"galleryLayout"` // "auto", "waterfall" or "grid"
+	Version             int    `json:"version"`
+	ThemeMode           string `json:"themeMode"` // "system", "light" or "dark"
+	LightTheme          string `json:"lightTheme"`
+	DarkTheme           string `json:"darkTheme"`
+	SystemAccent        bool   `json:"systemAccent"`
+	GridColumns         int    `json:"gridColumns"`
+	GalleryLayout       string `json:"galleryLayout"` // "auto", "waterfall" or "grid"
+	ShareMode           string `json:"shareMode"`     // "auto" or "choose"
+	ShareNotifyDisabled bool   `json:"shareNotifyDisabled,omitempty"`
 }
 
 // PreferencesVersion is the current preferences document version.
@@ -689,6 +702,7 @@ func DefaultPreferences() Preferences {
 		SystemAccent:  true,
 		GridColumns:   3,
 		GalleryLayout: LayoutAuto,
+		ShareMode:     ShareModeAuto,
 	}
 }
 
@@ -762,5 +776,74 @@ func (p Preferences) Normalize() Preferences {
 		p.GridColumns = def.GridColumns
 	}
 	p.GridColumns = ClampGridColumns(p.GalleryLayout, p.GridColumns)
+	switch p.ShareMode {
+	case ShareModeAuto, ShareModeChoose:
+	default:
+		p.ShareMode = def.ShareMode
+	}
 	return p
+}
+
+// LoadSaveHistory returns the local save-history document.
+func (l *Local) LoadSaveHistory() (SaveHistory, error) {
+	out := SaveHistory{Version: SaveHistoryVersion, Scopes: map[string][]string{}}
+	if _, err := l.store.Load("save_history.json", &out); err != nil {
+		return out, err
+	}
+	if out.Version == 0 {
+		out.Version = SaveHistoryVersion
+	}
+	if out.Scopes == nil {
+		out.Scopes = map[string][]string{}
+	}
+	return out, nil
+}
+
+// SaveHistoryIDs returns the saved item IDs for scope, newest first.
+func (l *Local) SaveHistoryIDs(scope string) ([]string, error) {
+	if scope == "" {
+		return nil, nil
+	}
+	h, err := l.LoadSaveHistory()
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), h.Scopes[scope]...), nil
+}
+
+// AddSaveHistory prepends item IDs for scope, deduplicates, and caps at 300.
+func (l *Local) AddSaveHistory(scope string, ids []string) error {
+	if scope == "" || len(ids) == 0 {
+		return nil
+	}
+	h, err := l.LoadSaveHistory()
+	if err != nil {
+		return err
+	}
+	existing := h.Scopes[scope]
+	seen := make(map[string]bool, len(ids)+len(existing))
+	next := make([]string, 0, len(ids)+len(existing))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		next = append(next, id)
+	}
+	for _, id := range existing {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		next = append(next, id)
+		if len(next) >= MaxSaveHistory {
+			break
+		}
+	}
+	if len(next) > MaxSaveHistory {
+		next = next[:MaxSaveHistory]
+	}
+	h.Scopes[scope] = next
+	return l.store.Save("save_history.json", h, privateFile)
 }

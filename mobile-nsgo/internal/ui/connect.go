@@ -106,20 +106,6 @@ func (a *App) connect(cx *core.Scope) core.Node {
 						}},
 						core.View{Style: core.Style{Gap: 6}, Children: recent},
 					}},
-					core.Show{When: func() bool { a.rev.Get(); return len(a.inboxEntries) > 0 }, Then: func(cx *core.Scope) core.Node {
-						return core.View{
-							Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.All(10),
-								CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()},
-							Children: []core.Node{
-								core.Text{Content: "收件箱中有 " + itoa(len(a.inboxEntries)) + " 项待上传内容",
-									Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
-								nsui.Button{Text: "查看", Variant: nsui.ButtonGhost, OnPress: func() {
-									a.inboxBackScreen = screenConnect
-									a.screen.Set(screenInbox)
-								}},
-							},
-						}
-					}},
 					a.pairDialog(cx),
 				},
 			},

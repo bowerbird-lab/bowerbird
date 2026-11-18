@@ -2,6 +2,10 @@ package com.bowerbird.mobile
 
 import android.Manifest
 import android.app.Activity
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -43,6 +47,7 @@ class MainActivity : Activity() {
         secure = SecurePrefs(this)
         discovery = Discovery(this)
         intake = ShareIntake(this)
+        ensureNotificationChannel()
         app = NsgoView(this)
         app.setStorageDirectory(filesDir)
         app.setParams(mapOf(
@@ -134,6 +139,23 @@ class MainActivity : Activity() {
                 intake.ack(ids)
                 runOnUiThread { reply.resolve(null) }
             }
+        }
+        app.handle("notify.show") { data, reply ->
+            val map = data as? Map<*, *>
+            val title = (map?.get("title") as? String).orEmpty().ifBlank { getString(R.string.app_name) }
+            val body = (map?.get("body") as? String).orEmpty()
+            runOnUiThread {
+                showSaveNotification(title, body)
+                reply.resolve(null)
+            }
+        }
+        app.handle("notify.requestPermission") { _, reply ->
+            if (Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFY_PERM)
+            }
+            reply.resolve(null)
         }
         app.handle("scanner.scan") { _, reply ->
             if (scanReply != null) {
@@ -293,8 +315,56 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        if (manager.getNotificationChannel(SAVE_CHANNEL_ID) != null) return
+        val channel = NotificationChannel(
+            SAVE_CHANNEL_ID,
+            "保存通知",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "分享保存到电脑后的结果通知"
+        }
+        manager.createNotificationChannel(channel)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun showSaveNotification(title: String, body: String) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        val launchIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val piFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pending = PendingIntent.getActivity(this, 0, launchIntent, piFlags)
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, SAVE_CHANNEL_ID)
+        } else {
+            Notification.Builder(this)
+        }
+        val notification = builder
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .build()
+        manager.notify((System.currentTimeMillis() and 0x7FFFFFFF).toInt(), notification)
+    }
+
     companion object {
         private const val REQ_QR_SCAN = 4091
         private const val REQ_INLINE_QR_PERM = 4092
+        private const val REQ_NOTIFY_PERM = 4093
+        private const val SAVE_CHANNEL_ID = "bowerbird_save"
     }
 }

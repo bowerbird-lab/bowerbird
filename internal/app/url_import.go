@@ -227,7 +227,7 @@ func (a *App) handleURLDropsToFolder(rawURLs []string, referer string, folderID 
 		imported := 0
 		var firstErr error
 		for _, raw := range urls {
-			item, err := a.importURL(raw, referer, folderID)
+			items, err := a.importURLItems(raw, referer, folderID)
 			if err != nil {
 				core.RecordLog("error", "url", "url import failed", fmt.Sprintf("url=%s err=%v", raw, err), 0)
 				if firstErr == nil {
@@ -235,9 +235,11 @@ func (a *App) handleURLDropsToFolder(rawURLs []string, referer string, folderID 
 				}
 				continue
 			}
-			if item != nil {
-				core.RecordLog("info", "url", "url import succeeded", fmt.Sprintf("url=%s name=%s", raw, item.Name), 0)
-				imported++
+			for _, item := range items {
+				if item != nil {
+					core.RecordLog("info", "url", "url import succeeded", fmt.Sprintf("url=%s name=%s", raw, item.Name), 0)
+					imported++
+				}
 			}
 		}
 		a.post(func() {
@@ -286,6 +288,17 @@ func (a *App) handleDroppedFiles(paths []string, folder string) {
 }
 
 func (a *App) importURL(raw string, referer string, folderID string) (*core.Item, error) {
+	items, err := a.importURLItems(raw, referer, folderID)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, errors.New("URL import failed")
+	}
+	return items[0], nil
+}
+
+func (a *App) importURLItems(raw string, referer string, folderID string) ([]*core.Item, error) {
 	var resolverID string
 	var resolution *plugin.ResolveResult
 	if a.pluginHost != nil {
@@ -300,17 +313,78 @@ func (a *App) importURL(raw string, referer string, folderID string) (*core.Item
 		}
 	}
 
-	opts := core.ImportItemOptions{SkipURL: !a.prefs.RecordImportURL}
+	baseOpts := core.ImportItemOptions{SkipURL: !a.prefs.RecordImportURL}
 	if a.prefs.RecordImportURL {
-		opts.URL = raw
+		baseOpts.URL = raw
 	}
 	if referer != "" {
-		opts.Headers = map[string]string{"Referer": referer}
+		baseOpts.Headers = map[string]string{"Referer": referer}
 	}
-	if folderID != "" {
-		opts.FolderIDs = []string{folderID}
+	if resolverID != "" {
+		if p, ok := a.pluginHost.Get(resolverID); ok && p.Settings != nil {
+			if cookie := strings.TrimSpace(p.Settings["cookie"]); cookie != "" {
+				if baseOpts.Headers == nil {
+					baseOpts.Headers = map[string]string{}
+				}
+				baseOpts.Headers["Cookie"] = cookie
+			}
+		}
 	}
 
+	targetFolderID := strings.TrimSpace(folderID)
+	if resolution != nil && len(resolution.Items) > 0 {
+		if folderName := strings.TrimSpace(resolution.FolderName); folderName != "" {
+			if created, err := a.svc.CreateFolder(folderName, targetFolderID); err == nil && created != nil {
+				targetFolderID = created.ID
+			}
+		}
+		var imported []*core.Item
+		var firstErr error
+		for _, entry := range resolution.Items {
+			opts := baseOpts
+			if targetFolderID != "" {
+				opts.FolderIDs = []string{targetFolderID}
+			}
+			if a.prefs.RecordImportURL {
+				opts.URL = firstNonEmpty(entry.SourceURL, resolution.SourceURL, raw)
+			} else {
+				opts.URL = ""
+				opts.SkipURL = true
+			}
+			opts.Name = firstNonEmpty(entry.Name, resolution.Name)
+			if len(entry.Tags) > 0 {
+				opts.Tags = entry.Tags
+			} else {
+				opts.Tags = resolution.Tags
+			}
+			candidates := uniqueURLs(append([]string{entry.URL}, entry.Candidates...))
+			if len(candidates) == 0 {
+				continue
+			}
+			item, err := a.importFirstCandidate(candidates, opts)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			if item != nil {
+				imported = append(imported, item)
+			}
+		}
+		if len(imported) == 0 {
+			if firstErr != nil {
+				return nil, firstErr
+			}
+			return nil, errors.New("URL import failed")
+		}
+		return imported, nil
+	}
+
+	opts := baseOpts
+	if targetFolderID != "" {
+		opts.FolderIDs = []string{targetFolderID}
+	}
 	candidates := []string{raw}
 	if resolution != nil {
 		if a.prefs.RecordImportURL {
@@ -321,22 +395,19 @@ func (a *App) importURL(raw string, referer string, folderID string) (*core.Item
 		}
 		opts.Name = resolution.Name
 		opts.Tags = resolution.Tags
-		if resolverID != "" {
-			if p, ok := a.pluginHost.Get(resolverID); ok && p.Settings != nil {
-				if cookie := strings.TrimSpace(p.Settings["cookie"]); cookie != "" {
-					if opts.Headers == nil {
-						opts.Headers = map[string]string{}
-					}
-					opts.Headers["Cookie"] = cookie
-				}
-			}
-		}
 		candidates = uniqueURLs(append([]string{resolution.URL}, resolution.Candidates...))
 	}
 	if len(candidates) == 0 {
 		return nil, errors.New("plugin returned no media URL")
 	}
+	item, err := a.importFirstCandidate(candidates, opts)
+	if err != nil {
+		return nil, err
+	}
+	return []*core.Item{item}, nil
+}
 
+func (a *App) importFirstCandidate(candidates []string, opts core.ImportItemOptions) (*core.Item, error) {
 	var lastErr error
 	for _, candidate := range candidates {
 		if candidate == "" {

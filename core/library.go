@@ -1179,6 +1179,24 @@ func (m *LibraryManager) ImportFilesFromMobile(sourcePaths []string) ([]Item, er
 	return m.importFilesWithProgress(sourcePaths, nil, false)
 }
 
+// ImportFilesFromMobileToFolder imports uploads from mobile and optionally
+// assigns each imported item to folderID when non-empty.
+func (m *LibraryManager) ImportFilesFromMobileToFolder(sourcePaths []string, folderID string) ([]Item, error) {
+	items, err := m.importFilesWithProgress(sourcePaths, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	folderID = strings.TrimSpace(folderID)
+	if folderID != "" && len(items) > 0 {
+		for i := range items {
+			if addErr := m.AddItemToFolder(items[i].ID, folderID); addErr == nil {
+				items[i].Folders = append(items[i].Folders, folderID)
+			}
+		}
+	}
+	return items, nil
+}
+
 func (m *LibraryManager) importFilesWithProgress(sourcePaths []string, onProgress ProgressCallback, emitDesktopBatch bool) ([]Item, error) {
 	m.mu.RLock()
 	active := m.activeLib

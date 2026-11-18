@@ -2,348 +2,489 @@ package ui
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
+	"github.com/nsgo-dev/nsgo/icons/lucide"
 	nsui "github.com/nsgo-dev/nsgo/ui"
 
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
+	"github.com/owocc/bowerbird/mobile-nsgo/internal/platform"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/storage"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/transport"
 )
 
 func (a *App) inboxPage(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
-	a.post(func() { a.reloadInbox() })
 	_ = a.rev.Get()
+
 	back := func() {
 		if (a.inboxBackScreen == screenConnect || a.inboxBackScreen == screenWelcome || a.inboxBackScreen == screenDevices) && a.session.Current() == nil {
 			a.screen.Set(a.inboxBackScreen)
-		} else {
-			a.screen.Set(screenGallery)
+			return
 		}
+		a.screen.Set(screenGallery)
 	}
-	header := core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
-		nsui.Button{Text: "返回", Variant: nsui.ButtonGhost, OnPress: back},
-		core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{
-			core.Text{Content: "收件箱", Style: nsui.TypeTitle, StyleFunc: nsui.Colored(colors.Text)},
-			core.Text{ContentFunc: func() string {
-				a.rev.Get()
-				return inboxCount(a.inboxEntries)
-			}, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
-		}},
-		core.Show{When: func() bool { return a.inboxBusy.Get() }, Then: func(cx *core.Scope) core.Node {
-			return nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.cancelInboxUpload() }}
-		}},
-		core.Show{When: func() bool { return !a.inboxBusy.Get() }, Then: func(cx *core.Scope) core.Node {
-			return nsui.Button{Text: "全部上传", Variant: nsui.ButtonSecondary, OnPress: func() { a.uploadAll(cx) },
-				Disabled: func() bool { a.rev.Get(); return len(a.inboxEntries) == 0 }, TestID: "inbox.uploadAll"}
-		}},
-	}}
-	status := core.Show{When: func() bool { return a.inboxStatus.Get() != "" }, Then: func(cx *core.Scope) core.Node {
-		return core.Text{ContentFunc: a.inboxStatus.Get, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})}
-	}}
-	body := core.List{
-		Count: func() int { a.rev.Get(); return len(a.inboxEntries) },
-		Key:   func(i int) any { a.rev.Get(); return a.inboxEntries[i].ID },
-		Row:   func(cx *core.Scope, row core.ListRow) core.Node { return a.inboxRow(cx, row) },
-		Gap:   8, EstimatedSize: 82,
-		Empty: core.View{Style: core.Style{FlexGrow: 1, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 8, Padding: core.All(24)}, Children: []core.Node{
-			core.Text{Content: "收件箱是空的", Style: nsui.TypeBody.Merge(core.Style{Color: colors.Muted()})},
-			core.Text{Content: "从其他应用分享图片、视频或文字到 Bowerbird，会先保存在这里。",
-				MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Faint(), TextAlign: core.TextAlignCenter})},
-		}},
+
+	header := core.View{
+		Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8},
+		Children: []core.Node{
+			nsui.IconButton{Icon: lucide.ArrowLeft, Variant: nsui.IconButtonGhost, Label: "返回", OnPress: back, TestID: "historySave.back"},
+			core.View{Style: core.Style{FlexGrow: 1}, Children: []core.Node{
+				core.Text{Content: "历史保存", Style: nsui.TypeTitle.Merge(core.Style{Color: colors.Text()})},
+				core.Text{ContentFunc: func() string {
+					a.rev.Get()
+					return saveHistoryCountText(a.saveHistoryIDs)
+				}, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+			}},
+			nsui.Button{
+				Text:    "刷新",
+				Variant: nsui.ButtonSecondary,
+				Disabled: func() bool {
+					return a.saveHistoryLoading.Get() || a.session.Current() == nil
+				},
+				OnPress: func() { a.loadSaveHistoryItems(cx) },
+				TestID:  "historySave.refresh",
+			},
+		},
+	}
+
+	status := core.Show{
+		When: func() bool { return a.saveHistoryStatus.Get() != "" },
+		Then: func(cx *core.Scope) core.Node {
+			return core.Text{ContentFunc: a.saveHistoryStatus.Get, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})}
+		},
+	}
+
+	list := core.List{
+		Count: func() int { a.rev.Get(); return len(a.saveHistoryItems) },
+		Key:   func(i int) any { a.rev.Get(); return a.saveHistoryItems[i].ID },
+		Row:   func(cx *core.Scope, row core.ListRow) core.Node { return a.saveHistoryRow(cx, row) },
 		Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
 	}
-	return core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, Gap: 8}, Children: []core.Node{
-		header, status, body, a.inboxDeleteDialog(cx), a.inboxTextDialog(cx),
-	}}
-}
 
-func (a *App) inboxRow(cx *core.Scope, row core.ListRow) core.Node {
-	colors := nsui.ColorsOf(cx)
-	entryAt := func() (storage.InboxEntry, bool) {
-		a.rev.Get()
-		index := row.Index()
-		if index < 0 || index >= len(a.inboxEntries) {
-			return storage.InboxEntry{}, false
+	var body core.Node = list
+	if a.session.Current() == nil {
+		body = core.View{
+			Style: core.Style{FlexGrow: 1, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
+			Children: []core.Node{
+				core.Text{Content: "连接桌面端后可查看历史保存", Style: nsui.TypeBody.Merge(core.Style{Color: colors.Muted()})},
+			},
 		}
-		return a.inboxEntries[index], true
+	} else if len(a.saveHistoryIDs) == 0 {
+		body = core.View{
+			Style: core.Style{FlexGrow: 1, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Padding: core.All(24)},
+			Children: []core.Node{
+				core.Text{Content: "暂无历史保存，从其他应用分享即可保存到电脑", MaxLines: 2,
+					Style: nsui.TypeBody.Merge(core.Style{Color: colors.Muted(), TextAlign: core.TextAlignCenter})},
+			},
+		}
 	}
-	name := func() string {
-		entry, ok := entryAt()
-		if !ok {
-			return ""
-		}
-		return entry.Name
-	}
-	meta := func() string {
-		entry, ok := entryAt()
-		if !ok {
-			return ""
-		}
-		kind := "文件"
-		if entry.Kind == "text" {
-			kind = "文本 · " + shortText(entry.Text, 40)
-		}
-		size := ""
-		if entry.Size > 0 {
-			size = " · " + model.FormatSize(entry.Size)
-		}
-		if entry.Attempts > 0 && entry.LastError != "" {
-			return kind + size + " · 上次失败: " + entry.LastError
-		}
-		return kind + size
-	}
+
 	return core.View{
-		StyleFunc: func() core.Style {
-			return core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
-				Padding: core.All(10), CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border()}
-		},
-		OnPress: func(core.PressEvent) {
-			entry, ok := entryAt()
-			if ok && entry.Kind == "text" {
-				a.inboxPreviewEntry = entry
-				a.inboxTextOpen.Set(true)
-				a.bump()
-			}
-		},
-		Children: []core.Node{
-			core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{
-				core.Text{ContentFunc: name, MaxLines: 1, Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
-				core.Text{ContentFunc: meta, MaxLines: 2, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
-			}},
-			nsui.Button{Text: "上传", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.inboxBusy.Get() }, OnPress: func() {
-				entry, ok := entryAt()
-				if ok {
-					a.uploadOne(cx, entry)
-				}
-			}},
-			nsui.Button{Text: "删除", Variant: nsui.ButtonGhost, OnPress: func() {
-				entry, ok := entryAt()
-				if !ok {
-					return
-				}
-				a.inboxDeleteEntry = entry
-				a.inboxConfirmDel.Set(true)
-				a.bump()
-			}},
-		},
+		TestID:   "screen.historySave",
+		Style:    core.Style{Width: core.Pct(100), Height: core.Pct(100), Gap: 10},
+		Children: []core.Node{header, status, body},
 	}
 }
 
-func (a *App) inboxDeleteDialog(cx *core.Scope) core.Node {
-	return nsui.Dialog{
-		Open:         func() bool { return a.inboxConfirmDel.Get() },
-		OnOpenChange: func(open bool, _ base.Reason) { a.inboxConfirmDel.Set(open) },
-		Title:        "删除本机收件？",
-		Description:  "将删除「" + a.inboxDeleteEntry.Name + "」及其本机暂存文件，无法恢复。",
-		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.inboxConfirmDel.Set(false) }},
-			nsui.Button{Text: "删除", OnPress: func() {
-				a.inboxConfirmDel.Set(false)
-				if err := a.inbox.Remove(a.inboxDeleteEntry); err != nil {
-					a.showToast(err.Error())
-					return
-				}
-				a.reloadInbox()
-				a.showToast("已删除本机收件")
-			}},
-		},
-	}
-}
-
-func (a *App) inboxTextDialog(cx *core.Scope) core.Node {
+func (a *App) saveHistoryRow(cx *core.Scope, row core.ListRow) core.Node {
 	colors := nsui.ColorsOf(cx)
-	return nsui.Dialog{
-		Open:         func() bool { return a.inboxTextOpen.Get() },
-		OnOpenChange: func(open bool, _ base.Reason) { a.inboxTextOpen.Set(open) },
-		Title:        "文本分享内容",
+	itemAt := func() (model.ItemSummary, bool) {
+		_ = a.rev.Get()
+		index := row.Index()
+		if index < 0 || index >= len(a.saveHistoryItems) {
+			return model.ItemSummary{}, false
+		}
+		return a.saveHistoryItems[index], true
+	}
+
+	item, ok := itemAt()
+	if !ok {
+		return core.View{}
+	}
+
+	var thumbNode core.Node
+	if thumbURL := a.itemThumbURL(item); thumbURL != "" {
+		thumbNode = core.Image{
+			Source:     core.Src(thumbURL),
+			ResizeMode: core.Cover,
+			Style:      core.Style{Width: core.Pt(48), Height: core.Pt(48), CornerRadius: 8, Background: colors.Inset()},
+		}
+	} else {
+		thumbNode = core.View{
+			Style: core.Style{Width: core.Pt(48), Height: core.Pt(48), CornerRadius: 8, Background: colors.Inset(),
+				AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
+			Children: []core.Node{
+				core.Icon{SVG: lucide.File(), Style: core.Style{FontSize: 20, Color: colors.Muted()}},
+			},
+		}
+	}
+
+	subParts := []string{}
+	if ext := strings.ToUpper(strings.TrimPrefix(item.Extension, ".")); ext != "" {
+		subParts = append(subParts, ext)
+	}
+	if item.Size > 0 {
+		subParts = append(subParts, model.FormatSize(item.Size))
+	}
+	subText := strings.Join(subParts, " · ")
+
+	return core.View{
+		Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10, Padding: core.All(10),
+			CornerRadius: 10, Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+			Margin: core.Edges{Bottom: 6}},
+		OnPress: func(core.PressEvent) {
+			cur, ok := itemAt()
+			if !ok {
+				return
+			}
+			items := a.gallery.Snapshot().Items
+			for idx, gItem := range items {
+				if gItem.ID == cur.ID {
+					a.screen.Set(screenGallery)
+					a.openDetail(cx, idx, screenGallery, core.Bounds{})
+					return
+				}
+			}
+			a.showToast("可在全部素材中查看「" + cur.Name + "」")
+		},
 		Children: []core.Node{
-			core.Dynamic(func(cx *core.Scope) core.Node {
-				_ = a.rev.Get()
-				_ = a.inboxTextOpen.Get()
-				return core.View{Style: core.Style{Gap: 6}, Children: []core.Node{
-					core.Text{Content: a.inboxPreviewEntry.Name, Style: nsui.TypeLabel.Merge(core.Style{Color: colors.Muted()})},
-					core.Scroll{
-						Style: core.Style{MaxHeight: core.Pt(260), Padding: core.All(10), CornerRadius: 8, Background: colors.Inset()},
-						Children: []core.Node{
-							core.Text{Content: a.inboxPreviewEntry.Text, Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})},
-						},
-					},
-				}}
-			}),
-		},
-		Footer: []core.Node{
-			nsui.Button{Text: "复制文字", Variant: nsui.ButtonSecondary, OnPress: func() {
-				cx.SetClipboard(a.inboxPreviewEntry.Text)
-				a.showToast("已复制文字")
+			thumbNode,
+			core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{
+				core.Text{Content: item.Name, MaxLines: 1, Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text()})},
+				core.Text{Content: subText, MaxLines: 1, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
 			}},
-			nsui.Button{Text: "上传为 .txt", Disabled: func() bool { return a.inboxBusy.Get() }, OnPress: func() {
-				a.inboxTextOpen.Set(false)
-				a.uploadOne(cx, a.inboxPreviewEntry)
-			}},
-			nsui.Button{Text: "关闭", Variant: nsui.ButtonGhost, OnPress: func() { a.inboxTextOpen.Set(false) }},
+			core.Icon{SVG: lucide.ChevronRight(), Style: core.Style{FontSize: 16, Color: colors.Faint()}},
 		},
 	}
 }
 
-func inboxCount(entries []storage.InboxEntry) string {
-	if len(entries) == 0 {
-		return "没有待上传内容"
+func saveHistoryCountText(ids []string) string {
+	if len(ids) == 0 {
+		return "暂无历史保存（最多保留 300 条）"
 	}
-	return itoa(len(entries)) + " 项待上传"
+	return "共 " + itoa(len(ids)) + " 条（最多保留 300 条）"
 }
 
-func (a *App) reloadInbox() {
-	entries, err := a.inbox.Entries()
-	if err != nil {
-		a.inboxStatus.Set("读取收件箱失败: " + err.Error())
+func (a *App) reloadSaveHistory() {
+	scope := a.session.ScopeKey()
+	if scope == "" {
+		a.saveHistoryIDs = nil
+		a.saveHistoryItems = nil
+		a.bump()
 		return
 	}
-	a.inboxEntries = entries
+	ids, err := a.local.SaveHistoryIDs(scope)
+	if err != nil {
+		return
+	}
+	a.saveHistoryIDs = ids
 	a.bump()
 }
 
+func (a *App) loadSaveHistoryItems(cx *core.Scope) {
+	a.reloadSaveHistory()
+	if a.session.Current() == nil || len(a.saveHistoryIDs) == 0 {
+		a.saveHistoryItems = nil
+		a.saveHistoryStatus.Set("")
+		a.bump()
+		return
+	}
+	ids := append([]string(nil), a.saveHistoryIDs...)
+	a.saveHistoryLoading.Set(true)
+	a.saveHistoryStatus.Set("正在同步历史保存…")
+	go func() {
+		ctx, cancel := context.WithTimeout(a.rootCtx(), 20*time.Second)
+		defer cancel()
+		items := make([]model.ItemSummary, 0, len(ids))
+		for _, id := range ids {
+			if ctx.Err() != nil {
+				break
+			}
+			detail, err := a.client.Item(ctx, id)
+			if err != nil {
+				continue
+			}
+			items = append(items, detail.Summary())
+		}
+		a.post(func() {
+			a.saveHistoryLoading.Set(false)
+			a.saveHistoryStatus.Set("")
+			a.saveHistoryItems = items
+			a.bump()
+		})
+	}()
+}
+
+func (a *App) recordSaveHistory(ids []string) {
+	scope := a.session.ScopeKey()
+	if scope == "" || len(ids) == 0 {
+		return
+	}
+	_ = a.local.AddSaveHistory(scope, ids)
+	a.reloadSaveHistory()
+}
+
 func (a *App) consumeShares(cx *core.Scope) {
-	if a.env.Share == nil || !a.sharesRunning.CompareAndSwap(false, true) {
+	if a.env.Share == nil {
+		return
+	}
+	if !a.sharesRunning.CompareAndSwap(false, true) {
+		a.sharesRescan = true
 		return
 	}
 	a.sharesBusy.Set(true)
-	a.inbox.Consume(a.rootCtx(), a.env.Share, func(added int, err error) {
-		a.post(func() {
-			a.sharesRunning.Store(false)
-			a.sharesBusy.Set(false)
-			a.reloadInbox()
-			if err != nil {
+	a.env.Share.TakePending(func(events []platform.ShareEvent, err error) {
+		if err != nil {
+			a.post(func() {
+				a.sharesRunning.Store(false)
+				a.sharesBusy.Set(false)
 				a.showToast("接收分享失败: " + transport.DescribeFailure(err))
-				return
+				if a.sharesRescan {
+					a.sharesRescan = false
+					a.consumeShares(cx)
+				}
+			})
+			return
+		}
+		var ackIDs []string
+		for _, ev := range events {
+			if id := strings.TrimSpace(ev.ID); id != "" {
+				ackIDs = append(ackIDs, id)
 			}
-			if added > 0 {
-				a.showToast("已收进 " + itoa(added) + " 项，可在收件箱上传")
-			}
-		})
+		}
+		finishTake := func() {
+			a.post(func() {
+				a.sharesRunning.Store(false)
+				a.sharesBusy.Set(false)
+				if len(events) > 0 {
+					if a.session.Current() == nil {
+						cleanupShareEvents(events)
+						a.showToast("请先连接桌面端后再分享保存")
+					} else if a.shareMode.Get() == storage.ShareModeChoose {
+						a.pendingShareEvents = append(a.pendingShareEvents, events...)
+						a.openShareFolderPicker(cx)
+					} else {
+						a.sendShareEventsToFolder(cx, events, "")
+					}
+				}
+				if a.sharesRescan {
+					a.sharesRescan = false
+					a.consumeShares(cx)
+				}
+			})
+		}
+		if len(ackIDs) > 0 {
+			a.env.Share.Ack(ackIDs, func(error) { finishTake() })
+			return
+		}
+		finishTake()
 	})
 }
 
-func (a *App) cancelInboxUpload() {
-	a.inboxUploadMu.Lock()
-	cancel := a.inboxUploadCancel
-	a.inboxUploadMu.Unlock()
-	if cancel != nil {
-		cancel()
+func (a *App) openShareFolderPicker(cx *core.Scope) {
+	a.shareFolderPickerOpen.Set(true)
+	if a.session.Current() != nil {
+		a.shareFoldersLoading.Set(true)
+		go func() {
+			ctx, cancel := context.WithTimeout(a.rootCtx(), 10*time.Second)
+			defer cancel()
+			folders, err := a.client.Folders(ctx)
+			a.post(func() {
+				a.shareFoldersLoading.Set(false)
+				if err == nil {
+					a.folders = folders
+					a.bump()
+				}
+			})
+		}()
 	}
 }
 
-func (a *App) setInboxCancel(cancel context.CancelFunc) {
-	a.inboxUploadMu.Lock()
-	a.inboxUploadCancel = cancel
-	a.inboxUploadMu.Unlock()
-}
-
-func (a *App) uploadOne(cx *core.Scope, entry storage.InboxEntry) {
-	if a.session.Current() == nil {
-		a.showToast("请先连接桌面端")
-		return
-	}
-	a.inboxBusy.Set(true)
-	a.inboxStatus.Set("正在上传 " + entry.Name + "…")
-	ctx, cancel := context.WithTimeout(a.rootCtx(), 5*time.Minute)
-	a.setInboxCancel(cancel)
-	go func() {
-		defer cancel()
-		result, shaHex, err := a.inbox.Upload(ctx, a.client, entry)
-		a.post(func() {
-			a.setInboxCancel(nil)
-			a.inboxBusy.Set(false)
-			a.reloadInbox()
-			if err != nil {
-				a.markInboxError(entry, err)
-				a.inboxStatus.Set("上传失败: " + transport.DescribeFailure(err))
-				a.showToast("上传失败，内容仍在收件箱")
-				return
+func (a *App) shareFolderPickerDialog(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
+	return a.bottomDrawer(cx, bottomDrawerSpec{
+		Open: func() bool { return a.shareFolderPickerOpen.Get() },
+		OnClose: func() {
+			a.shareFolderPickerOpen.Set(false)
+			if len(a.pendingShareEvents) > 0 {
+				cleanupShareEvents(a.pendingShareEvents)
+				a.pendingShareEvents = nil
 			}
-			a.recordShareTag(result, shaHex)
-			a.inboxStatus.Set("已上传 " + entry.Name)
-			a.showToast("已上传")
-			a.scheduleCalibratedRefresh(cx, 100*time.Millisecond)
-		})
-	}()
+		},
+		Title: "选择保存目录",
+		Children: []core.Node{
+			core.Dynamic(func(cx *core.Scope) core.Node {
+				_ = a.rev.Get()
+				_ = a.shareFolderPickerOpen.Get()
+				_ = a.shareFoldersLoading.Get()
+
+				pickFolder := func(folderID string) {
+					events := a.pendingShareEvents
+					a.pendingShareEvents = nil
+					a.shareFolderPickerOpen.Set(false)
+					if len(events) > 0 {
+						a.sendShareEventsToFolder(cx, events, folderID)
+					}
+				}
+
+				rows := []core.Node{
+					core.View{
+						Style:   drawerRowStyle(colors),
+						OnPress: func(core.PressEvent) { pickFolder("") },
+						Children: []core.Node{
+							core.Icon{SVG: lucide.Inbox(), Style: core.Style{FontSize: 18, Color: colors.Accent()}},
+							core.Text{Content: "全部 (当前资源库)", Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
+						},
+					},
+				}
+				if a.shareFoldersLoading.Get() && len(a.folders) == 0 {
+					rows = append(rows, core.Text{
+						Content: "正在加载目录…",
+						Style:   nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()}),
+					})
+				}
+				for _, f := range a.folders {
+					folder := f
+					rows = append(rows, core.View{
+						Style:   drawerRowStyle(colors),
+						OnPress: func(core.PressEvent) { pickFolder(folder.ID) },
+						Children: []core.Node{
+							core.Icon{SVG: lucide.Folder(), Style: core.Style{FontSize: 18, Color: colors.Muted()}},
+							core.Text{Content: folder.Name, MaxLines: 1, Style: nsui.TypeBody.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
+							core.Text{Content: itoa(folder.ItemCount), Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
+						},
+					})
+				}
+				return core.Scroll{
+					Style:    core.Style{FlexShrink: 1, MinHeight: core.Pt(0), MaxHeight: core.Pt(380)},
+					Children: []core.Node{core.View{Style: core.Style{Gap: 6}, Children: rows}},
+				}
+			}),
+		},
+	})
 }
 
-func (a *App) uploadAll(cx *core.Scope) {
-	if a.inboxBusy.Get() {
-		return
-	}
-	entries := append([]storage.InboxEntry(nil), a.inboxEntries...)
-	if len(entries) == 0 {
+func (a *App) sendShareEventsToFolder(cx *core.Scope, events []platform.ShareEvent, folderID string) {
+	if len(events) == 0 {
 		return
 	}
 	if a.session.Current() == nil {
+		cleanupShareEvents(events)
 		a.showToast("请先连接桌面端")
 		return
 	}
-	a.inboxBusy.Set(true)
-	ctx, cancel := context.WithCancel(a.rootCtx())
-	a.setInboxCancel(cancel)
+	a.activeMobileShares++
+	if a.shareNotifyTimer != nil {
+		a.shareNotifyTimer.Stop()
+		a.shareNotifyTimer = nil
+	}
+	a.showToast("正在保存到电脑…")
 	go func() {
-		defer cancel()
-		okCount := 0
+		defer cleanupShareEvents(events)
+		var savedIDs []string
+		var firstName string
 		var lastErr error
-		for i, entry := range entries {
-			if ctx.Err() != nil {
-				lastErr = ctx.Err()
-				break
+		for _, ev := range events {
+			for _, item := range ev.Items {
+				ctx, cancel := context.WithTimeout(a.rootCtx(), 5*time.Minute)
+				var (
+					res model.UploadResult
+					err error
+				)
+				if strings.EqualFold(item.Kind, "text") {
+					res, err = a.client.ShareText(ctx, item.Text, item.Name, folderID)
+				} else if path := strings.TrimSpace(item.Path); path != "" {
+					res, err = a.client.UploadFileToFolder(ctx, path, folderID)
+				}
+				cancel()
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				for _, saved := range res.Items {
+					if saved.ID != "" {
+						savedIDs = append(savedIDs, saved.ID)
+					}
+					if firstName == "" && saved.Name != "" {
+						firstName = saved.Name
+					}
+				}
+				a.post(func() { a.recordShareTag(res, "") })
 			}
-			a.post(func() { a.inboxStatus.Set("正在上传 " + itoa(i+1) + "/" + itoa(len(entries)) + "…") })
-			itemCtx, itemCancel := context.WithTimeout(ctx, 5*time.Minute)
-			result, shaHex, err := a.inbox.Upload(itemCtx, a.client, entry)
-			itemCancel()
-			if err != nil {
-				lastErr = err
-				a.post(func() { a.markInboxError(entry, err) })
-				continue
-			}
-			okCount++
-			a.post(func() { a.recordShareTag(result, shaHex) })
 		}
 		a.post(func() {
-			a.setInboxCancel(nil)
-			a.inboxBusy.Set(false)
-			a.reloadInbox()
-			switch {
-			case lastErr == nil:
-				a.inboxStatus.Set("全部上传完成")
-				a.showToast("已上传 " + itoa(okCount) + " 项")
-			case okCount == 0:
-				a.inboxStatus.Set("上传失败: " + transport.DescribeFailure(lastErr))
-				a.showToast("上传失败，内容仍在收件箱")
-			default:
-				a.inboxStatus.Set("部分上传成功，失败项仍在收件箱")
-				a.showToast("成功 " + itoa(okCount) + " 项，失败 " + itoa(len(entries)-okCount) + " 项")
+			if a.activeMobileShares > 0 {
+				a.activeMobileShares--
 			}
-			if okCount > 0 {
+			if len(savedIDs) > 0 {
+				a.recordSaveHistory(savedIDs)
 				a.scheduleCalibratedRefresh(cx, 100*time.Millisecond)
+				if a.screen.Get() == screenInbox {
+					a.loadSaveHistoryItems(cx)
+				}
+				a.shareNotifyCount += len(savedIDs)
+				if a.shareNotifyFirst == "" {
+					a.shareNotifyFirst = firstName
+				}
+			} else if lastErr != nil {
+				a.showToast("保存失败: " + transport.DescribeFailure(lastErr))
+			}
+			if a.activeMobileShares == 0 && a.shareNotifyCount > 0 {
+				if a.shareNotifyTimer != nil {
+					a.shareNotifyTimer.Stop()
+				}
+				a.shareNotifyTimer = time.AfterFunc(1500*time.Millisecond, func() {
+					a.post(func() { a.flushMobileSaveNotify(cx) })
+				})
 			}
 		})
 	}()
 }
 
-func (a *App) markInboxError(entry storage.InboxEntry, err error) {
-	idx, loadErr := a.local.LoadInbox()
-	if loadErr != nil {
+func (a *App) flushMobileSaveNotify(cx *core.Scope) {
+	if a.activeMobileShares > 0 || a.shareNotifyCount == 0 {
 		return
 	}
-	for i := range idx.Entries {
-		if idx.Entries[i].ID == entry.ID {
-			idx.Entries[i].Attempts++
-			idx.Entries[i].LastError = transport.DescribeFailure(err)
-			break
+	count := a.shareNotifyCount
+	firstName := a.shareNotifyFirst
+	a.shareNotifyCount = 0
+	a.shareNotifyFirst = ""
+	a.shareNotifyTimer = nil
+	a.scheduleCalibratedRefresh(cx, 50*time.Millisecond)
+	a.notifyMobileSaved(cx, count, firstName)
+}
+
+func (a *App) notifyMobileSaved(cx *core.Scope, count int, firstName string) {
+	if count <= 0 {
+		return
+	}
+	msg := "已保存到电脑"
+	if count == 1 && strings.TrimSpace(firstName) != "" {
+		msg = "已保存「" + firstName + "」"
+	} else if count > 1 {
+		msg = "已保存 " + itoa(count) + " 项到电脑"
+	}
+	a.showToast(msg)
+	if a.shareNotify.Get() && a.env.HasHost && cx.Env().OS() == core.OSAndroid {
+		cx.CallHost("notify.show", map[string]any{
+			"title": "已保存到电脑",
+			"body":  msg,
+		}, nil)
+	}
+}
+
+func cleanupShareEvents(events []platform.ShareEvent) {
+	for _, ev := range events {
+		for _, item := range ev.Items {
+			if p := strings.TrimSpace(item.Path); p != "" {
+				_ = os.Remove(p)
+			}
 		}
 	}
-	_ = a.local.SaveInbox(idx)
 }
 
 func (a *App) recordShareTag(result model.UploadResult, shaHex string) {
@@ -373,12 +514,4 @@ func (a *App) recordShareTag(result model.UploadResult, shaHex string) {
 	}
 	_ = a.local.SaveShareTags(tags)
 	a.reloadShareTags()
-}
-
-func shortText(s string, limit int) string {
-	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
-	if len([]rune(s)) <= limit {
-		return s
-	}
-	return string([]rune(s)[:limit]) + "…"
 }
