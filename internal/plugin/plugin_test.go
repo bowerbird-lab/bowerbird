@@ -98,18 +98,18 @@ func TestRegisterBuiltinPersistsEnabledState(t *testing.T) {
 	dir := t.TempDir()
 	h := NewHost(dir)
 	h.RegisterBuiltin(OfficialManifests()...)
-	if !h.IsEnabled("official.markdown-preview") {
+	if !h.IsEnabled("official.audio-player") {
 		t.Fatal("builtin should start enabled")
 	}
-	h.SetEnabled("official.markdown-preview", false)
+	h.SetEnabled("official.audio-player", false)
 
 	for i := 0; i < 2; i++ {
 		reloaded := NewHost(dir)
 		reloaded.RegisterBuiltin(OfficialManifests()...)
-		if reloaded.IsEnabled("official.markdown-preview") {
+		if reloaded.IsEnabled("official.audio-player") {
 			t.Fatalf("disabled state was not persisted on restart %d", i+1)
 		}
-		if got := reloaded.MatchPreview("md", "text/markdown"); got != nil {
+		if got := reloaded.MatchPreview("mp3", "audio/mpeg"); got != nil {
 			t.Fatalf("disabled builtin still matched: %+v", got)
 		}
 	}
