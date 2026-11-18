@@ -8,14 +8,17 @@ import (
 	"strings"
 )
 
-// extractInternalItemID reports the content id of a path inside a library's
-// items/<hex> directory, or "" for an external path.
+// extractInternalItemID reports the item id of a path inside a library's
+// items/<id> directory, or "" for an external path.
 func extractInternalItemID(filePath string) string {
 	clean := filepath.Clean(filePath)
 	parts := strings.Split(clean, string(filepath.Separator))
 	for i, part := range parts {
-		if part == "items" && i+1 < len(parts) && len(parts[i+1]) == 64 {
-			return parts[i+1]
+		if part == "items" && i+1 < len(parts) {
+			id := parts[i+1]
+			if id != "" && !strings.HasPrefix(id, ".") {
+				return id
+			}
 		}
 	}
 	return ""

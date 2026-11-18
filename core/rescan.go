@@ -105,8 +105,30 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 
 	var discovered []scannedItem
 	now := time.Now().Unix()
+	totalEntries := len(entries)
+	if totalEntries > 0 {
+		m.emit(LibraryIndexProgressEvent, LibraryIndexProgress{
+			Active:  true,
+			Current: 0,
+			Total:   totalEntries,
+		})
+		defer m.emit(LibraryIndexProgressEvent, LibraryIndexProgress{
+			Active:  false,
+			Current: totalEntries,
+			Total:   totalEntries,
+		})
+	}
+	var lastEmit time.Time
 
-	for _, entry := range entries {
+	for i, entry := range entries {
+		if totalEntries > 0 && (i == totalEntries-1 || time.Since(lastEmit) >= 50*time.Millisecond) {
+			lastEmit = time.Now()
+			m.emit(LibraryIndexProgressEvent, LibraryIndexProgress{
+				Active:  true,
+				Current: i + 1,
+				Total:   totalEntries,
+			})
+		}
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
@@ -169,7 +191,7 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 		createdAt := stat.ModTime().Unix()
 		importedAt := now
 		updatedAt := now
-		hexVal := itemID
+		hexVal := ""
 
 		var width, height int
 		var hasThumbnail bool
@@ -186,7 +208,7 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 					if meta.Name != "" {
 						nameWithoutExt = meta.Name
 					}
-					if meta.Hex != "" {
+					if meta.Hex != "" && (meta.Size == 0 || meta.Size == stat.Size()) {
 						hexVal = meta.Hex
 					}
 					if meta.MimeType != "" {
@@ -209,6 +231,12 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 					palette = meta.Palette
 					imgMeta = meta.Meta
 				}
+			}
+		}
+
+		if hexVal == "" {
+			if computedHex, hErr := ComputeFileSHA256(assetPath); hErr == nil && computedHex != "" {
+				hexVal = computedHex
 			}
 		}
 

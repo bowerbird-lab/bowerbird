@@ -12,6 +12,15 @@ release, tag names carry the release date as `v1.0.0-alpha-YYYY-MM-DD`; that fir
 date-based release is the renamed `alpha-10` and appears below as
 `1.0.0-alpha-2026-11-15`.
 
+## [1.1.0-alpha-4] - 2026-11-18
+
+### Changed (Breaking Storage & Deduplication Architecture)
+
+- **Random uppercase alphanumeric item directories**: Newly imported assets are now stored under `items/<16-char 0-9A-Z>/` using a cryptographically random uppercase alphanumeric ID instead of the file's SHA-256 hex. Existing libraries with 64-char hex item directories remain 100% compatible.
+- **SQLite-driven `hex` deduplication & hot-update**: Deduplication now relies strictly on SQLite's `idx_items_hex` index and verifies the candidate file's current SHA-256 on disk before skipping import. If an already-imported editable file (such as `.psd`, `.txt`, `.md`) was modified externally after import, its `hex` and `size` are hot-updated in SQLite, `metadata.json`, and memory cache, allowing the original backup copy to be re-imported cleanly without conflict.
+- **One-time hex index initialization & fast rescan**: Opening a library for the first time initializes/syncs the SQLite `hex` index and `metadata.json` once (tracked via `library_meta.hex_index_initialized`). `RescanLibrary` reuses `metadata.json` `hex` when the file size matches, avoiding redundant hashing on rebuilds.
+- **Main window indexing progress modal**: Added a non-dismissible progress bar modal in the main window (`library-index-progress`) while initializing the hex index or rescanning a library.
+
 ## [1.0.0-alpha-2026-11-15] - 2026-11-15
 
 The desktop app is now rendered natively by `mygo/ui`. The React 19 + Vite + Tailwind

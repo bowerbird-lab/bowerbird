@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
@@ -282,6 +283,7 @@ func (m *LibraryManager) CreateLibrary(parentDir string, libName string) (*Libra
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
+	_, _ = db.Exec(`INSERT OR REPLACE INTO library_meta (key, value) VALUES ('hex_index_initialized', '1')`)
 
 	m.mu.Lock()
 	if m.db != nil {
@@ -347,6 +349,10 @@ func (m *LibraryManager) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 		_ = db.Close()
 		RecordLog("error", "core", "Schema migration failed", fmt.Sprintf("path=%s err=%v", dbPath, err), 0)
 		return nil, fmt.Errorf("schema migration failed: %w", err)
+	}
+
+	if err := m.ensureHexIndexInitialized(db, libraryPath); err != nil {
+		RecordLog("warn", "core", "Hex index initialization failed", fmt.Sprintf("path=%s err=%v", dbPath, err), 0)
 	}
 
 	var count int64
@@ -734,9 +740,6 @@ func (m *LibraryManager) ensureCacheLoaded() error {
 		m.populateItemPaths(&item, activePath, port)
 
 		itemsByID[item.ID] = item
-		if item.Hex != "" && item.Hex != item.ID {
-			itemsByID[item.Hex] = item
-		}
 		searchIndex[item.ID] = buildItemSearchKey(&item)
 
 		if item.InTrash {
@@ -779,22 +782,19 @@ func (m *LibraryManager) mutateCachedItem(itemID string, mutator func(it *Item))
 	wasInTrash := it.InTrash
 	mutator(&it)
 	m.itemsByID[it.ID] = it
-	if it.Hex != "" {
-		m.itemsByID[it.Hex] = it
-	}
 	m.searchIndex[it.ID] = buildItemSearchKey(&it)
 
 	if wasInTrash == it.InTrash {
 		if !it.InTrash {
 			for i := range m.itemsDesc {
-				if m.itemsDesc[i].ID == it.ID || (it.Hex != "" && m.itemsDesc[i].Hex == it.Hex) {
+				if m.itemsDesc[i].ID == it.ID {
 					m.itemsDesc[i] = it
 					break
 				}
 			}
 		} else {
 			for i := range m.trashDesc {
-				if m.trashDesc[i].ID == it.ID || (it.Hex != "" && m.trashDesc[i].Hex == it.Hex) {
+				if m.trashDesc[i].ID == it.ID {
 					m.trashDesc[i] = it
 					break
 				}
@@ -806,7 +806,7 @@ func (m *LibraryManager) mutateCachedItem(itemID string, mutator func(it *Item))
 	if it.InTrash {
 		// Moved from active to trash
 		for i := range m.itemsDesc {
-			if m.itemsDesc[i].ID == it.ID || (it.Hex != "" && m.itemsDesc[i].Hex == it.Hex) {
+			if m.itemsDesc[i].ID == it.ID {
 				m.itemsDesc = append(m.itemsDesc[:i], m.itemsDesc[i+1:]...)
 				break
 			}
@@ -815,7 +815,7 @@ func (m *LibraryManager) mutateCachedItem(itemID string, mutator func(it *Item))
 	} else {
 		// Restored from trash to active
 		for i := range m.trashDesc {
-			if m.trashDesc[i].ID == it.ID || (it.Hex != "" && m.trashDesc[i].Hex == it.Hex) {
+			if m.trashDesc[i].ID == it.ID {
 				m.trashDesc = append(m.trashDesc[:i], m.trashDesc[i+1:]...)
 				break
 			}
@@ -839,22 +839,19 @@ func (m *LibraryManager) removeCachedItem(id string) {
 	it, ok := m.itemsByID[id]
 	if ok {
 		delete(m.itemsByID, it.ID)
-		if it.Hex != "" {
-			delete(m.itemsByID, it.Hex)
-		}
 		delete(m.searchIndex, it.ID)
 	} else {
 		delete(m.itemsByID, id)
 		delete(m.searchIndex, id)
 	}
 	for i := range m.itemsDesc {
-		if m.itemsDesc[i].ID == id || m.itemsDesc[i].Hex == id {
+		if m.itemsDesc[i].ID == id {
 			m.itemsDesc = append(m.itemsDesc[:i], m.itemsDesc[i+1:]...)
 			break
 		}
 	}
 	for i := range m.trashDesc {
-		if m.trashDesc[i].ID == id || m.trashDesc[i].Hex == id {
+		if m.trashDesc[i].ID == id {
 			m.trashDesc = append(m.trashDesc[:i], m.trashDesc[i+1:]...)
 			break
 		}
@@ -890,9 +887,6 @@ func (m *LibraryManager) upsertItemsInCache(items []Item, folderID string) {
 			it.Tags = existing.Tags
 		}
 		m.itemsByID[it.ID] = it
-		if it.Hex != "" {
-			m.itemsByID[it.Hex] = it
-		}
 		m.searchIndex[it.ID] = buildItemSearchKey(&it)
 		updatedSet[it.ID] = it
 	}
@@ -988,6 +982,10 @@ func (m *LibraryManager) initSchema(db *sql.DB) error {
 		created_at INTEGER NOT NULL,
 		color TEXT DEFAULT ''
 	)`)
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS library_meta (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL DEFAULT ''
+	)`)
 	return nil
 }
 
@@ -1075,7 +1073,7 @@ func (m *LibraryManager) GetItem(id string) (*Item, error) {
 	}
 	m.cacheMu.RUnlock()
 
-	row := db.QueryRow("SELECT id, COALESCE(hex, ''), name, extension, filename, size, mime_type, width, height, has_thumbnail, tags, created_at, imported_at, COALESCE(updated_at, 0), COALESCE(note, ''), COALESCE(url, ''), COALESCE(rating, 0), COALESCE(prompt, ''), COALESCE(in_trash, 0), COALESCE(trashed_at, 0), COALESCE(dominant_color, ''), COALESCE(palette, ''), COALESCE(meta_json, '') FROM items WHERE id = ? OR hex = ?", id, id)
+	row := db.QueryRow("SELECT id, COALESCE(hex, ''), name, extension, filename, size, mime_type, width, height, has_thumbnail, tags, created_at, imported_at, COALESCE(updated_at, 0), COALESCE(note, ''), COALESCE(url, ''), COALESCE(rating, 0), COALESCE(prompt, ''), COALESCE(in_trash, 0), COALESCE(trashed_at, 0), COALESCE(dominant_color, ''), COALESCE(palette, ''), COALESCE(meta_json, '') FROM items WHERE id = ?", id)
 	var item Item
 	var tagsStr string
 	var hasThumbInt int
@@ -1341,6 +1339,7 @@ func (m *LibraryManager) runConcurrentImportJobs(jobs []importJob, onProgress Pr
 	}()
 
 	orderedItems := make([]*Item, total)
+	seenHexInBatch := make(map[string]*Item)
 	var pendingBatch []preparedImportResult
 	const batchSize = 32
 
@@ -1370,6 +1369,30 @@ func (m *LibraryManager) runConcurrentImportJobs(jobs []importJob, onProgress Pr
 			continue
 		}
 		if res.item != nil {
+			if !res.isExisting && res.item.Hex != "" {
+				if prev, dup := seenHexInBatch[res.item.Hex]; dup {
+					if res.item.ItemPath != "" {
+						_ = os.RemoveAll(res.item.ItemPath)
+					}
+					prevCopy := *prev
+					if res.folderID != "" {
+						hasFolder := false
+						for _, f := range prevCopy.Folders {
+							if f == res.folderID {
+								hasFolder = true
+								break
+							}
+						}
+						if !hasFolder {
+							prevCopy.Folders = append(append([]string{}, prevCopy.Folders...), res.folderID)
+						}
+					}
+					res.item = &prevCopy
+					res.isExisting = true
+				} else {
+					seenHexInBatch[res.item.Hex] = res.item
+				}
+			}
 			orderedItems[res.index] = res.item
 			pendingBatch = append(pendingBatch, res)
 			if len(pendingBatch) >= batchSize {
@@ -1533,6 +1556,314 @@ func itemPayloadPresent(item *Item) bool {
 	}
 	info, err := os.Stat(filepath.Join(item.ItemPath, item.Filename))
 	return err == nil && info.Mode().IsRegular()
+}
+
+const (
+	itemIDAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	itemIDLength   = 16
+)
+
+// generateRandomItemID generates a cryptographically random uppercase
+// alphanumeric directory name for newly imported items.
+func generateRandomItemID() (string, error) {
+	const maxUnbiased = 252 // largest multiple of 36 <= 255
+	var buf [itemIDLength]byte
+	var rnd [32]byte
+	i := 0
+	for i < itemIDLength {
+		if _, err := rand.Read(rnd[:]); err != nil {
+			return "", err
+		}
+		for _, b := range rnd {
+			if b < maxUnbiased {
+				buf[i] = itemIDAlphabet[b%byte(len(itemIDAlphabet))]
+				i++
+				if i == itemIDLength {
+					break
+				}
+			}
+		}
+	}
+	return string(buf[:]), nil
+}
+
+// allocateAndCreateItemDir atomically reserves a unique random uppercase
+// alphanumeric item directory under itemsRoot that collides with neither disk
+// nor SQLite.
+func allocateAndCreateItemDir(db *sql.DB, itemsRoot string) (string, string, error) {
+	if err := os.MkdirAll(itemsRoot, 0o755); err != nil {
+		return "", "", err
+	}
+	for range 32 {
+		id, err := generateRandomItemID()
+		if err != nil {
+			return "", "", err
+		}
+		if db != nil {
+			var exists int
+			if qErr := db.QueryRow("SELECT 1 FROM items WHERE id = ? LIMIT 1", id).Scan(&exists); qErr == nil {
+				continue
+			}
+		}
+		dir := filepath.Join(itemsRoot, id)
+		if mkErr := os.Mkdir(dir, 0o755); mkErr != nil {
+			if os.IsExist(mkErr) {
+				continue
+			}
+			return "", "", mkErr
+		}
+		return id, dir, nil
+	}
+	return "", "", errors.New("failed to allocate unique item directory")
+}
+
+// ensureHexIndexInitialized populates and verifies the SQLite hex index once
+// when opening a library for the first time.
+func (m *LibraryManager) ensureHexIndexInitialized(db *sql.DB, libraryPath string) error {
+	if db == nil {
+		return nil
+	}
+	var initialized string
+	if err := db.QueryRow("SELECT value FROM library_meta WHERE key = 'hex_index_initialized'").Scan(&initialized); err == nil && initialized == "1" {
+		return nil
+	}
+
+	start := time.Now()
+	type itemHexRow struct {
+		id       string
+		hex      string
+		filename string
+		size     int64
+	}
+	rows, err := db.Query("SELECT id, COALESCE(hex, ''), filename, size FROM items")
+	if err != nil {
+		return err
+	}
+	var pending []itemHexRow
+	for rows.Next() {
+		var r itemHexRow
+		if scanErr := rows.Scan(&r.id, &r.hex, &r.filename, &r.size); scanErr == nil {
+			pending = append(pending, r)
+		}
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		_ = rows.Close()
+		return rowsErr
+	}
+	_ = rows.Close()
+
+	type hexUpdate struct {
+		id       string
+		newHex   string
+		newSize  int64
+		metaPath string
+		dbDirty  bool
+	}
+	total := len(pending)
+	if total > 0 {
+		m.emit(LibraryIndexProgressEvent, LibraryIndexProgress{
+			Active:  true,
+			Current: 0,
+			Total:   total,
+		})
+		defer m.emit(LibraryIndexProgressEvent, LibraryIndexProgress{
+			Active:  false,
+			Current: total,
+			Total:   total,
+		})
+	}
+	var lastEmit time.Time
+	var updates []hexUpdate
+	for i, r := range pending {
+		if total > 0 && (i == total-1 || time.Since(lastEmit) >= 50*time.Millisecond) {
+			lastEmit = time.Now()
+			m.emit(LibraryIndexProgressEvent, LibraryIndexProgress{
+				Active:  true,
+				Current: i + 1,
+				Total:   total,
+			})
+		}
+		if r.id == "" || r.filename == "" {
+			continue
+		}
+		filePath := filepath.Join(libraryPath, "items", r.id, r.filename)
+		stat, statErr := os.Stat(filePath)
+		if statErr != nil || !stat.Mode().IsRegular() {
+			continue
+		}
+
+		metaPath := filepath.Join(libraryPath, "items", r.id, itemMetadataName)
+		var metaHex string
+		var metaSize int64
+		hasMeta := false
+		if raw, mErr := os.ReadFile(metaPath); mErr == nil {
+			var meta ItemMetadata
+			if json.Unmarshal(raw, &meta) == nil {
+				hasMeta = true
+				metaHex = meta.Hex
+				metaSize = meta.Size
+			}
+		}
+
+		actualHex := ""
+		if r.hex != "" && stat.Size() == r.size {
+			actualHex = r.hex
+		} else if hasMeta && metaHex != "" && (metaSize == 0 || metaSize == stat.Size()) {
+			actualHex = metaHex
+		} else {
+			computed, hErr := ComputeFileSHA256(filePath)
+			if hErr != nil || computed == "" {
+				continue
+			}
+			actualHex = computed
+		}
+
+		dbDirty := actualHex != r.hex || stat.Size() != r.size
+		metaDirty := hasMeta && (metaHex != actualHex || metaSize != stat.Size())
+		if dbDirty || metaDirty {
+			updates = append(updates, hexUpdate{
+				id:       r.id,
+				newHex:   actualHex,
+				newSize:  stat.Size(),
+				metaPath: metaPath,
+				dbDirty:  dbDirty,
+			})
+		}
+	}
+
+	now := time.Now().Unix()
+	if len(updates) > 0 {
+		tx, txErr := db.Begin()
+		if txErr != nil {
+			return txErr
+		}
+		stmt, stmtErr := tx.Prepare("UPDATE items SET hex = ?, size = ?, updated_at = ? WHERE id = ?")
+		if stmtErr != nil {
+			_ = tx.Rollback()
+			return stmtErr
+		}
+		for _, u := range updates {
+			if u.dbDirty {
+				_, _ = stmt.Exec(u.newHex, u.newSize, now, u.id)
+			}
+		}
+		_ = stmt.Close()
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		for _, u := range updates {
+			if raw, rErr := os.ReadFile(u.metaPath); rErr == nil {
+				var meta ItemMetadata
+				if json.Unmarshal(raw, &meta) == nil && (meta.Hex != u.newHex || meta.Size != u.newSize) {
+					meta.Hex = u.newHex
+					meta.Size = u.newSize
+					meta.UpdatedAt = now
+					if out, mErr := json.Marshal(meta); mErr == nil {
+						_ = os.WriteFile(u.metaPath, out, 0o644)
+					}
+				}
+			}
+		}
+	}
+
+	if _, err := db.Exec(`INSERT OR REPLACE INTO library_meta (key, value) VALUES ('hex_index_initialized', '1')`); err != nil {
+		return err
+	}
+	RecordLog("info", "core", "Initialized SQLite hex index", fmt.Sprintf("scanned=%d updated=%d", len(pending), len(updates)), time.Since(start).Milliseconds())
+	return nil
+}
+
+// hotUpdateItemHex updates an existing item's hex, size, and updated_at in
+// SQLite, metadata.json, and the in-memory cache when its file on disk changed.
+func (m *LibraryManager) hotUpdateItemHex(itemID, newHex string, newSize int64) {
+	m.mu.RLock()
+	db := m.db
+	active := m.activeLib
+	m.mu.RUnlock()
+	if db == nil {
+		return
+	}
+
+	now := time.Now().Unix()
+	_, _ = db.Exec("UPDATE items SET hex = ?, size = ?, updated_at = ? WHERE id = ?", newHex, newSize, now, itemID)
+
+	if active != nil {
+		metaPath := filepath.Join(active.Path, "items", itemID, itemMetadataName)
+		if raw, rErr := os.ReadFile(metaPath); rErr == nil {
+			var meta ItemMetadata
+			if json.Unmarshal(raw, &meta) == nil {
+				meta.Hex = newHex
+				meta.Size = newSize
+				meta.UpdatedAt = now
+				if out, mErr := json.Marshal(meta); mErr == nil {
+					_ = os.WriteFile(metaPath, out, 0o644)
+				}
+			}
+		}
+	}
+
+	m.mutateCachedItem(itemID, func(it *Item) {
+		it.Hex = newHex
+		it.Size = newSize
+		it.UpdatedAt = now
+	})
+	if updated, err := m.GetItem(itemID); err == nil && updated != nil {
+		m.emit("library-items-upserted", []Item{*updated})
+	}
+}
+
+// findDuplicateByHex looks up contentHex via SQLite's idx_items_hex index and
+// verifies the matching item's file on disk still has that exact hash. If an
+// item's file was edited on disk (e.g. PSD/TXT/MD modified externally), its hex
+// index is hot-updated and it is not treated as a duplicate.
+func (m *LibraryManager) findDuplicateByHex(db *sql.DB, contentHex string) (*Item, error) {
+	if db == nil || contentHex == "" {
+		return nil, nil
+	}
+	rows, err := db.Query("SELECT id FROM items WHERE hex = ?", contentHex)
+	if err != nil {
+		return nil, err
+	}
+	var candidateIDs []string
+	for rows.Next() {
+		var id string
+		if scanErr := rows.Scan(&id); scanErr == nil && id != "" {
+			candidateIDs = append(candidateIDs, id)
+		}
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		_ = rows.Close()
+		return nil, rowsErr
+	}
+	_ = rows.Close()
+
+	var missingPayloadCandidate *Item
+	for _, id := range candidateIDs {
+		item, gErr := m.GetItem(id)
+		if gErr != nil || item == nil {
+			continue
+		}
+		stat, statErr := os.Stat(item.FilePath)
+		if statErr != nil || !stat.Mode().IsRegular() {
+			if missingPayloadCandidate == nil {
+				missingPayloadCandidate = item
+			}
+			continue
+		}
+		actualHex, hErr := ComputeFileSHA256(item.FilePath)
+		if hErr != nil {
+			continue
+		}
+		if actualHex != contentHex {
+			m.hotUpdateItemHex(item.ID, actualHex, stat.Size())
+			continue
+		}
+		return item, nil
+	}
+	if missingPayloadCandidate != nil {
+		return missingPayloadCandidate, nil
+	}
+	return nil, nil
 }
 
 // sqliteDSNOptions is appended to the database path when opening a library.
@@ -1702,10 +2033,10 @@ func (m *LibraryManager) prepareSingleFileImport(job importJob) preparedImportRe
 	}
 	copyHashMs := time.Since(tHashStart).Milliseconds()
 
-	itemLock := m.acquireItemLock(contentHex)
+	itemLock := m.acquireItemLock("hex:" + contentHex)
 	defer itemLock.Unlock()
 
-	existing, err := m.GetItem(contentHex)
+	existing, err := m.findDuplicateByHex(db, contentHex)
 	if err == nil && existing != nil && itemPayloadPresent(existing) {
 		if tempPath != "" {
 			_ = os.Remove(tempPath)
@@ -1731,9 +2062,15 @@ func (m *LibraryManager) prepareSingleFileImport(job importJob) preparedImportRe
 		}
 	}
 
-	itemID := contentHex
-	itemDir := filepath.Join(active.Path, "items", itemID)
-	if err := ensureItemDir(itemDir); err != nil {
+	var itemID, itemDir string
+	if existing != nil {
+		itemID = existing.ID
+		itemDir = filepath.Join(active.Path, "items", itemID)
+		err = ensureItemDir(itemDir)
+	} else {
+		itemID, itemDir, err = allocateAndCreateItemDir(db, itemsRoot)
+	}
+	if err != nil {
 		if tempPath != "" {
 			_ = os.Remove(tempPath)
 		}
@@ -1928,7 +2265,10 @@ func (m *LibraryManager) ImportFromBase64WithOptions(filename string, base64Data
 	}
 
 	contentHex := ComputeBytesSHA256(data)
-	existing, err := m.GetItem(contentHex)
+	itemLock := m.acquireItemLock("hex:" + contentHex)
+	defer itemLock.Unlock()
+
+	existing, err := m.findDuplicateByHex(db, contentHex)
 	if err == nil && existing != nil && itemPayloadPresent(existing) {
 		// Apply any requested folders/tags to existing duplicate
 		for _, fID := range opts.FolderIDs {
@@ -1967,9 +2307,15 @@ func (m *LibraryManager) ImportFromBase64WithOptions(filename string, base64Data
 		return m.GetItem(existing.ID)
 	}
 
-	itemID := contentHex
-	itemDir := filepath.Join(active.Path, "items", itemID)
-	if err := ensureItemDir(itemDir); err != nil {
+	var itemID, itemDir string
+	if existing != nil {
+		itemID = existing.ID
+		itemDir = filepath.Join(active.Path, "items", itemID)
+		err = ensureItemDir(itemDir)
+	} else {
+		itemID, itemDir, err = allocateAndCreateItemDir(db, filepath.Join(active.Path, "items"))
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -2452,8 +2798,8 @@ func (m *LibraryManager) SaveItemThumbnailImage(itemID string, img image.Image, 
 	}
 
 	_, err = db.Exec(
-		`UPDATE items SET width = ?, height = ?, has_thumbnail = 1, dominant_color = ?, palette = ?, meta_json = ? WHERE id = ? OR hex = ?`,
-		w, h, dominantColor, paletteStr, metaJSONStr, item.ID, item.ID,
+		`UPDATE items SET width = ?, height = ?, has_thumbnail = 1, dominant_color = ?, palette = ?, meta_json = ? WHERE id = ?`,
+		w, h, dominantColor, paletteStr, metaJSONStr, item.ID,
 	)
 	if err != nil {
 		return nil, err
@@ -2676,7 +3022,7 @@ func (m *LibraryManager) DeleteItem(id string) error {
 	_ = os.RemoveAll(itemDir)
 
 	_, _ = db.Exec("DELETE FROM item_folders WHERE item_id = ?", id)
-	_, err := db.Exec("DELETE FROM items WHERE id = ? OR hex = ?", id, id)
+	_, err := db.Exec("DELETE FROM items WHERE id = ?", id)
 	m.removeCachedItem(id)
 	m.notifyItemsUpdated()
 	return err
@@ -3519,8 +3865,8 @@ func (m *LibraryManager) MoveToTrash(id string) error {
 	now := time.Now().Unix()
 
 	// 2. Update database row
-	_, err = db.Exec("UPDATE items SET in_trash = 1, trashed_at = ?, trashed_folders = ? WHERE id = ? OR hex = ?",
-		now, string(foldersJSON), id, id,
+	_, err = db.Exec("UPDATE items SET in_trash = 1, trashed_at = ?, trashed_folders = ? WHERE id = ?",
+		now, string(foldersJSON), id,
 	)
 	if err != nil {
 		return err
@@ -3597,7 +3943,7 @@ func (m *LibraryManager) BatchMoveToTrash(ids []string) error {
 	}
 	defer tx.Rollback()
 
-	updStmt, err := tx.Prepare("UPDATE items SET in_trash = 1, trashed_at = ?, trashed_folders = ? WHERE id = ? OR hex = ?")
+	updStmt, err := tx.Prepare("UPDATE items SET in_trash = 1, trashed_at = ?, trashed_folders = ? WHERE id = ?")
 	if err != nil {
 		return err
 	}
@@ -3728,7 +4074,7 @@ func (m *LibraryManager) RestoreFromTrash(id string) error {
 		}
 	}
 
-	_, err = db.Exec("UPDATE items SET in_trash = 0, trashed_at = 0, trashed_folders = '' WHERE id = ? OR hex = ?", id, id)
+	_, err = db.Exec("UPDATE items SET in_trash = 0, trashed_at = 0, trashed_folders = '' WHERE id = ?", id)
 	if err != nil {
 		return err
 	}
@@ -4352,7 +4698,7 @@ func (m *LibraryManager) AddTagToItem(itemID string, tag string) error {
 	newTagsStr := strings.Join(existingTags, ",")
 
 	now := time.Now().Unix()
-	_, err = db.Exec("UPDATE items SET tags = ?, updated_at = ? WHERE id = ? OR hex = ?", newTagsStr, now, itemID, itemID)
+	_, err = db.Exec("UPDATE items SET tags = ?, updated_at = ? WHERE id = ?", newTagsStr, now, itemID)
 	if err != nil {
 		return err
 	}
@@ -4412,7 +4758,7 @@ func (m *LibraryManager) RemoveTagFromItem(itemID string, tag string) error {
 	newTagsStr := strings.Join(newTags, ",")
 
 	now := time.Now().Unix()
-	_, err = db.Exec("UPDATE items SET tags = ?, updated_at = ? WHERE id = ? OR hex = ?", newTagsStr, now, itemID, itemID)
+	_, err = db.Exec("UPDATE items SET tags = ?, updated_at = ? WHERE id = ?", newTagsStr, now, itemID)
 	if err != nil {
 		return err
 	}
@@ -4471,7 +4817,7 @@ func (m *LibraryManager) SetItemTags(itemID string, tags []string) error {
 	}
 
 	newTagsStr := strings.Join(cleanTags, ",")
-	_, err := db.Exec("UPDATE items SET tags = ?, updated_at = ? WHERE id = ? OR hex = ?", newTagsStr, now, itemID, itemID)
+	_, err := db.Exec("UPDATE items SET tags = ?, updated_at = ? WHERE id = ?", newTagsStr, now, itemID)
 	if err != nil {
 		return err
 	}
@@ -4571,7 +4917,7 @@ func (m *LibraryManager) RenameItem(id string, newName string) (*Item, error) {
 	}
 
 	now := time.Now().Unix()
-	_, err = db.Exec("UPDATE items SET name = ?, filename = ?, updated_at = ? WHERE id = ? OR hex = ?", displayName, newFilename, now, id, id)
+	_, err = db.Exec("UPDATE items SET name = ?, filename = ?, updated_at = ? WHERE id = ?", displayName, newFilename, now, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update item in database: %w", err)
 	}
@@ -4628,8 +4974,8 @@ func (m *LibraryManager) UpdateItemDetails(id string, note string, rawURL string
 	now := time.Now().Unix()
 
 	_, err = db.Exec(
-		"UPDATE items SET note = ?, url = ?, rating = ?, prompt = ?, updated_at = ? WHERE id = ? OR hex = ?",
-		note, cleanURL, rating, prompt, now, item.ID, item.ID,
+		"UPDATE items SET note = ?, url = ?, rating = ?, prompt = ?, updated_at = ? WHERE id = ?",
+		note, cleanURL, rating, prompt, now, item.ID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update item details: %w", err)
