@@ -121,6 +121,22 @@ func TestValidateManifest(t *testing.T) {
 	}
 }
 
+func TestValidateManifest_AllKinds(t *testing.T) {
+	for _, kind := range []string{"preview", "metadata", "resolver", "action"} {
+		m := PluginManifest{
+			ID:      "official.pinterest",
+			Name:    "Pinterest",
+			Version: "1.1.0",
+			Author:  "Bowerbird Team",
+			Kind:    kind,
+			Main:    "index.js",
+		}
+		if err := ValidateManifest(&m); err != nil {
+			t.Fatalf("ValidateManifest(kind=%q) unexpected error: %v", kind, err)
+		}
+	}
+}
+
 func TestPluginManager_InstallFromManifestURL(t *testing.T) {
 	tempDir := t.TempDir()
 	pm := NewPluginManagerWithDir(tempDir)

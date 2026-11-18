@@ -252,8 +252,10 @@ func ValidateManifest(m *PluginManifest) error {
 	if strings.TrimSpace(m.Author) == "" {
 		return errors.New("missing or empty plugin author")
 	}
-	if m.Kind != "preview" && m.Kind != "metadata" {
-		return fmt.Errorf("invalid kind %q: must be 'preview' or 'metadata'", m.Kind)
+	switch m.Kind {
+	case "preview", "metadata", "resolver", "action":
+	default:
+		return fmt.Errorf("invalid kind %q: must be 'preview', 'metadata', 'resolver', or 'action'", m.Kind)
 	}
 	if m.Priority < 0 || m.Priority > 100 {
 		return fmt.Errorf("invalid priority %d: must be between 0 and 100", m.Priority)
