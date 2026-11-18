@@ -54,6 +54,35 @@ type MobileServer struct {
 	codeMu              sync.RWMutex
 	clientsMu           sync.Mutex
 	clients             map[*wsClient]bool
+	urlImporter         func(rawURL, folderID string) ([]Item, error)
+
+	shareMu           sync.Mutex
+	activeShares      int
+	shareNotifyCount  int
+	shareNotifyFirst  string
+	shareNotifyFolder string
+	shareNotifyMode   string
+	shareNotifyTimer  *time.Timer
+}
+
+const mobileShareDebounce = 1500 * time.Millisecond
+
+// MobileShareSavedEvent is emitted to the desktop host after mobile shares are saved.
+const MobileShareSavedEvent = "mobile-share-saved"
+
+// MobileShareSavedPayload describes items saved from a mobile share.
+type MobileShareSavedPayload struct {
+	Count     int    `json:"count"`
+	FirstName string `json:"firstName,omitempty"`
+	FolderID  string `json:"folderId,omitempty"`
+	Mode      string `json:"mode,omitempty"` // "file", "url", "text"
+}
+
+// SetURLImporter registers the desktop URL resolver/importer callback.
+func (s *MobileServer) SetURLImporter(fn func(rawURL, folderID string) ([]Item, error)) {
+	s.mu.Lock()
+	s.urlImporter = fn
+	s.mu.Unlock()
 }
 
 // MobileItemSummary represents an item in the lightweight mobile timeline view.
@@ -196,6 +225,7 @@ func (s *MobileServer) Start() error {
 	mux.HandleFunc("/api/v1/libraries", s.authMiddleware(s.handleLibrariesList))
 	mux.HandleFunc("/api/v1/libraries/switch", s.authMiddleware(s.handleLibrarySwitch))
 	mux.HandleFunc("/api/v1/upload", s.authMiddleware(s.handleUpload))
+	mux.HandleFunc("/api/v1/share/text", s.authMiddleware(s.handleShareText))
 	mux.HandleFunc("/api/v1/tags", s.authMiddleware(s.handleTagsList))
 	mux.HandleFunc("/api/v1/folders", s.authMiddleware(s.handleFoldersList))
 	mux.HandleFunc("/api/v1/colors", s.authMiddleware(s.handleColorsList))
@@ -238,6 +268,13 @@ func (s *MobileServer) Stop() error {
 
 	log.Printf("[MobileServer] stopping mobile server...")
 	s.stopMDNSInternal()
+
+	s.shareMu.Lock()
+	if s.shareNotifyTimer != nil {
+		s.shareNotifyTimer.Stop()
+		s.shareNotifyTimer = nil
+	}
+	s.shareMu.Unlock()
 
 	s.clientsMu.Lock()
 	for c := range s.clients {
@@ -968,6 +1005,8 @@ func (s *MobileServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	folderID := strings.TrimSpace(r.URL.Query().Get("folderId"))
+
 	// 500 MB max request body
 	r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
 	mr, err := r.MultipartReader()
@@ -995,6 +1034,13 @@ func (s *MobileServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		filename := part.FileName()
 		if filename == "" {
+			if part.FormName() == "folderId" {
+				if raw, readErr := io.ReadAll(io.LimitReader(part, 1024)); readErr == nil {
+					if v := strings.TrimSpace(string(raw)); v != "" {
+						folderID = v
+					}
+				}
+			}
 			_ = part.Close()
 			continue
 		}
@@ -1029,15 +1075,25 @@ func (s *MobileServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, importErr := s.manager.ImportFilesFromMobile(savedPaths)
+	s.beginMobileShare()
+	var (
+		sharedItems []Item
+		sharedMode  = "file"
+	)
+	defer func() {
+		s.finishMobileShare(sharedItems, folderID, sharedMode)
+	}()
+
+	items, importErr := s.manager.ImportFilesFromMobileToFolder(savedPaths, folderID)
 	if importErr != nil {
 		writeError(w, http.StatusInternalServerError, "IMPORT_FAILED", importErr.Error())
 		return
 	}
+	sharedItems = items
 
 	if len(items) > 0 {
 		// The import pipeline already broadcast items_updated to mobile clients;
-		// notify the desktop UI exactly once with the imported summaries.
+		// notify the desktop UI immediately to refresh while batching the toast/OS notification.
 		s.manager.emit("library-items-upserted", items)
 	}
 
@@ -1048,6 +1104,243 @@ func (s *MobileServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		"count":  len(items),
 		"items":  items,
 	})
+}
+
+type mobileShareTextRequest struct {
+	Text     string `json:"text"`
+	Subject  string `json:"subject,omitempty"`
+	FolderID string `json:"folderId,omitempty"`
+}
+
+// handleShareText accepts shared text from mobile, detects whether it contains
+// URLs (running desktop's URL resolver/importer) or falls back to saving plain text.
+func (s *MobileServer) handleShareText(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, ErrCodeMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+		writeError(w, http.StatusServiceUnavailable, "NO_ACTIVE_LIBRARY", "no active library opened")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+	var req mobileShareTextRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body: "+err.Error())
+		return
+	}
+	req.Text = strings.TrimSpace(req.Text)
+	req.Subject = strings.TrimSpace(req.Subject)
+	req.FolderID = strings.TrimSpace(req.FolderID)
+	if req.Text == "" {
+		writeError(w, http.StatusBadRequest, "EMPTY_TEXT", "text is required")
+		return
+	}
+
+	urls := extractURLsFromShareText(req.Text)
+	var items []Item
+	mode := "text"
+
+	s.beginMobileShare()
+	defer func() {
+		s.finishMobileShare(items, req.FolderID, mode)
+	}()
+
+	if len(urls) > 0 {
+		mode = "url"
+		s.mu.RLock()
+		importer := s.urlImporter
+		s.mu.RUnlock()
+
+		var firstErr error
+		for _, rawURL := range urls {
+			var (
+				imported []Item
+				err      error
+			)
+			if importer != nil {
+				imported, err = importer(rawURL, req.FolderID)
+			} else {
+				opts := ImportItemOptions{URL: rawURL}
+				if req.FolderID != "" {
+					opts.FolderIDs = []string{req.FolderID}
+				}
+				if single, impErr := s.manager.ImportFromURLWithOptions(rawURL, opts); impErr != nil {
+					err = impErr
+				} else if single != nil {
+					imported = []Item{*single}
+				}
+			}
+			if err != nil {
+				RecordLog("error", "mobile", "mobile URL share import failed", fmt.Sprintf("url=%s err=%v", rawURL, err), 0)
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			if len(imported) > 0 {
+				items = append(items, imported...)
+			}
+		}
+		if len(items) == 0 {
+			msg := "URL import failed"
+			if firstErr != nil {
+				msg = firstErr.Error()
+			}
+			writeError(w, http.StatusUnprocessableEntity, "URL_IMPORT_FAILED", msg)
+			return
+		}
+	} else {
+		tempDir, err := os.MkdirTemp("", "bowerbird_share_text_*")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create temporary directory")
+			return
+		}
+		defer os.RemoveAll(tempDir)
+
+		name := sanitizeShareTextFilename(req.Subject)
+		destPath := filepath.Join(tempDir, name)
+		if err := os.WriteFile(destPath, []byte(req.Text), 0o600); err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to write shared text")
+			return
+		}
+		imported, err := s.manager.ImportFilesFromMobileToFolder([]string{destPath}, req.FolderID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "IMPORT_FAILED", err.Error())
+			return
+		}
+		items = imported
+	}
+
+	if len(items) > 0 {
+		s.manager.emit("library-items-upserted", items)
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": "success",
+		"mode":   mode,
+		"count":  len(items),
+		"items":  items,
+	})
+}
+
+func (s *MobileServer) beginMobileShare() {
+	s.shareMu.Lock()
+	defer s.shareMu.Unlock()
+	s.activeShares++
+	if s.shareNotifyTimer != nil {
+		s.shareNotifyTimer.Stop()
+		s.shareNotifyTimer = nil
+	}
+}
+
+func (s *MobileServer) finishMobileShare(items []Item, folderID, mode string) {
+	s.shareMu.Lock()
+	defer s.shareMu.Unlock()
+	if s.activeShares > 0 {
+		s.activeShares--
+	}
+	if len(items) > 0 {
+		s.shareNotifyCount += len(items)
+		if s.shareNotifyFirst == "" {
+			s.shareNotifyFirst = items[0].Name
+		}
+		if folderID != "" {
+			s.shareNotifyFolder = folderID
+		}
+		if mode != "" {
+			s.shareNotifyMode = mode
+		}
+	}
+	if s.activeShares == 0 && s.shareNotifyCount > 0 {
+		if s.shareNotifyTimer != nil {
+			s.shareNotifyTimer.Stop()
+		}
+		s.shareNotifyTimer = time.AfterFunc(mobileShareDebounce, s.flushMobileShareNotify)
+	}
+}
+
+func (s *MobileServer) flushMobileShareNotify() {
+	s.shareMu.Lock()
+	if s.activeShares > 0 || s.shareNotifyCount == 0 {
+		s.shareMu.Unlock()
+		return
+	}
+	payload := MobileShareSavedPayload{
+		Count:     s.shareNotifyCount,
+		FirstName: s.shareNotifyFirst,
+		FolderID:  s.shareNotifyFolder,
+		Mode:      s.shareNotifyMode,
+	}
+	s.shareNotifyCount = 0
+	s.shareNotifyFirst = ""
+	s.shareNotifyFolder = ""
+	s.shareNotifyMode = ""
+	s.shareNotifyTimer = nil
+	s.shareMu.Unlock()
+
+	if s.manager != nil {
+		s.manager.emit(MobileShareSavedEvent, payload)
+	}
+	s.Broadcast("items_updated", map[string]any{
+		"action": "mobile_share_saved",
+		"count":  payload.Count,
+	})
+}
+
+func extractURLsFromShareText(text string) []string {
+	fields := strings.Fields(text)
+	seen := make(map[string]bool)
+	var out []string
+	for _, field := range fields {
+		candidate := strings.TrimSpace(field)
+		lower := strings.ToLower(candidate)
+		if idx := strings.Index(lower, "https://"); idx >= 0 {
+			candidate = candidate[idx:]
+		} else if idx := strings.Index(lower, "http://"); idx >= 0 {
+			candidate = candidate[idx:]
+		} else {
+			continue
+		}
+		candidate = strings.TrimRight(candidate, ".,;:!?)]}>\"'")
+		u, err := url.Parse(candidate)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			continue
+		}
+		key := u.String()
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, key)
+	}
+	return out
+}
+
+func sanitizeShareTextFilename(subject string) string {
+	name := strings.TrimSpace(subject)
+	if name == "" {
+		name = "分享文本"
+	}
+	name = strings.Map(func(r rune) rune {
+		switch r {
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|', '\r', '\n', 0:
+			return '_'
+		default:
+			return r
+		}
+	}, name)
+	name = strings.TrimSpace(filepath.Base(name))
+	if name == "" || name == "." || name == ".." {
+		name = "分享文本"
+	}
+	if !strings.HasSuffix(strings.ToLower(name), ".txt") {
+		name += ".txt"
+	}
+	return name
 }
 
 // handleItemsList is the legacy mobile timeline endpoint. It keeps the old

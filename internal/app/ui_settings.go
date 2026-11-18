@@ -955,6 +955,20 @@ func (a *App) settingsMobile(c *ui.Context) {
 				}()
 			}
 		})
+		a.settingsRow(c, a.t("settings.mobile.shareNotify"), a.t("settings.mobile.shareNotifyHelp"), func() {
+			notifyOn := a.svc != nil && a.svc.IsMobileShareNotifyEnabled()
+			if ui.Switch(c.Key("mobile-share-notify"), &notifyOn).Changed() {
+				go func() {
+					err := a.svc.SetMobileShareNotifyEnabled(notifyOn)
+					a.postSettings(func() {
+						if err != nil {
+							a.showToast(err.Error())
+						}
+						a.refreshSettings()
+					})
+				}()
+			}
+		})
 		if status != nil {
 			label := a.t("settings.mobile.stopped")
 			if status.Running {

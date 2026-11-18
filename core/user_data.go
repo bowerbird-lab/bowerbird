@@ -294,6 +294,9 @@ type MobileSettings struct {
 	// conservative default (LAN only); an explicit empty list means the user
 	// turned every interface off, so it must survive a JSON round trip.
 	AllowedNetworks []string `json:"allowedNetworks"`
+	// ShareNotifyDisabled turns off desktop notifications when mobile shares
+	// are saved. Zero value (false) keeps notifications enabled by default.
+	ShareNotifyDisabled bool `json:"shareNotifyDisabled,omitempty"`
 }
 
 // Token source identifiers for MobileTokenEntry.Source.

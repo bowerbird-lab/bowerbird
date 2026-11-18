@@ -955,3 +955,125 @@ func TestMobileServerPortSwitch(t *testing.T) {
 		t.Fatalf("expected pairing URL to contain port %d, got %s", stoppedPort, pairingURL)
 	}
 }
+
+func TestMobileShareTextURLAndFolder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	tempDir := t.TempDir()
+	mgr := NewLibraryManager()
+	defer func() {
+		if mgr.assetServer != nil {
+			_ = mgr.assetServer.Stop()
+		}
+		if mgr.mobileServer != nil {
+			_ = mgr.mobileServer.Stop()
+		}
+	}()
+
+	if _, err := mgr.CreateLibrary(tempDir, "ShareTestLib"); err != nil {
+		t.Fatalf("CreateLibrary failed: %v", err)
+	}
+	folder, err := mgr.CreateFolder("TargetFolder", "")
+	if err != nil {
+		t.Fatalf("CreateFolder failed: %v", err)
+	}
+
+	svc := NewService(mgr)
+	if !svc.IsMobileShareNotifyEnabled() {
+		t.Fatal("expected share notify enabled by default")
+	}
+	if err := svc.SetMobileShareNotifyEnabled(false); err != nil {
+		t.Fatalf("SetMobileShareNotifyEnabled(false) failed: %v", err)
+	}
+	if svc.IsMobileShareNotifyEnabled() {
+		t.Fatal("expected share notify disabled after toggle")
+	}
+
+	var resolvedURL string
+	var resolvedFolder string
+	svc.SetMobileURLImporter(func(rawURL, folderID string) ([]Item, error) {
+		resolvedURL = rawURL
+		resolvedFolder = folderID
+		return []Item{{ID: "url-item-1", Name: "TweetImage.jpg"}}, nil
+	})
+
+	mobileSrv := mgr.GetMobileServer()
+	if mobileSrv == nil {
+		t.Fatal("expected non-nil mobile server")
+	}
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", mobileSrv.GetPort())
+	pairCode := mobileSrv.GetPairingCode()
+
+	pairBody := fmt.Sprintf(`{"code":"%s","deviceName":"TestPhone"}`, pairCode)
+	pairResp, err := http.Post(baseURL+"/api/v1/pair", "application/json", strings.NewReader(pairBody))
+	if err != nil {
+		t.Fatalf("pair failed: %v", err)
+	}
+	defer pairResp.Body.Close()
+	var pairRes struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(pairResp.Body).Decode(&pairRes); err != nil || pairRes.Data.Token == "" {
+		t.Fatalf("expected pair token, err=%v", err)
+	}
+	token := pairRes.Data.Token
+
+	// 1. Share Twitter/X post text containing URL -> triggers URL importer with folderId
+	shareBody := fmt.Sprintf(`{"text":"Look at this post https://x.com/user/status/123456?s=20","subject":"X","folderId":"%s"}`, folder.ID)
+	req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/share/text", strings.NewReader(shareBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/v1/share/text failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var urlShareOut struct {
+		Status string `json:"status"`
+		Mode   string `json:"mode"`
+		Count  int    `json:"count"`
+		Items  []Item `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&urlShareOut); err != nil {
+		t.Fatalf("decode share/text failed: %v", err)
+	}
+	if urlShareOut.Mode != "url" || urlShareOut.Count != 1 || len(urlShareOut.Items) != 1 || urlShareOut.Items[0].ID != "url-item-1" {
+		t.Fatalf("unexpected url share response: %+v", urlShareOut)
+	}
+	if resolvedURL != "https://x.com/user/status/123456?s=20" || resolvedFolder != folder.ID {
+		t.Fatalf("unexpected importer args: url=%q folder=%q", resolvedURL, resolvedFolder)
+	}
+
+	// 2. Share plain text without URL -> saves .txt into folderId and returns item ID
+	plainBody := fmt.Sprintf(`{"text":"Just a plain note","subject":"NoteSubject","folderId":"%s"}`, folder.ID)
+	req2, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/share/text", strings.NewReader(plainBody))
+	req2.Header.Set("Authorization", "Bearer "+token)
+	req2.Header.Set("Content-Type", "application/json")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("POST /api/v1/share/text plain failed: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for plain text, got %d", resp2.StatusCode)
+	}
+	var plainOut struct {
+		Mode  string `json:"mode"`
+		Count int    `json:"count"`
+		Items []Item `json:"items"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&plainOut); err != nil {
+		t.Fatalf("decode plain share/text failed: %v", err)
+	}
+	if plainOut.Mode != "text" || plainOut.Count != 1 || len(plainOut.Items) != 1 || plainOut.Items[0].ID == "" {
+		t.Fatalf("unexpected plain text share response: %+v", plainOut)
+	}
+	if len(plainOut.Items[0].Folders) == 0 || plainOut.Items[0].Folders[0] != folder.ID {
+		t.Fatalf("expected item assigned to folder %s, got %+v", folder.ID, plainOut.Items[0].Folders)
+	}
+}

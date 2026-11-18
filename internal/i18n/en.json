@@ -648,6 +648,8 @@
       "devices": "Authorized devices",
       "enabled": "Enable mobile server",
       "enabledHelp": "Allow the mobile app to browse this library over the LAN",
+      "shareNotify": "Mobile share notifications",
+      "shareNotifyHelp": "Show a system notification when items are saved from mobile",
       "port": "Listen port",
       "portHelp": "Port the mobile app connects to. Changing it restarts the LAN service.",
       "portInvalid": "Enter a port between 1 and 65535.",
@@ -1098,5 +1100,10 @@
     "toggle-inspector": "Toggle inspector",
     "delete": "Delete selection",
     "delete-backspace": "Delete selection (Backspace)"
+  },
+  "mobile": {
+    "shareNotifyTitle": "Saved from mobile",
+    "shareNotifyBodySingle": "Saved \"{{name}}\"",
+    "shareNotifyBodyCount": "Saved {{count}} items"
   }
 }

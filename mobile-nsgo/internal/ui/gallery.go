@@ -135,7 +135,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 											core.Show{
 												When: func() bool {
 													a.rev.Get()
-													return len(a.inboxEntries) > 0 || a.galleryFilter.String() != ""
+													return a.galleryFilter.String() != ""
 												},
 												Then: func(cx *core.Scope) core.Node {
 													return core.View{

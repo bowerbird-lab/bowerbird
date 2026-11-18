@@ -351,6 +351,11 @@ func (p *progressReader) Read(b []byte) (int, error) {
 // into memory. The desktop's total request ceiling is 500 MiB, which includes
 // multipart overhead, so one file may not exceed it.
 func (c *Client) Upload(ctx context.Context, filename string, r io.Reader, size int64) (model.UploadResult, error) {
+	return c.UploadToFolder(ctx, filename, r, size, "")
+}
+
+// UploadToFolder streams one file to /api/v1/upload, optionally assigning it to folderID.
+func (c *Client) UploadToFolder(ctx context.Context, filename string, r io.Reader, size int64, folderID string) (model.UploadResult, error) {
 	var out model.UploadResult
 	if size > 500<<20 {
 		return out, &APIError{Kind: KindInvalid, Message: "file exceeds the 500 MB upload limit"}
@@ -363,7 +368,14 @@ func (c *Client) Upload(ctx context.Context, filename string, r io.Reader, size 
 	mw := multipart.NewWriter(pw)
 	contentType := mw.FormDataContentType()
 	go func() {
-		part, err := mw.CreateFormFile("file", filepath.Base(filename))
+		var err error
+		if folderID != "" {
+			err = mw.WriteField("folderId", folderID)
+		}
+		var part io.Writer
+		if err == nil {
+			part, err = mw.CreateFormFile("file", filepath.Base(filename))
+		}
 		if err == nil {
 			_, err = io.Copy(part, io.LimitReader(r, 500<<20))
 		}
@@ -397,6 +409,11 @@ func (c *Client) Upload(ctx context.Context, filename string, r io.Reader, size 
 
 // UploadFile opens path and uploads it.
 func (c *Client) UploadFile(ctx context.Context, path string) (model.UploadResult, error) {
+	return c.UploadFileToFolder(ctx, path, "")
+}
+
+// UploadFileToFolder opens path and uploads it, optionally assigning it to folderID.
+func (c *Client) UploadFileToFolder(ctx context.Context, path, folderID string) (model.UploadResult, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return model.UploadResult{}, err
@@ -406,7 +423,23 @@ func (c *Client) UploadFile(ctx context.Context, path string) (model.UploadResul
 	if err != nil {
 		return model.UploadResult{}, err
 	}
-	return c.Upload(ctx, info.Name(), f, info.Size())
+	return c.UploadToFolder(ctx, info.Name(), f, info.Size(), folderID)
+}
+
+// ShareText sends shared text or URLs directly to desktop for URL resolution or text saving.
+func (c *Client) ShareText(ctx context.Context, text, subject, folderID string) (model.UploadResult, error) {
+	var out model.UploadResult
+	body := map[string]string{
+		"text": text,
+	}
+	if subject != "" {
+		body["subject"] = subject
+	}
+	if folderID != "" {
+		body["folderId"] = folderID
+	}
+	err := c.doJSON(ctx, http.MethodPost, "/api/v1/share/text", nil, body, &out)
+	return out, err
 }
 
 // BatchItemError describes one item failure in a batch operation.

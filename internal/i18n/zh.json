@@ -648,6 +648,8 @@
       "devices": "已授权设备",
       "enabled": "启用移动端服务",
       "enabledHelp": "允许手机应用通过局域网浏览素材库",
+      "shareNotify": "接收手机分享通知",
+      "shareNotifyHelp": "手机端分享保存到电脑后显示系统通知",
       "port": "监听端口",
       "portHelp": "手机 App 连接的端口，修改后会自动重启局域网服务。",
       "portInvalid": "请输入 1 到 65535 之间的端口号。",
@@ -1098,5 +1100,10 @@
     "toggle-inspector": "切换检查器",
     "delete": "删除选中项",
     "delete-backspace": "删除选中项（退格键）"
+  },
+  "mobile": {
+    "shareNotifyTitle": "已保存来自手机的分享",
+    "shareNotifyBodySingle": "已保存「{{name}}」",
+    "shareNotifyBodyCount": "已保存 {{count}} 项素材"
   }
 }

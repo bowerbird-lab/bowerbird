@@ -323,19 +323,6 @@ func (a *App) devicesPage(cx *core.Scope) core.Node {
 											Children: rows,
 										}
 									}),
-									core.Show{
-										When: func() bool { a.rev.Get(); return len(a.inboxEntries) > 0 },
-										Then: func(cx *core.Scope) core.Node {
-											return nsui.Button{
-												Text:    "收件箱中有 " + itoa(len(a.inboxEntries)) + " 项待上传 · 查看",
-												Variant: nsui.ButtonGhost,
-												OnPress: func() {
-													a.inboxBackScreen = screenDevices
-													a.screen.Set(screenInbox)
-												},
-											}
-										},
-									},
 								},
 							},
 						},

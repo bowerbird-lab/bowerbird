@@ -7,6 +7,7 @@
 const PINTEREST_HOST_RE = /(^|\.)pinterest\.[a-z.]+$/i;
 const PINIMG_HOST_RE = /^i(?:-[a-z0-9]+)?\.pinimg\.com$/i;
 const PIN_PATH_RE = /\/pin\/(\d+)/i;
+const MULTI_PIN_SHARE_RE = /\/multi-pin-share\/(\d+)/i;
 const PINIMG_URL_RE = /(?:https?:)?\/\/i(?:-[a-z0-9]+)?\.pinimg\.com\/[^\s"'<>\\]+?\.(?:jpe?g|png|gif|webp)(?:\?[^\s"'<>\\]*)?/gi;
 const META_TAG_RE = /<meta\b[^>]*>/gi;
 
@@ -28,10 +29,22 @@ function parsePin(url) {
     return { id: "", host, sourceUrl: normalized, canonicalUrl: normalized, shortLink: true };
   }
   if (!PINTEREST_HOST_RE.test(host)) return null;
+  const mpsMatch = parsed.pathname.match(MULTI_PIN_SHARE_RE);
+  if (mpsMatch) {
+    return {
+      id: "",
+      mpsId: mpsMatch[1],
+      host,
+      sourceUrl: normalized,
+      canonicalUrl: `https://${host}/multi-pin-share/${mpsMatch[1]}/`,
+      shortLink: false,
+    };
+  }
   const match = parsed.pathname.match(PIN_PATH_RE);
   if (!match) return null;
   return {
     id: match[1],
+    mpsId: "",
     host,
     sourceUrl: normalized,
     canonicalUrl: `https://${host}/pin/${match[1]}/`,
@@ -212,6 +225,99 @@ async function host_fetch(url, options = {}) {
   }
 }
 
+function pickPinImagesBestUrl(images) {
+  if (!images || typeof images !== "object") return "";
+  for (const key of ["orig", "1200x", "750x", "736x", "600x", "564x", "474x", "236x"]) {
+    const entry = images[key];
+    if (entry && typeof entry.url === "string" && entry.url.trim()) {
+      return entry.url.trim();
+    }
+  }
+  let best = "";
+  let bestWidth = -1;
+  for (const key of Object.keys(images)) {
+    const entry = images[key];
+    if (!entry || typeof entry.url !== "string" || !entry.url.trim()) continue;
+    const w = Number(entry.width || 0);
+    if (w > bestWidth) {
+      bestWidth = w;
+      best = entry.url.trim();
+    }
+  }
+  return best;
+}
+
+async function fetchMultiPinShare(mpsId, sourceUrl) {
+  try {
+    const sourcePath = `/multi-pin-share/${mpsId}/`;
+    const dataPayload = JSON.stringify({
+      options: {
+        url: `/v3/multipinshare/${mpsId}/`,
+        data: {
+          fields: "multipinshare.owner(),multipinshare.pins(),pin.images,pin.title,pin.grid_title,user.username,user.full_name",
+        },
+      },
+      context: {},
+    });
+    const apiUrl = `https://www.pinterest.com/resource/ApiResource/get/?source_url=${encodeURIComponent(sourcePath)}&data=${encodeURIComponent(dataPayload)}`;
+    const response = await host_fetch(apiUrl, {
+      timeoutMs: 12000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        "X-Pinterest-AppState": "active",
+        "X-Pinterest-PWS-Handler": "www/multi-pin-share/[id].js",
+        "X-Pinterest-Source-Url": sourcePath,
+        "Referer": `https://www.pinterest.com${sourcePath}`,
+      },
+    });
+    if (!response.ok) return null;
+    const json = await response.json();
+    const data = json && json.resource_response && json.resource_response.data;
+    const pins = data && Array.isArray(data.pins) ? data.pins : [];
+    if (pins.length === 0) return null;
+
+    const items = [];
+    for (const p of pins) {
+      const imgUrl = pickPinImagesBestUrl(p && p.images);
+      if (!imgUrl) continue;
+      const candidates = pinterestImageCandidates(imgUrl);
+      const name = String((p && (p.grid_title || p.title)) || "").trim();
+      items.push({
+        url: candidates[0] || imgUrl,
+        candidates,
+        sourceUrl,
+        name,
+        tags: ["pinterest"],
+      });
+    }
+    if (items.length === 0) return null;
+
+    const owner = data.owner || {};
+    const ownerName = String(owner.full_name || owner.username || "").trim();
+    const shortId = mpsId.slice(-6);
+    const folderName = ownerName
+      ? `Pinterest · ${ownerName} (${shortId})`
+      : `Pinterest 集合 (${shortId})`;
+
+    if (globalThis.host && typeof host.log === "function") {
+      host.log("info", "pinterest.multipin", `mpsId=${mpsId} pins=${items.length} folder=${folderName}`);
+    }
+    return {
+      folderName,
+      sourceUrl,
+      tags: ["pinterest"],
+      items,
+    };
+  } catch (err) {
+    if (globalThis.host && typeof host.log === "function") {
+      host.log("warn", "pinterest.multipin", `${mpsId} ${String(err)}`);
+    }
+    return null;
+  }
+}
+
 async function fetchPinImage(pageUrl, options = {}) {
   try {
     const response = await host_fetch(pageUrl, options);
@@ -221,6 +327,12 @@ async function fetchPinImage(pageUrl, options = {}) {
       }
       return null;
     }
+    const finalUrl = response.url || pageUrl;
+    const mpsMatch = finalUrl.match(MULTI_PIN_SHARE_RE);
+    if (mpsMatch) {
+      const multi = await fetchMultiPinShare(mpsMatch[1], pageUrl);
+      if (multi) return { multi };
+    }
     const html = await response.text();
     const imageUrl = extractImageFromHtml(html);
     if (!imageUrl) {
@@ -229,7 +341,7 @@ async function fetchPinImage(pageUrl, options = {}) {
       }
       return null;
     }
-    return { pageUrl: response.url || pageUrl, imageUrl };
+    return { pageUrl: finalUrl, imageUrl };
   } catch (err) {
     if (globalThis.host && typeof host.log === "function") {
       host.log("warn", "pinterest.page", `${pageUrl} ${String(err)}`);
@@ -256,6 +368,11 @@ export async function resolveUrl({ url }) {
     host.log("info", "pinterest.match", pin.host);
   }
 
+  if (pin.mpsId) {
+    const multi = await fetchMultiPinShare(pin.mpsId, pin.sourceUrl);
+    if (multi) return multi;
+  }
+
   const pageUrls = [pin.sourceUrl];
   if (pin.canonicalUrl && pin.canonicalUrl !== pin.sourceUrl) pageUrls.push(pin.canonicalUrl);
 
@@ -263,6 +380,7 @@ export async function resolveUrl({ url }) {
     // Keep direct attempts short when the main domain is blackholed.
     const resolved = await fetchPinImage(pageUrl, { timeoutMs: 8000 });
     if (resolved) {
+      if (resolved.multi) return resolved.multi;
       return {
         url: resolved.imageUrl,
         candidates: pinterestImageCandidates(resolved.imageUrl),

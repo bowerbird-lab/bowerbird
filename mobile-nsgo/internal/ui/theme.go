@@ -236,16 +236,42 @@ func (a *App) savePreferences() {
 		return
 	}
 	prefs := storage.Preferences{
-		Version:       storage.PreferencesVersion,
-		ThemeMode:     a.settingsMode.Get(),
-		LightTheme:    a.settingsLightTheme.Get(),
-		DarkTheme:     a.settingsDarkTheme.Get(),
-		SystemAccent:  a.settingsSystemAccent.Get(),
-		GridColumns:   a.gridCols.Get(),
-		GalleryLayout: a.galleryLayout.Get(),
+		Version:             storage.PreferencesVersion,
+		ThemeMode:           a.settingsMode.Get(),
+		LightTheme:          a.settingsLightTheme.Get(),
+		DarkTheme:           a.settingsDarkTheme.Get(),
+		SystemAccent:        a.settingsSystemAccent.Get(),
+		GridColumns:         a.gridCols.Get(),
+		GalleryLayout:       a.galleryLayout.Get(),
+		ShareMode:           a.shareMode.Get(),
+		ShareNotifyDisabled: !a.shareNotify.Get(),
 	}
 	if err := a.local.SavePreferences(prefs); err != nil {
 		log.Printf("[Settings] saving preferences: %v", err)
+	}
+}
+
+func (a *App) setShareMode(mode string) {
+	switch mode {
+	case storage.ShareModeAuto, storage.ShareModeChoose:
+	default:
+		return
+	}
+	if a.shareMode.Get() == mode {
+		return
+	}
+	a.shareMode.Set(mode)
+	a.savePreferences()
+}
+
+func (a *App) setShareNotify(cx *core.Scope, enabled bool) {
+	if a.shareNotify.Get() == enabled {
+		return
+	}
+	a.shareNotify.Set(enabled)
+	a.savePreferences()
+	if enabled && a.env.HasHost && cx.Env().OS() == core.OSAndroid {
+		cx.CallHost("notify.requestPermission", nil, nil)
 	}
 }
 
@@ -638,6 +664,10 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 		{Value: storage.LayoutWaterfall, Label: "瀑布流"},
 		{Value: storage.LayoutGrid, Label: "网格"},
 	}
+	shareModeOptions := []nsui.Option[string]{
+		{Value: storage.ShareModeAuto, Label: "自动保存到全部"},
+		{Value: storage.ShareModeChoose, Label: "选择目录"},
+	}
 
 	return core.View{
 		Style: core.Style{Width: core.Pct(100), Height: core.Pct(100), Gap: 10},
@@ -679,6 +709,25 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 									OnPress: func() { a.setGridColumns(cx, a.effectiveGridCols()-1) }, TestID: "settings.gridLess"},
 								nsui.Button{Text: "+", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.effectiveGridCols() >= a.maxGridCols() },
 									OnPress: func() { a.setGridColumns(cx, a.effectiveGridCols()+1) }, TestID: "settings.gridMore"},
+							}},
+						),
+						card("分享与通知",
+							core.View{Style: core.Style{Gap: 8}, Children: []core.Node{
+								core.Text{Content: "分享保存方式", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
+								core.Text{Content: "从其他应用分享到 Bowerbird 时，直接保存到当前资源库全部，或每次弹窗选择目录。",
+									Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
+								nsui.Tabs[string]{Options: shareModeOptions, Value: func() string { return a.shareMode.Get() },
+									Equal: true, OnChange: a.setShareMode, TestID: "settings.shareMode"},
+							}},
+							divider,
+							core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{
+								core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{
+									core.Text{Content: "保存成功通知", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
+									core.Text{Content: "分享保存到电脑后发送系统通知。",
+										MaxLines: 2, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
+								}},
+								nsui.Switch{Checked: func() bool { return a.shareNotify.Get() },
+									OnChange: func(on bool) { a.setShareNotify(cx, on) }, Label: "保存成功通知", TestID: "settings.shareNotify"},
 							}},
 						),
 						card("主题",

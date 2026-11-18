@@ -197,7 +197,7 @@ func TestPreferencesDefaultsNormalizeAndRoundTrip(t *testing.T) {
 		t.Fatalf("fresh preferences = %+v", prefs)
 	}
 
-	want := Preferences{ThemeMode: "dark", LightTheme: "sand-light", DarkTheme: "midnight-dark", SystemAccent: false, GridColumns: 4, GalleryLayout: LayoutGrid}
+	want := Preferences{ThemeMode: "dark", LightTheme: "sand-light", DarkTheme: "midnight-dark", SystemAccent: false, GridColumns: 4, GalleryLayout: LayoutGrid, ShareMode: ShareModeChoose, ShareNotifyDisabled: true}
 	if err := local.SavePreferences(want); err != nil {
 		t.Fatal(err)
 	}
@@ -205,12 +205,12 @@ func TestPreferencesDefaultsNormalizeAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ThemeMode != want.ThemeMode || got.LightTheme != want.LightTheme || got.DarkTheme != want.DarkTheme || got.SystemAccent != want.SystemAccent || got.GridColumns != want.GridColumns || got.GalleryLayout != want.GalleryLayout || got.Version != PreferencesVersion {
+	if got.ThemeMode != want.ThemeMode || got.LightTheme != want.LightTheme || got.DarkTheme != want.DarkTheme || got.SystemAccent != want.SystemAccent || got.GridColumns != want.GridColumns || got.GalleryLayout != want.GalleryLayout || got.ShareMode != want.ShareMode || got.ShareNotifyDisabled != want.ShareNotifyDisabled || got.Version != PreferencesVersion {
 		t.Fatalf("loaded preferences = %+v", got)
 	}
 
-	bad := Preferences{ThemeMode: "sepia", LightTheme: "", DarkTheme: "", GridColumns: 1, GalleryLayout: "masonry"}.Normalize()
-	if bad.ThemeMode != "system" || bad.LightTheme != "default-light" || bad.DarkTheme != "default-dark" || bad.GridColumns != 3 || bad.GalleryLayout != LayoutAuto {
+	bad := Preferences{ThemeMode: "sepia", LightTheme: "", DarkTheme: "", GridColumns: 1, GalleryLayout: "masonry", ShareMode: "invalid"}.Normalize()
+	if bad.ThemeMode != "system" || bad.LightTheme != "default-light" || bad.DarkTheme != "default-dark" || bad.GridColumns != 3 || bad.GalleryLayout != LayoutAuto || bad.ShareMode != ShareModeAuto {
 		t.Fatalf("normalized = %+v", bad)
 	}
 
@@ -220,5 +220,40 @@ func TestPreferencesDefaultsNormalizeAndRoundTrip(t *testing.T) {
 	}
 	if !IsWaterfallLayout(LayoutAuto, 3) || IsWaterfallLayout(LayoutAuto, 4) || IsWaterfallLayout(LayoutGrid, 2) {
 		t.Fatal("IsWaterfallLayout mismatch")
+	}
+}
+
+func TestSaveHistoryCap300(t *testing.T) {
+	local := NewLocal(t.TempDir())
+	scope := "lib-1"
+
+	ids := make([]string, 350)
+	for i := range ids {
+		ids[i] = "id-" + strconv.Itoa(i)
+	}
+	if err := local.AddSaveHistory(scope, ids); err != nil {
+		t.Fatal(err)
+	}
+	got, err := local.SaveHistoryIDs(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != MaxSaveHistory {
+		t.Fatalf("expected %d entries, got %d", MaxSaveHistory, len(got))
+	}
+	if got[0] != "id-0" || got[MaxSaveHistory-1] != "id-299" {
+		t.Fatalf("unexpected ordering/bounds: first=%s last=%s", got[0], got[MaxSaveHistory-1])
+	}
+
+	// Prepending an existing ID moves it to the front without exceeding 300.
+	if err := local.AddSaveHistory(scope, []string{"id-50", "new-id"}); err != nil {
+		t.Fatal(err)
+	}
+	got2, err := local.SaveHistoryIDs(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got2) != MaxSaveHistory || got2[0] != "id-50" || got2[1] != "new-id" {
+		t.Fatalf("unexpected deduplicated history: len=%d first=%s second=%s", len(got2), got2[0], got2[1])
 	}
 }

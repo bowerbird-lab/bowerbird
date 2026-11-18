@@ -106,10 +106,9 @@ class ShareIntake(private val context: Context) {
             })
         }
         if (!text.isNullOrBlank()) {
-            val textName = subject?.takeIf { it.isNotBlank() }?.let { sanitizeFileName(it, "分享文本") } ?: "分享文本"
             items.put(JSONObject().apply {
                 put("kind", "text")
-                put("name", if (textName.endsWith(".txt", true)) textName else "$textName.txt")
+                put("name", subject?.trim().orEmpty())
                 put("text", text)
             })
         }

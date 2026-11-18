@@ -937,19 +937,6 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 							}
 						},
 					},
-					core.Show{
-						When: func() bool { a.rev.Get(); return len(a.inboxEntries) > 0 && a.welcomeSheetMode.Get() == "" },
-						Then: func(cx *core.Scope) core.Node {
-							return nsui.Button{
-								Text:    "收件箱中有 " + itoa(len(a.inboxEntries)) + " 项待上传 · 查看",
-								Variant: nsui.ButtonGhost,
-								OnPress: func() {
-									a.inboxBackScreen = screenWelcome
-									a.screen.Set(screenInbox)
-								},
-							}
-						},
-					},
 				},
 			},
 

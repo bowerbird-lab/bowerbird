@@ -112,18 +112,23 @@ type App struct {
 	libs        []model.Library
 	libsBusy    *core.Signal[bool]
 
-	// Inbox
-	sharesBusy        *core.Signal[bool]
-	inboxEntries      []storage.InboxEntry
-	inboxBusy         *core.Signal[bool]
-	inboxStatus       *core.Signal[string]
-	inboxConfirmDel   *core.Signal[bool]
-	inboxDeleteEntry  storage.InboxEntry
-	inboxTextOpen     *core.Signal[bool]
-	inboxPreviewEntry storage.InboxEntry
-	inboxBackScreen   string
-	inboxUploadMu     sync.Mutex
-	inboxUploadCancel context.CancelFunc
+	// Save history & share flow
+	sharesBusy            *core.Signal[bool]
+	shareMode             *core.Signal[string]
+	shareNotify           *core.Signal[bool]
+	shareFolderPickerOpen *core.Signal[bool]
+	shareFoldersLoading   *core.Signal[bool]
+	pendingShareEvents    []platform.ShareEvent
+	saveHistoryIDs        []string
+	saveHistoryItems      []model.ItemSummary
+	saveHistoryLoading    *core.Signal[bool]
+	saveHistoryStatus     *core.Signal[string]
+	inboxBackScreen       string
+	sharesRescan          bool
+	activeMobileShares    int
+	shareNotifyCount      int
+	shareNotifyFirst      string
+	shareNotifyTimer      *time.Timer
 
 	// Active file-picker upload
 	uploadStatus *core.Signal[string]
@@ -339,11 +344,13 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		quickOpen:            core.NewSignal(cx, false),
 		restoreOpen:          core.NewSignal(cx, false),
 		emptyTrashOpen:       core.NewSignal(cx, false),
-		sharesBusy:           core.NewSignal(cx, false),
-		inboxBusy:            core.NewSignal(cx, false),
-		inboxStatus:          core.NewSignal(cx, ""),
-		inboxConfirmDel:      core.NewSignal(cx, false),
-		inboxTextOpen:        core.NewSignal(cx, false),
+		sharesBusy:            core.NewSignal(cx, false),
+		shareMode:             core.NewSignal(cx, prefs.ShareMode),
+		shareNotify:           core.NewSignal(cx, !prefs.ShareNotifyDisabled),
+		shareFolderPickerOpen: core.NewSignal(cx, false),
+		shareFoldersLoading:   core.NewSignal(cx, false),
+		saveHistoryLoading:    core.NewSignal(cx, false),
+		saveHistoryStatus:     core.NewSignal(cx, ""),
 		uploadStatus:         core.NewSignal(cx, ""),
 		filterOpen:           core.NewSignal(cx, false),
 		filterDraftType:      core.NewSignal(cx, ""),
@@ -401,6 +408,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 				a.address.Set(session.BaseURL)
 				a.reloadShareTags()
 				a.reloadUsageIDs()
+				a.reloadSaveHistory()
 				a.screen.Set(screenGallery)
 				a.refreshGalleryView(cx, true)
 				a.loadSidebarData(cx)
@@ -489,7 +497,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 	}
 	a.post(func() {
 		a.runLegacyMigration(cx)
-		a.reloadInbox()
+		a.reloadSaveHistory()
 		if a.env.Share != nil {
 			a.consumeShares(cx)
 		}
@@ -525,6 +533,7 @@ func (a *App) Render(cx *core.Scope) core.Node {
 			}, Then: a.mainStack},
 			core.Show{When: func() bool { return a.screen.Get() == screenInbox }, Then: a.inboxPage},
 			core.Show{When: func() bool { return a.screen.Get() == screenSettings }, Then: a.settingsPage},
+			a.shareFolderPickerDialog(cx),
 			a.backGuard(cx),
 			a.previewMatchOverlay(cx),
 			core.Show{When: func() bool { return a.pluginsSyncing.Get() }, Then: func(cx *core.Scope) core.Node {
@@ -1367,7 +1376,7 @@ func (a *App) runLegacyMigration(cx *core.Scope) {
 			})
 		}
 		a.post(func() {
-			a.reloadInbox()
+			a.reloadSaveHistory()
 			a.reloadShareTags()
 			if paths.HasLegacySecure && a.session.Current() == nil {
 				a.legacyNotice.Set("检测到旧版客户端数据：收件箱与分享标记已保留迁移；旧版加密凭据格式不同，请重新扫码或输入地址配对。")

@@ -46,9 +46,9 @@ func (a *App) menuDialog(cx *core.Scope) core.Node {
 				if a.galleryFilter.String() != "" {
 					filterBadge = "已筛选"
 				}
-				inboxBadge := ""
-				if len(a.inboxEntries) > 0 {
-					inboxBadge = itoa(len(a.inboxEntries))
+				historySaveBadge := ""
+				if len(a.saveHistoryIDs) > 0 {
+					historySaveBadge = itoa(len(a.saveHistoryIDs))
 				}
 				layoutOptions := []nsui.Option[string]{
 					{Value: storage.LayoutAuto, Label: "自动"},
@@ -92,11 +92,11 @@ func (a *App) menuDialog(cx *core.Scope) core.Node {
 					}))
 				}
 				items = append(items,
-					row(lucide.Inbox, "收件箱", inboxBadge, false, func() {
+					row(lucide.Clock, "历史保存", historySaveBadge, false, func() {
 						a.menuOpen.Set(false)
 						a.inboxBackScreen = screenGallery
 						a.screen.Set(screenInbox)
-						a.consumeShares(cx)
+						a.loadSaveHistoryItems(cx)
 					}),
 					row(lucide.ArrowLeftRight, "切换资源库", a.libraryName(), false, func() {
 						a.menuOpen.Set(false)
@@ -132,7 +132,7 @@ func (a *App) disconnectDialog(cx *core.Scope) core.Node {
 		Open:         func() bool { return a.confirmDisc.Get() },
 		OnOpenChange: func(open bool, _ base.Reason) { a.confirmDisc.Set(open) },
 		Title:        "断开连接？",
-		Description:  "将返回连接页，保留历史记录与收件箱中的待上传内容。",
+		Description:  "将返回连接页，保留连接记录与本地历史保存记录。",
 		Footer: []core.Node{
 			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.confirmDisc.Set(false) }},
 			nsui.Button{Text: "断开", OnPress: func() {

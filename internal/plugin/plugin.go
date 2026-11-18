@@ -734,12 +734,23 @@ func (h *Host) Uninstall(id string) error {
 // Hook results -------------------------------------------------------------
 
 // ResolveResult is what resolveUrl returns.
-type ResolveResult struct {
+// ResolveItem represents one resolved media entry inside a multi-item result.
+type ResolveItem struct {
 	URL        string   `json:"url"`
-	Candidates []string `json:"candidates"`
-	SourceURL  string   `json:"sourceUrl"`
-	Name       string   `json:"name"`
-	Tags       []string `json:"tags"`
+	Candidates []string `json:"candidates,omitempty"`
+	SourceURL  string   `json:"sourceUrl,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+}
+
+type ResolveResult struct {
+	URL        string        `json:"url"`
+	Candidates []string      `json:"candidates"`
+	SourceURL  string        `json:"sourceUrl"`
+	Name       string        `json:"name"`
+	Tags       []string      `json:"tags"`
+	FolderName string        `json:"folderName,omitempty"`
+	Items      []ResolveItem `json:"items,omitempty"`
 }
 
 // InspectRow is one label/value row in an inspector section.
@@ -966,7 +977,7 @@ func (h *Host) Resolve(rawURL string) (*ResolveResult, string, error) {
 			lastErr = err
 			continue
 		}
-		if out.URL != "" || len(out.Candidates) > 0 {
+		if out.URL != "" || len(out.Candidates) > 0 || len(out.Items) > 0 {
 			return &out, p.Manifest.ID, nil
 		}
 	}
