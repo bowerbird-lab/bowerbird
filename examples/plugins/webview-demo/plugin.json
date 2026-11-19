@@ -5,6 +5,7 @@
   "kind": "action",
   "description": "用于验证插件窗口与本地 HTML 加载。",
   "author": "Bowerbird",
+  "settings": [{ "key": "message", "label": "测试文字", "default": "来自插件设置" }],
   "ui": {
     "windows": [{ "id": "demo", "title": "打开 WebView 测试", "entry": "ui/index.html" }]
   }

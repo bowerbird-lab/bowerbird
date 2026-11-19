@@ -17,8 +17,8 @@ func TestUISessionsIsolateAndRevoke(t *testing.T) {
 	a, b, unknown := new(int), new(int), new(int)
 	var sessions UISessions
 	allowed := true
-	sessions.Attach(a, dirA, func() bool { return allowed })
-	sessions.Attach(b, dirB, func() bool { return true })
+	sessions.Attach(a, dirA, func() bool { return allowed }, nil)
+	sessions.Attach(b, dirB, func() bool { return true }, nil)
 	check := func(page any, wantStatus int, want string) {
 		t.Helper()
 		w := httptest.NewRecorder()
