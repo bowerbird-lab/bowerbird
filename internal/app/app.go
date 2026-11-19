@@ -379,6 +379,7 @@ type App struct {
 	pluginSecretVisible map[string]bool
 	pluginUISessions    plugin.UISessions
 	pluginUIWindows     map[string]*mygo.Window
+	pluginScanning      bool
 	pendingInstall      *core.PluginInstallRequest
 
 	// Themes and their resolved palettes. Both variants are kept ready so

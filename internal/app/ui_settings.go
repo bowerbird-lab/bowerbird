@@ -822,6 +822,9 @@ func (a *App) settingsPlugins(c *ui.Context) {
 			a.dialogValue = ""
 			a.pendingInstall = a.svc.GetPendingPluginInstall()
 		}
+		if ui.Button(c.Key("plugin-refresh"), a.t("settings.plugins.refresh")).Disabled(a.pluginScanning || a.pluginHost == nil).Clicked() {
+			a.rescanPlugins()
+		}
 		if ui.Button(c, a.t("settings.plugins.openFolder")).Clicked() {
 			_ = a.svc.OpenPluginsFolder()
 		}
@@ -928,6 +931,25 @@ func (a *App) settingsPlugins(c *ui.Context) {
 			})
 		})
 	}
+}
+
+// rescanPlugins discovers manually added or removed plugins without blocking the settings UI.
+func (a *App) rescanPlugins() {
+	if a.pluginHost == nil || a.pluginScanning {
+		return
+	}
+	a.pluginScanning = true
+	go func() {
+		a.pluginHost.Scan()
+		var installed []core.InstalledPlugin
+		if a.svc != nil {
+			installed, _ = a.svc.ListInstalledPlugins()
+		}
+		a.postSettings(func() {
+			a.plugins = a.pluginRows(installed)
+			a.pluginScanning = false
+		})
+	}()
 }
 
 // openPluginStore opens the marketplace detail page for one plugin.
