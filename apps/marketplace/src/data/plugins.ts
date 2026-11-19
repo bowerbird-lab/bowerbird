@@ -8,6 +8,10 @@ export interface PluginVersionHistory {
 }
 
 export interface MarketplacePlugin extends PluginManifest {
+  kind: PluginKind;
+  description: string;
+  author: string;
+  extensions: string[];
   manifestUrl: string;
   downloadUrl: string;
   iconName: "file-text" | "music" | "table" | "camera" | "box" | "sparkles" | "code" | "database" | "palette" | "image" | "video" | string;
@@ -463,8 +467,8 @@ export const PLUGIN_CATEGORIES_CONFIG = [
   { id: "data", name: "数据与表格", enName: "Data & Tables", icon: "Table" },
 ] as const;
 
-export function getAllPlugins(options?: { category?: string }): MarketplacePlugin[] {
-  const catalog = mergeBuiltinPlugins(INITIAL_OFFICIAL_PLUGINS);
+export function getAllPlugins(options?: { category?: string; catalog?: MarketplacePlugin[] }): MarketplacePlugin[] {
+  const catalog = options?.catalog ?? mergeBuiltinPlugins(INITIAL_OFFICIAL_PLUGINS);
   if (!options || !options.category || options.category === "all" || options.category === "全部") {
     return catalog;
   }
@@ -481,8 +485,8 @@ export function getPluginById(id: string): MarketplacePlugin | undefined {
   return mergeBuiltinPlugins(INITIAL_OFFICIAL_PLUGINS).find((p) => p.id === id);
 }
 
-export function searchPlugins(query: string, category?: string): MarketplacePlugin[] {
-  let list = getAllPlugins(category ? { category } : undefined);
+export function searchPlugins(query: string, category?: string, catalog?: MarketplacePlugin[]): MarketplacePlugin[] {
+  let list = getAllPlugins({ category, catalog });
   if (!query || !query.trim()) return list;
 
   const q = query.toLowerCase().trim();
@@ -515,7 +519,24 @@ export function usePluginsCatalog(): {
       if (res.ok) {
         const data = (await res.json()) as { plugins: MarketplacePlugin[] };
         if (Array.isArray(data.plugins) && data.plugins.length > 0) {
-          setPlugins(mergeBuiltinPlugins(data.plugins));
+          const normalized = data.plugins.map((plugin) => {
+            const fallback = INITIAL_OFFICIAL_PLUGINS.find((item) => item.id === plugin.id);
+            return {
+              ...fallback,
+              ...plugin,
+              kind: plugin.kind || fallback?.kind || "action",
+              description: plugin.description || fallback?.description || "",
+              author: plugin.author || fallback?.author || "",
+              category: plugin.category || fallback?.category || plugin.kind || "action",
+              extensions: plugin.extensions || [],
+              iconName: plugin.iconName || fallback?.iconName || "box",
+              longDescription: plugin.longDescription || fallback?.longDescription || plugin.description || "",
+              changelog: plugin.changelog || fallback?.changelog || [],
+              downloadsCount: plugin.downloadsCount ?? fallback?.downloadsCount ?? 0,
+              rating: plugin.rating ?? fallback?.rating ?? 0,
+            };
+          });
+          setPlugins(mergeBuiltinPlugins(normalized));
         }
       }
     } catch {

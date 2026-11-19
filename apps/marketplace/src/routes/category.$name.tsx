@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import * as React from "react";
 import { ChevronRight, BookOpen, Star } from "lucide-react";
-import { getAllPlugins, PLUGIN_CATEGORIES_CONFIG, type MarketplacePlugin } from "../data/plugins";
+import { getAllPlugins, usePluginsCatalog, PLUGIN_CATEGORIES_CONFIG, type MarketplacePlugin } from "../data/plugins";
 import { getPluginIcon } from "../components/plugin-icon";
 import { BuiltinBadge } from "../components/builtin-badge";
 import { PluginActionButton } from "../components/plugin-action-button";
@@ -35,9 +35,10 @@ export function CategoryPage() {
         : categoryItem.enName
       : decoded;
 
+  const { plugins: catalog } = usePluginsCatalog();
   const plugins = React.useMemo(() => {
-    return getAllPlugins({ category: categoryParam });
-  }, [categoryParam]);
+    return getAllPlugins({ category: categoryParam, catalog });
+  }, [categoryParam, catalog]);
 
   const featuredSlice = plugins.slice(0, 8);
   const topRankSlice =

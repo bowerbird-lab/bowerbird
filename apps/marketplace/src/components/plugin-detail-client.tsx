@@ -112,7 +112,7 @@ export function PluginDetailClient({ plugin, otherPlugins = [] }: Props) {
                 <span className="font-mono">v{plugin.version}</span>
                 <span>•</span>
                 <span className="px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground font-medium border border-border">
-                  {plugin.kind === "preview" ? "预览扩展" : "元数据透视"}
+                  {({ preview: "预览扩展", metadata: "元数据透视", resolver: "链接解析", action: "操作扩展" } as Record<string, string>)[plugin.kind] || plugin.kind}
                 </span>
                 {plugin.rating > 0 && (
                   <>

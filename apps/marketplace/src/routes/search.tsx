@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import * as React from "react";
 import { Sparkles, Search as SearchIcon, X, BookOpen } from "lucide-react";
-import { searchPlugins } from "../data/plugins";
+import { searchPlugins, usePluginsCatalog } from "../data/plugins";
 import { SearchCard } from "../components/search-card";
 import { useI18n } from "../lib/i18n";
 
@@ -29,10 +29,11 @@ export function SearchPage() {
     setInputVal(q || "");
   }, [q]);
 
+  const { plugins: catalog } = usePluginsCatalog();
   const query = (q || "").trim();
   const plugins = React.useMemo(() => {
-    return searchPlugins(query);
-  }, [query]);
+    return searchPlugins(query, undefined, catalog);
+  }, [query, catalog]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
