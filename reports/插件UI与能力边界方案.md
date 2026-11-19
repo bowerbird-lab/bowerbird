@@ -130,6 +130,12 @@ await bowerbird.windows.open("studio");
 5. **Mage 插件迁移**：在插件仓库实现并发布新版本，在 App 中删除专用实现；保留通用素材版本能力。
 6. **Native 后续**：根据真实插件场景再评估声明式原生 UI 或其他方案，不把 WebView 插件强制迁移。
 
+## WebView 实施记录
+
+当前工作分支已实现插件目录的静态资源处理器和页面会话隔离基础，但尚未将其注册到 WebView，也尚未开放插件 UI。资源处理器使用 Go `os.Root` 限定目录并拒绝目录遍历和越界符号链接；会话由宿主传入的页面身份绑定插件目录，不接受插件通过 URL 指定身份。测试覆盖隔离、撤销和路径逃逸。
+
+mygo v0.9.2 的 `PageOptions.Untrusted` 禁止绑定 Go 方法；`Protocol.Handle` 可通过 `CallerPage` 识别页面，可用于下一阶段设计桥接。`ContentRules` 文档明确指出 Windows 上 WebSocket 不受该机制拦截，不能把 content rules 当成完整网络隔离；启用前必须结合 CSP 和平台实测，任何不能可靠约束网络的路径都不开放。
+
 ## 验收
 
 - 无需修改 App 即可安装新的 HTML 插件并在检查器或独立窗口显示；卸载和禁用后入口消失。
