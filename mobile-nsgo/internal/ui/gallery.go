@@ -388,8 +388,13 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 			}
 			snap := g.Snapshot()
 			entries := a.buildNativeGridEntries(snap.Items, false, from)
+			if !isSearch {
+				if subEntries := a.buildNativeSubfolderEntries(); len(subEntries) > 0 {
+					entries = append(subEntries, entries...)
+				}
+			}
 			emptyText := ""
-			if len(snap.Items) == 0 {
+			if len(entries) == 0 {
 				if isSearch {
 					if snap.Loading {
 						emptyText = "查询中…"
@@ -493,9 +498,54 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 				if idx >= 0 && idx < len(items) {
 					a.openQuickPreview(items[idx], idx)
 				}
+			case "toggleSubfolders":
+				if !isSearch {
+					a.subfoldersCollapsed = !a.subfoldersCollapsed
+					a.rebuildGalleryRows()
+					a.bump()
+				}
+			case "pressFolder":
+				if !isSearch {
+					if id := nativeStr(m, "id"); id != "" {
+						a.selectFolder(cx, id)
+					}
+				}
 			}
 		},
 	}
+}
+
+func (a *App) buildNativeSubfolderEntries() []map[string]any {
+	subfolders := a.currentSubfolders()
+	if len(subfolders) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, 1+len(subfolders))
+	out = append(out, map[string]any{
+		"kind":      "folder_header",
+		"key":       "folder_header:" + a.activeFolderID,
+		"title":     "子文件夹 (" + itoa(len(subfolders)) + ")",
+		"count":     len(subfolders),
+		"collapsed": a.subfoldersCollapsed,
+	})
+	if a.subfoldersCollapsed {
+		return out
+	}
+	for _, f := range subfolders {
+		thumbs := a.folderPreviews[f.ID]
+		if len(thumbs) > 4 {
+			thumbs = thumbs[:4]
+		}
+		out = append(out, map[string]any{
+			"kind":      "folder",
+			"key":       "folder:" + f.ID,
+			"id":        f.ID,
+			"title":     f.Name,
+			"count":     f.ItemCount,
+			"thumbUrls": thumbs,
+		})
+	}
+	return out
 }
 
 func (a *App) buildNativeGridEntries(items []model.ItemSummary, monthGrouped bool, from string) []map[string]any {
@@ -653,6 +703,16 @@ func (a *App) galleryListRow(cx *core.Scope, isSearch bool, row core.ListRow, fr
 		return ok && r.Kind == RowMonthHeader
 	}
 
+	isFolderHeader := func() bool {
+		r, ok := rowAt()
+		return ok && r.Kind == RowFolderHeader
+	}
+
+	isFolderGroup := func() bool {
+		r, ok := rowAt()
+		return ok && r.Kind == RowFolderGroup
+	}
+
 	headerNode := func(cx *core.Scope) core.Node {
 		return core.View{
 			Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifySpaceBetween,
@@ -670,28 +730,193 @@ func (a *App) galleryListRow(cx *core.Scope, isSearch bool, row core.ListRow, fr
 		}
 	}
 
+	folderHeaderNode := func(cx *core.Scope) core.Node {
+		return core.View{
+			TestID: "gallery.subfolders.toggle",
+			Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6,
+				Padding: core.Edges{Top: 8, Bottom: 4, Left: 2, Right: 2}},
+			OnPress: func(core.PressEvent) {
+				a.subfoldersCollapsed = !a.subfoldersCollapsed
+				a.rebuildGalleryRows()
+				a.bump()
+			},
+			Children: []core.Node{
+				core.Show{
+					When: func() bool { r, _ := rowAt(); return r.Collapsed },
+					Then: func(cx *core.Scope) core.Node { return nsui.Icon(lucide.ChevronRight, 14, colors.Muted) },
+					Else: func(cx *core.Scope) core.Node { return nsui.Icon(lucide.ChevronDown, 14, colors.Muted) },
+				},
+				core.Text{ContentFunc: func() string {
+					r, _ := rowAt()
+					return r.Title
+				}, Style: nsui.TypeLabel.Merge(core.Style{Color: colors.Text()})},
+			},
+		}
+	}
+
+	folderGroupNode := func(cx *core.Scope) core.Node {
+		return core.Dynamic(func(cx *core.Scope) core.Node {
+			cols := a.effectiveGridCols()
+			slots := make([]core.Node, 0, cols)
+			for slotIdx := 0; slotIdx < cols; slotIdx++ {
+				si := slotIdx
+				folderAt := func() (model.Folder, bool) {
+					r, ok := rowAt()
+					if !ok || r.Kind != RowFolderGroup || si >= len(r.Folders) {
+						return model.Folder{}, false
+					}
+					return r.Folders[si], true
+				}
+				slots = append(slots, a.folderCardTile(cx, folderAt))
+			}
+			return core.View{
+				Style:    core.Style{Direction: core.Row, Gap: 6},
+				Children: slots,
+			}
+		})
+	}
+
 	return core.View{
 		Children: []core.Node{
 			core.Show{When: isHeader, Then: headerNode, Else: func(cx *core.Scope) core.Node {
-				return core.Dynamic(func(cx *core.Scope) core.Node {
-					cols := a.effectiveGridCols()
-					slots := make([]core.Node, 0, cols)
-					for slotIdx := 0; slotIdx < cols; slotIdx++ {
-						si := slotIdx
-						slotAt := func() (TileSlot, bool) {
-							r, ok := rowAt()
-							if !ok || r.Kind != RowTileGroup || si >= len(r.Slots) {
-								return TileSlot{}, false
+				return core.Show{When: isFolderHeader, Then: folderHeaderNode, Else: func(cx *core.Scope) core.Node {
+					return core.Show{When: isFolderGroup, Then: folderGroupNode, Else: func(cx *core.Scope) core.Node {
+						return core.Dynamic(func(cx *core.Scope) core.Node {
+							cols := a.effectiveGridCols()
+							slots := make([]core.Node, 0, cols)
+							for slotIdx := 0; slotIdx < cols; slotIdx++ {
+								si := slotIdx
+								slotAt := func() (TileSlot, bool) {
+									r, ok := rowAt()
+									if !ok || r.Kind != RowTileGroup || si >= len(r.Slots) {
+										return TileSlot{}, false
+									}
+									return r.Slots[si], true
+								}
+								slots = append(slots, a.slotTile(cx, slotAt, from))
 							}
-							return r.Slots[si], true
+							return core.View{
+								Style:    core.Style{Direction: core.Row, Gap: 6},
+								Children: slots,
+							}
+						})
+					}}
+				}}
+			}},
+		},
+	}
+}
+
+func (a *App) folderCardTile(cx *core.Scope, folderAt func() (model.Folder, bool)) core.Node {
+	colors := nsui.ColorsOf(cx)
+	hasFolder := func() bool { _, ok := folderAt(); return ok }
+
+	return core.View{
+		StyleFunc: func() core.Style {
+			a.galleryRev.Get()
+			size := a.cachedTileSize
+			return core.Style{
+				Width: core.Pt(size), Height: core.Pt(size),
+			}
+		},
+		Children: []core.Node{
+			core.Show{When: hasFolder, Then: func(cx *core.Scope) core.Node {
+				return core.View{
+					TestID: "gallery.folder",
+					StyleFunc: func() core.Style {
+						return core.Style{
+							Width: core.Pct(100), Height: core.Pct(100),
+							Padding: core.All(5), Gap: 4, CornerRadius: 10,
+							Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
 						}
-						slots = append(slots, a.slotTile(cx, slotAt, from))
-					}
-					return core.View{
-						Style:    core.Style{Direction: core.Row, Gap: 6},
-						Children: slots,
-					}
-				})
+					},
+					OnPress: func(core.PressEvent) {
+						if f, ok := folderAt(); ok {
+							a.selectFolder(cx, f.ID)
+						}
+					},
+					Children: []core.Node{
+						core.Dynamic(func(cx *core.Scope) core.Node {
+							f, ok := folderAt()
+							if !ok {
+								return core.View{Style: core.Style{FlexGrow: 1}}
+							}
+							urls := a.folderPreviews[f.ID]
+							var previewBody core.Node
+							switch len(urls) {
+							case 0:
+								previewBody = core.View{
+									Style:    core.Style{Width: core.Pct(100), Height: core.Pct(100), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
+									Children: []core.Node{nsui.Icon(lucide.Folder, 24, colors.Accent)},
+								}
+							case 1:
+								previewBody = core.Image{
+									Source:     core.Src(urls[0]),
+									ResizeMode: core.Cover,
+									Style:      core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+								}
+							default:
+								gridCell := func(idx int) core.Node {
+									if idx < len(urls) {
+										return core.Image{
+											Source:     core.Src(urls[idx]),
+											ResizeMode: core.Cover,
+											Style:      core.Style{FlexGrow: 1, FlexShrink: 1, Height: core.Pct(100)},
+										}
+									}
+									return core.View{
+										StyleFunc: func() core.Style {
+											return core.Style{FlexGrow: 1, FlexShrink: 1, Height: core.Pct(100), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Background: colors.Hover()}
+										},
+										Children: []core.Node{nsui.Icon(lucide.Folder, 12, colors.Faint)},
+									}
+								}
+								previewBody = core.View{
+									Style: core.Style{Width: core.Pct(100), Height: core.Pct(100), Gap: 1},
+									Children: []core.Node{
+										core.View{Style: core.Style{Direction: core.Row, FlexGrow: 1, Gap: 1}, Children: []core.Node{gridCell(0), gridCell(1)}},
+										core.View{Style: core.Style{Direction: core.Row, FlexGrow: 1, Gap: 1}, Children: []core.Node{gridCell(2), gridCell(3)}},
+									},
+								}
+							}
+							return core.View{
+								StyleFunc: func() core.Style {
+									return core.Style{
+										Width: core.Pct(100), FlexGrow: 1, MinHeight: core.Pt(0),
+										CornerRadius: 6, Overflow: core.Hidden, Background: colors.Inset(),
+									}
+								},
+								Children: []core.Node{previewBody},
+							}
+						}),
+						core.View{
+							Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4, Height: core.Pt(18)},
+							Children: []core.Node{
+								nsui.Icon(lucide.Folder, 12, colors.Muted),
+								core.Text{
+									ContentFunc: func() string {
+										if f, ok := folderAt(); ok {
+											return f.Name
+										}
+										return ""
+									},
+									MaxLines:  1,
+									Style:     nsui.TypeCaption.Merge(core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}),
+									StyleFunc: nsui.Colored(colors.Text),
+								},
+								core.Text{
+									ContentFunc: func() string {
+										if f, ok := folderAt(); ok {
+											return itoa(f.ItemCount)
+										}
+										return ""
+									},
+									Style:     core.Style{FontSize: 10, Color: colors.Faint()},
+								},
+							},
+						},
+					},
+				}
 			}},
 		},
 	}

@@ -57,9 +57,11 @@ type App struct {
 	detailFrom    string
 
 	// Sidebar & library navigation
-	sidebarView     SidebarView
-	activeFolderID  string
-	expandedFolders map[string]bool
+	sidebarView         SidebarView
+	activeFolderID      string
+	expandedFolders     map[string]bool
+	subfoldersCollapsed bool
+	folderPreviews      map[string][]string
 	drawerOpen      *core.Signal[bool]
 	drawerDragging  *core.Signal[bool]
 	drawerPos       *core.Signal[core.Points]
@@ -386,6 +388,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		toast:                core.NewSignal(cx, ""),
 		sidebarView:          SidebarAll,
 		expandedFolders:      map[string]bool{},
+		folderPreviews:       map[string][]string{},
 		shareTagIDs:          map[string]bool{},
 		shareTagHexes:        map[string]bool{},
 	}
@@ -715,7 +718,11 @@ func (a *App) bumpGallery()                     { a.galleryRev.Update(func(v int
 
 func (a *App) rebuildGalleryRows() {
 	snap := a.gallery.Snapshot()
-	a.cachedRows = BuildFlatRows(snap.Items, a.effectiveGridCols())
+	if a.sidebarView == SidebarFolder && a.activeFolderID != "" {
+		a.cachedRows = BuildGalleryRows(a.currentSubfolders(), a.subfoldersCollapsed, snap.Items, a.effectiveGridCols())
+	} else {
+		a.cachedRows = BuildFlatRows(snap.Items, a.effectiveGridCols())
+	}
 	a.bumpGallery()
 }
 
@@ -773,6 +780,93 @@ func (a *App) selectFolder(cx *core.Scope, folderID string) {
 	a.activeFolderID = folderID
 	a.bump()
 	a.refreshGalleryView(cx, true)
+	a.fetchSubfolderPreviews(cx, folderID)
+}
+
+func (a *App) currentUploadFolderID() string {
+	if a.sidebarView == SidebarFolder {
+		return a.activeFolderID
+	}
+	return ""
+}
+
+func (a *App) findFolderByID(id string) (model.Folder, bool) {
+	if id == "" {
+		return model.Folder{}, false
+	}
+	var walk func(list []model.Folder) (model.Folder, bool)
+	walk = func(list []model.Folder) (model.Folder, bool) {
+		for _, f := range list {
+			if f.ID == id {
+				return f, true
+			}
+			if found, ok := walk(f.Children); ok {
+				return found, true
+			}
+		}
+		return model.Folder{}, false
+	}
+	return walk(a.folders)
+}
+
+func (a *App) currentSubfolders() []model.Folder {
+	if a.sidebarView != SidebarFolder || a.activeFolderID == "" {
+		return nil
+	}
+	f, ok := a.findFolderByID(a.activeFolderID)
+	if !ok || len(f.Children) == 0 {
+		return nil
+	}
+	return f.Children
+}
+
+func (a *App) fetchSubfolderPreviews(cx *core.Scope, folderID string) {
+	if a.session.Current() == nil || folderID == "" {
+		return
+	}
+	f, ok := a.findFolderByID(folderID)
+	if !ok || len(f.Children) == 0 {
+		return
+	}
+	children := make([]model.Folder, len(f.Children))
+	copy(children, f.Children)
+	go func() {
+		ctx, cancel := context.WithTimeout(a.rootCtx(), 15*time.Second)
+		defer cancel()
+		results := make(map[string][]string, len(children))
+		for _, child := range children {
+			if ctx.Err() != nil {
+				return
+			}
+			if child.ItemCount == 0 {
+				results[child.ID] = nil
+				continue
+			}
+			page, err := a.client.List(ctx, query.Spec{Folder: child.ID}, model.SortDesc, 0, 4)
+			if err != nil {
+				continue
+			}
+			urls := make([]string, 0, len(page.Items))
+			for _, it := range page.Items {
+				u := a.client.MediaURL(it.ThumbnailURL)
+				if u == "" {
+					u = a.client.ThumbURL(it.ID)
+				}
+				if u != "" {
+					urls = append(urls, u)
+				}
+			}
+			results[child.ID] = urls
+		}
+		a.post(func() {
+			for id, urls := range results {
+				a.folderPreviews[id] = urls
+			}
+			if a.sidebarView == SidebarFolder && a.activeFolderID == folderID {
+				a.rebuildGalleryRows()
+			}
+		})
+	}()
 }
 
 func (a *App) ensureLoaded(cx *core.Scope) {
@@ -786,6 +880,7 @@ func (a *App) ensureLoaded(cx *core.Scope) {
 func (a *App) refreshGalleryView(cx *core.Scope, jumpTop bool) {
 	spec := a.effectiveGallerySpec()
 	token := a.gallery.Reset(spec, model.SortDesc, model.DefaultPageSize)
+	a.rebuildGalleryRows()
 	a.bump()
 	a.fetchGalleryPage(cx, token, a.sidebarView, spec, 0, model.DefaultPageSize, false, jumpTop)
 }
@@ -920,6 +1015,10 @@ func (a *App) loadSidebarData(cx *core.Scope) {
 			}
 			if foldersErr == nil {
 				a.folders = folders
+				if a.sidebarView == SidebarFolder && a.activeFolderID != "" {
+					a.rebuildGalleryRows()
+					a.fetchSubfolderPreviews(cx, a.activeFolderID)
+				}
 			}
 			if tagsErr == nil {
 				a.tags = tags
@@ -1013,6 +1112,8 @@ func (a *App) invalidateForLibraryChange(cx *core.Scope) {
 	a.activeFolderID = ""
 	a.galleryFilter = query.Spec{}
 	a.folders = nil
+	clear(a.folderPreviews)
+	a.subfoldersCollapsed = false
 	a.tags = nil
 	a.colors = nil
 	a.stats = model.Stats{}
@@ -1040,6 +1141,8 @@ func (a *App) resetSessionState() {
 	a.cachedSearchRows = nil
 	a.bumpGallery()
 	a.folders = nil
+	clear(a.folderPreviews)
+	a.subfoldersCollapsed = false
 	a.tags = nil
 	a.colors = nil
 	a.libs = nil
@@ -1256,6 +1359,7 @@ func (a *App) pickAndUpload(cx *core.Scope) {
 		a.showToast("请先连接桌面端")
 		return
 	}
+	folderID := a.currentUploadFolderID()
 	cx.PickFiles(core.PickFilesOptions{
 		Multiple: true,
 		Types:    []string{"image/*", "video/*", "audio/*"},
@@ -1283,7 +1387,7 @@ func (a *App) pickAndUpload(cx *core.Scope) {
 				}
 				a.post(func() { a.uploadStatus.Set("正在上传 " + itoa(i+1) + "/" + itoa(len(files)) + "：" + f.Name) })
 				itemCtx, itemCancel := context.WithTimeout(ctx, 5*time.Minute)
-				_, upErr := a.client.UploadFile(itemCtx, f.Path)
+				_, upErr := a.client.UploadFileToFolder(itemCtx, f.Path, folderID)
 				itemCancel()
 				if upErr != nil {
 					lastErr = upErr
