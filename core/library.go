@@ -1066,6 +1066,7 @@ func (m *LibraryManager) GetItem(id string) (*Item, error) {
 		if it, ok := m.itemsByID[id]; ok {
 			copyIt := it
 			m.cacheMu.RUnlock()
+			copyIt.Versions = readItemVersions(copyIt.ItemPath)
 			return &copyIt, nil
 		}
 		m.cacheMu.RUnlock()
@@ -1141,6 +1142,7 @@ func (m *LibraryManager) GetItem(id string) (*Item, error) {
 		fRows.Close()
 	}
 	m.populateItemPaths(&item, active.Path, port)
+	item.Versions = readItemVersions(item.ItemPath)
 	return &item, nil
 }
 

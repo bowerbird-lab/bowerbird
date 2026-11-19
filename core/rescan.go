@@ -146,6 +146,27 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 		var assetPath string
 		var existingThumbPath string
 		var hasMetaFile bool
+		var preloadedMeta *ItemMetadata
+		backupNames := map[string]bool{}
+
+		if raw, rErr := os.ReadFile(filepath.Join(itemDir, itemMetadataName)); rErr == nil {
+			var parsed ItemMetadata
+			if json.Unmarshal(raw, &parsed) == nil {
+				preloadedMeta = &parsed
+				hasMetaFile = true
+				for _, v := range parsed.Versions {
+					if v.Filename != "" {
+						backupNames[strings.ToLower(v.Filename)] = true
+					}
+				}
+				if parsed.Filename != "" {
+					cand := filepath.Join(itemDir, parsed.Filename)
+					if st, stErr := os.Stat(cand); stErr == nil && st.Mode().IsRegular() {
+						assetPath = cand
+					}
+				}
+			}
+		}
 
 		for _, de := range dirEntries {
 			name := de.Name()
@@ -165,13 +186,14 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 				hasMetaFile = true
 				continue
 			}
-			if isRescanBookkeepingFile(name) {
+			if isRescanBookkeepingFile(name) || backupNames[lower] || isVersionBackupFilename(name) {
 				continue
 			}
 			if assetPath == "" {
 				assetPath = filepath.Join(itemDir, name)
 			}
 		}
+		_ = preloadedMeta
 
 		if assetPath == "" {
 			continue

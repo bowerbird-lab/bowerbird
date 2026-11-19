@@ -119,6 +119,12 @@ func (a *App) viewHeader(c *ui.Context) {
 			ui.Box(c).Grow(1)
 		}
 
+		if a.aiEditPlugin() != nil {
+			a.iconButton(c, "ai-editor-open", iconSparkles, a.aiEditorWin != nil, a.t("aiEditor.openWindow"), func() {
+				a.openAIEditorWindow(a.activeItem)
+			})
+		}
+
 		a.viewSearchField(c)
 	}, func() {
 		ui.Row(c).FillWidth().Height(headerSecondRowHeight).Padding(0, 12).Gap(8).AlignItems(ui.Center).DragWindow().Children(func() {

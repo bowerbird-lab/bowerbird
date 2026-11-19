@@ -142,6 +142,8 @@ func (h *appHost) newWindow(spec core.WindowSpec) *mygo.Window {
 		h.views.SetLogsWindow(w)
 	case "setup":
 		h.views.SetSetupWindow(w)
+	case "ai-editor":
+		h.views.SetAIEditorWindow(w)
 	}
 	return w
 }
@@ -449,6 +451,8 @@ func (h *appHost) windowOptions(spec core.WindowSpec) mygo.WindowOptions {
 	case "setup":
 		opts.Content = h.views.SetupContent()
 		opts.Frameless = true
+	case "ai-editor":
+		opts.Content = h.views.AIEditorContent()
 	default:
 		opts.Content = h.views.MainContent()
 	}

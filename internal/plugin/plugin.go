@@ -133,8 +133,8 @@ func NewHost(baseDir string) *Host {
 		plugins:    map[string]*Plugin{},
 		states:     map[string]pluginState{},
 		indexPath:  filepath.Join(baseDir, "native-plugins.json"),
-		timeout:    30 * time.Second,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		timeout:    60 * time.Second,
+		httpClient: &http.Client{Timeout: 60 * time.Second},
 		modules:    map[string]cachedModule{},
 	}
 	_ = os.MkdirAll(baseDir, 0o755)
@@ -1028,19 +1028,70 @@ func (h *Host) Actions(ctx ItemContext) []Action {
 	return out
 }
 
+// FindByCapability returns the first enabled plugin that advertises the given
+// capability string in its manifest (e.g. "ai-image-edit").
+func (h *Host) FindByCapability(capability string) *Plugin {
+	capability = strings.TrimSpace(capability)
+	if capability == "" {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var best *Plugin
+	for _, p := range h.plugins {
+		if !p.Enabled {
+			continue
+		}
+		matched := false
+		for _, capName := range p.Manifest.Capabilities {
+			if strings.EqualFold(strings.TrimSpace(capName), capability) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		if best == nil || p.Manifest.Priority > best.Manifest.Priority ||
+			(p.Manifest.Priority == best.Manifest.Priority && p.Manifest.ID < best.Manifest.ID) {
+			best = p
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	cp := *best
+	return &cp
+}
+
 // RunAction executes a previously advertised action.
 func (h *Host) RunAction(id string, ctx ItemContext) error {
 	pluginID, actionID, ok := strings.Cut(id, ":")
 	if !ok {
 		return errors.New("invalid action id")
 	}
+	return h.CallAction(pluginID, actionID, map[string]any{
+		"items":  ctx.Items,
+		"item":   ctx.Item,
+		"folder": ctx.Folder,
+	}, nil)
+}
+
+// CallAction invokes a plugin's runAction hook with arbitrary JSON parameters
+// and decodes the returned JSON value into out (when non-nil).
+func (h *Host) CallAction(pluginID, actionID string, params map[string]any, out any) error {
 	p, found := h.Get(pluginID)
 	if !found || !p.Enabled || p.Manifest.Main == "" || !hasHook(p.Manifest, "runAction") {
 		return errors.New("plugin action is not declared")
 	}
-	payload := map[string]any{"id": actionID, "items": ctx.Items, "item": ctx.Item, "folder": ctx.Folder}
-	var out any
-	return h.call(p, "runAction", payload, &out)
+	payload := map[string]any{"id": actionID}
+	for k, v := range params {
+		if k == "id" {
+			continue
+		}
+		payload[k] = v
+	}
+	return h.call(p, "runAction", payload, out)
 }
 
 // CanGenerateThumbnail reports whether an enabled JS plugin advertises the

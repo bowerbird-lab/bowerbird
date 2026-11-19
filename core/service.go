@@ -685,6 +685,66 @@ func (s *Service) UpdateItemDetails(id string, note string, rawURL string, ratin
 	return s.mgr.UpdateItemDetails(id, note, rawURL, rating, prompt)
 }
 
+// GetItemVersions returns historical backups stored in items/<id>/metadata.json.
+func (s *Service) GetItemVersions(itemID string) ([]ItemVersion, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.GetItemVersions(itemID)
+}
+
+// SaveNewItemFromBytes imports generated image bytes as a new library item.
+func (s *Service) SaveNewItemFromBytes(data []byte, filename string, opts ImportItemOptions) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.SaveNewItemFromBytes(data, filename, opts)
+}
+
+// ReplaceItemWithBackup overwrites an item's active file while keeping the old
+// version in the same directory and recording it in metadata.json.
+func (s *Service) ReplaceItemWithBackup(itemID string, newData []byte, opts ReplaceItemOptions) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.ReplaceItemWithBackup(itemID, newData, opts)
+}
+
+// RestoreItemVersion swaps a backed-up version back to be the active file.
+func (s *Service) RestoreItemVersion(itemID string, versionID string) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.RestoreItemVersion(itemID, versionID)
+}
+
+// DeleteItemVersion permanently deletes a backed-up historical version.
+func (s *Service) DeleteItemVersion(itemID string, versionID string) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.DeleteItemVersion(itemID, versionID)
+}
+
+// OpenAIEditorWindow opens or focuses the standalone AI image editor window.
+func (s *Service) OpenAIEditorWindow() error {
+	host := s.getHost()
+	if host == nil {
+		return ErrAppNotInitialized
+	}
+	return host.OpenWindow(WindowSpec{
+		Name:           "ai-editor",
+		Title:          "AI Image Studio",
+		URL:            "/#/ai-editor",
+		Width:          980,
+		Height:         700,
+		MinWidth:       780,
+		MinHeight:      560,
+		TitleBarHidden: true,
+		TitleBarHeight: 44,
+	})
+}
+
 func (s *Service) OpenExternalURL(rawURL string) error {
 	return OpenExternalURL(rawURL)
 }
