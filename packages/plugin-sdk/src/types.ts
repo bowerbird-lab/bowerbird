@@ -122,7 +122,12 @@ export interface PluginManifest {
 
   permissions?: PluginPermissions;
   /** HTML UI contributions; requires a host version that supports plugin WebViews. */
-  ui?: { panels?: PluginUIEntry[]; windows?: PluginUIEntry[] };
+  ui?: {
+    panels?: PluginUIEntry[];
+    windows?: PluginUIEntry[];
+    /** Buttons in an asset's details panel; opens a declared plugin window. */
+    inspector?: Array<{ id: string; type: "window"; title: string; window: string }>;
+  };
   settings?: PluginSetting[];
 
   /** Hooks implemented by `main`. Purely informational for native plugins. */

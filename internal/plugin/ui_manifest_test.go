@@ -23,6 +23,27 @@ func TestScanFindsUIOnlyPlugin(t *testing.T) {
 	}
 }
 
+func TestInspectorPluginMatchesItem(t *testing.T) {
+	p := Plugin{Manifest: Manifest{Extensions: []string{"png"}, MimePrefixes: []string{"image/"}}}
+	if !p.MatchesItem("png", "image/png") || !p.MatchesItem("webp", "image/webp") || p.MatchesItem("mp3", "audio/mpeg") {
+		t.Fatal("inspector asset matching is incorrect")
+	}
+	if !(&Plugin{}).MatchesItem("txt", "text/plain") {
+		t.Fatal("unfiltered action should match")
+	}
+}
+
+func TestInspectorActionsValidateWindow(t *testing.T) {
+	base := Manifest{ID: "example.ui", Name: "Example", Version: "1", UI: PluginUI{Windows: []PluginUIEntry{{ID: "studio", Entry: "ui/index.html"}}, Inspector: []PluginInspectorAction{{ID: "edit", Type: "window", Title: "Edit", Window: "studio"}}}}
+	if err := validateManifest(&base); err != nil {
+		t.Fatal(err)
+	}
+	base.UI.Inspector[0].Window = "missing"
+	if err := validateManifest(&base); err == nil {
+		t.Fatal("expected unknown window to be rejected")
+	}
+}
+
 func TestPluginUIEntriesValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

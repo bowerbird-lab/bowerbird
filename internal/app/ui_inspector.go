@@ -193,6 +193,9 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 			a.openPreview(item.ID, "inline")
 		}
 
+		// Plugin-declared actions receive this item when opening their window.
+		a.viewInspectorPluginActions(c, item)
+
 		// File name, edited inline.
 		ui.TextInput(c.Key("rename"), &a.renameValue).FontSize(14).FontWeight(600).OnSubmit(func() {
 			name := strings.TrimSpace(a.renameValue)
@@ -367,6 +370,30 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 			a.inspectorAudio(c, item)
 		}
 	})
+}
+
+func (a *App) viewInspectorPluginActions(c *ui.Context, item core.Item) {
+	if a.pluginHost == nil {
+		return
+	}
+	for _, p := range a.pluginHost.Plugins() {
+		if !p.Enabled || !p.MatchesItem(item.Extension, item.MimeType) {
+			continue
+		}
+		for _, action := range p.Manifest.UI.Inspector {
+			for _, window := range p.Manifest.UI.Windows {
+				if window.ID != action.Window {
+					continue
+				}
+				if ui.Button(c.Key("inspector-plugin-"+p.Manifest.ID+"-"+action.ID), action.Title).FillWidth().Clicked() {
+					if err := a.openPluginUIForItem(p.Manifest.ID, window, &item); err != nil {
+						a.showToast(err.Error())
+					}
+				}
+				break
+			}
+		}
+	}
 }
 
 func (a *App) saveDetails(id string) {

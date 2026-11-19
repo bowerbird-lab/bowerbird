@@ -22,6 +22,10 @@ func (a *App) RegisterPluginUIProtocol() error {
 }
 
 func (a *App) openPluginUI(pluginID string, entry plugin.PluginUIEntry) error {
+	return a.openPluginUIForItem(pluginID, entry, a.activeItem)
+}
+
+func (a *App) openPluginUIForItem(pluginID string, entry plugin.PluginUIEntry, item *core.Item) error {
 	if a.pluginHost == nil {
 		return fmt.Errorf("plugin host is unavailable")
 	}
@@ -41,6 +45,9 @@ func (a *App) openPluginUI(pluginID string, entry plugin.PluginUIEntry) error {
 		return fmt.Errorf("plugin window is not declared")
 	}
 	key := pluginID + ":" + entry.ID
+	if item != nil {
+		key += ":" + item.ID
+	}
 	if a.pluginUIWindows == nil {
 		a.pluginUIWindows = make(map[string]*mygo.Window)
 	}
@@ -70,8 +77,8 @@ func (a *App) openPluginUI(pluginID string, entry plugin.PluginUIEntry) error {
 	view = created
 	page := view.Page()
 	var selected *core.Item
-	if a.activeItem != nil {
-		copy := *a.activeItem
+	if item != nil {
+		copy := *item
 		selected = &copy
 	}
 	a.pluginUISessions.Attach(page, dir, func() bool {

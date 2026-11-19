@@ -71,8 +71,17 @@ type PreviewContribution struct {
 
 // PluginUI describes HTML pages packaged with the plugin.
 type PluginUI struct {
-	Panels  []PluginUIEntry `json:"panels,omitempty"`
-	Windows []PluginUIEntry `json:"windows,omitempty"`
+	Panels    []PluginUIEntry         `json:"panels,omitempty"`
+	Windows   []PluginUIEntry         `json:"windows,omitempty"`
+	Inspector []PluginInspectorAction `json:"inspector,omitempty"`
+}
+
+// PluginInspectorAction contributes a button for a selected asset.
+type PluginInspectorAction struct {
+	ID     string `json:"id"`
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Window string `json:"window"`
 }
 
 type PluginUIEntry struct {
@@ -399,6 +408,17 @@ func validateManifest(m *Manifest) error {
 			}
 		}
 	}
+	windowIDs := make(map[string]bool, len(m.UI.Windows))
+	for _, window := range m.UI.Windows {
+		windowIDs[window.ID] = true
+	}
+	actionIDs := map[string]bool{}
+	for _, action := range m.UI.Inspector {
+		if action.ID == "" || strings.ContainsAny(action.ID, "/\\") || actionIDs[action.ID] || strings.TrimSpace(action.Title) == "" || action.Type != "window" || !windowIDs[action.Window] {
+			return fmt.Errorf("invalid inspector action %q", action.ID)
+		}
+		actionIDs[action.ID] = true
+	}
 	if m.Preview.Renderer != "" {
 		if m.Native == "" {
 			m.Native = strings.TrimSpace(m.Preview.Renderer)
@@ -523,6 +543,14 @@ func (h *Host) IsEnabled(id string) bool {
 	defer h.mu.RUnlock()
 	p, ok := h.plugins[id]
 	return ok && p.Enabled
+}
+
+// MatchesItem reports whether a plugin declares support for an asset.
+func (p *Plugin) MatchesItem(extension, mimeType string) bool {
+	if len(p.Manifest.Extensions) == 0 && len(p.Manifest.MimePrefixes) == 0 {
+		return true
+	}
+	return manifestMatchesItem(p.Manifest, extension, mimeType)
 }
 
 func manifestMatchesItem(m Manifest, extension, mimeType string) bool {
