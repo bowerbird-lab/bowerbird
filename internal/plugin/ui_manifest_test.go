@@ -1,6 +1,27 @@
 package plugin
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestScanFindsUIOnlyPlugin(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "example.webview-demo")
+	if err := os.Mkdir(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"id":"example.webview-demo","name":"Demo","version":"1","kind":"action","ui":{"windows":[{"id":"demo","entry":"ui/index.html"}]}}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+	host := NewHost(dir)
+	p, ok := host.Get("example.webview-demo")
+	if !ok || p.Manifest.Main != "" || len(p.Manifest.UI.Windows) != 1 {
+		t.Fatalf("UI-only plugin not discovered correctly: %+v", p)
+	}
+}
 
 func TestPluginUIEntriesValidation(t *testing.T) {
 	for _, tc := range []struct {

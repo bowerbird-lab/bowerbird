@@ -336,7 +336,7 @@ func loadPlugin(dir string) (*Plugin, error) {
 	if err := validateManifest(&m); err != nil {
 		return nil, err
 	}
-	if m.Main == "" && m.Native == "" {
+	if m.Main == "" && m.Native == "" && len(m.UI.Panels) == 0 && len(m.UI.Windows) == 0 {
 		m.Main = "index.js"
 	}
 	if m.Main != "" {
