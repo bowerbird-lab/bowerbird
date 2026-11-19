@@ -126,9 +126,6 @@ type App struct {
 	settingsWin *mygo.Window
 	logsWin     *mygo.Window
 	setupWin    *mygo.Window
-	aiEditorWin *mygo.Window
-
-	aiEditor aiEditorState
 
 	// Library and workspace.
 	library *core.LibraryInfo
@@ -459,7 +456,6 @@ const (
 	dialogFolderPicker
 	dialogTagPicker
 	dialogRescanLibrary
-	dialogOverwriteItem
 )
 
 type settingsGroup struct {
@@ -594,20 +590,6 @@ func (a *App) SetLogsWindow(w *mygo.Window) {
 }
 func (a *App) SetSetupWindow(w *mygo.Window) { a.setupWin = w; a.syncLanguage() }
 
-func (a *App) SetAIEditorWindow(w *mygo.Window) {
-	a.aiEditorWin = w
-	if w != nil {
-		w.OnClosed(func() {
-			if a.aiEditorWin == w {
-				a.aiEditorWin = nil
-			}
-		})
-	}
-	a.syncLanguage()
-	a.syncAIEditorFromActive(false)
-	a.refreshAIEditorModels(false)
-}
-
 // content wraps a view so a panic is logged and the window keeps painting
 // rather than falling back to an unexplained black frame.
 func (a *App) content(name string, view func(*ui.Context)) *ui.Content {
@@ -636,9 +618,6 @@ func (a *App) LogsContent() *ui.Content { return a.content("logs", a.viewLogs) }
 // SetupContent is the mygo content for the first-run library setup window.
 func (a *App) SetupContent() *ui.Content { return a.content("setup", a.viewSetup) }
 
-// AIEditorContent is the mygo content for the standalone AI image studio window.
-func (a *App) AIEditorContent() *ui.Content { return a.content("ai-editor", a.viewAIEditorWindow) }
-
 // post runs fn on the main thread and redraws the main window. Calls from the
 // main thread may run inline; background calls go through Window.Update.
 func (a *App) post(fn func()) {
@@ -661,30 +640,6 @@ func (a *App) postSettings(fn func()) {
 		return
 	}
 	a.post(fn)
-}
-
-func (a *App) postAIEditor(fn func()) {
-	if fn == nil {
-		return
-	}
-	wrapped := func() {
-		fn()
-		if a.aiEditorWin != nil {
-			a.aiEditorWin.Invalidate()
-		}
-		if a.win != nil {
-			a.win.Invalidate()
-		}
-	}
-	if a.aiEditorWin != nil {
-		a.aiEditorWin.Update(wrapped)
-		return
-	}
-	if a.win != nil {
-		a.win.Update(wrapped)
-		return
-	}
-	mygo.RunOnMain(wrapped)
 }
 
 // Notify is called by the host for window OnShow. It starts a refresh when the

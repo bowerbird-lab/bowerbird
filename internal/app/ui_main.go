@@ -548,8 +548,6 @@ func (a *App) viewDialog(c *ui.Context) {
 			p := a.palette(c)
 			ui.Text(c, a.tf("sidebar.rescanLibraryConfirm", map[string]any{"name": a.dialogValue})).FontSize(12).TextColor(p.muted).Wrap()
 		}, a.t("common.confirm"), a.rescanLibraryFromDialog)
-	case dialogOverwriteItem:
-		a.viewOverwriteConfirmDialog(c, &open)
 	}
 	if !open {
 		if a.dialog == dialogNewFolder {

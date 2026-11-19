@@ -2,9 +2,8 @@
  * Bowerbird native plugin SDK.
  *
  * A plugin is a single JavaScript/TypeScript module loaded by the desktop host.
- * It never renders DOM or React: it returns plain data, and the host paints the
- * result with `mygo/ui` (Go + GPU). This keeps plugins portable, sandboxable and
- * consistent with the rest of the native application.
+ * Existing hook plugins return plain data for the native host to render.
+ * HTML UI contributions describe packaged views for hosts that support them.
  */
 
 /** Capability group advertised by a plugin. */
@@ -69,6 +68,14 @@ export interface PreviewContribution {
   priority?: number;
 }
 
+/** A packaged HTML view contributed by a plugin. */
+export interface PluginUIEntry {
+  id: string;
+  entry: string;
+  title?: string;
+  location?: "inspector";
+}
+
 /**
  * `plugin.json` schema. Only `id`, `name` and `version` are mandatory; native
  * plugins may omit `main` when all of their behaviour is declared through the
@@ -112,6 +119,8 @@ export interface PluginManifest {
   descriptionKey?: string;
 
   permissions?: PluginPermissions;
+  /** HTML UI contributions; requires a host version that supports plugin WebViews. */
+  ui?: { panels?: PluginUIEntry[]; windows?: PluginUIEntry[] };
   settings?: PluginSetting[];
 
   /** Hooks implemented by `main`. Purely informational for native plugins. */

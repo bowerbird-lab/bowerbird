@@ -48,6 +48,7 @@ type Manifest struct {
 	URLPatterns   []string            `json:"urlPatterns,omitempty"`
 	URLHosts      []string            `json:"urlHosts,omitempty"`
 	Permissions   Permissions         `json:"permissions,omitempty"`
+	UI            PluginUI            `json:"ui,omitempty"`
 	Settings      []Setting           `json:"settings,omitempty"`
 	Hooks         []string            `json:"hooks,omitempty"`
 	Homepage      string              `json:"homepage,omitempty"`
@@ -66,6 +67,19 @@ type PreviewContribution struct {
 	SupportsZoom bool     `json:"supportsZoom,omitempty"`
 	Priority     int      `json:"priority,omitempty"`
 	Platforms    []string `json:"platforms,omitempty"`
+}
+
+// PluginUI describes HTML pages packaged with the plugin.
+type PluginUI struct {
+	Panels  []PluginUIEntry `json:"panels,omitempty"`
+	Windows []PluginUIEntry `json:"windows,omitempty"`
+}
+
+type PluginUIEntry struct {
+	ID       string `json:"id"`
+	Title    string `json:"title,omitempty"`
+	Location string `json:"location,omitempty"`
+	Entry    string `json:"entry"`
 }
 
 // Permissions declares the capabilities a plugin may use.
@@ -365,6 +379,19 @@ func validateManifest(m *Manifest) error {
 	}
 	if m.Main != "" && (strings.Contains(m.Main, "..") || filepath.IsAbs(m.Main)) {
 		return errors.New("plugin main must stay inside its directory")
+	}
+	for _, entries := range [][]PluginUIEntry{m.UI.Panels, m.UI.Windows} {
+		seen := map[string]bool{}
+		for _, entry := range entries {
+			if entry.ID == "" || strings.ContainsAny(entry.ID, "/\\") || seen[entry.ID] {
+				return fmt.Errorf("invalid or duplicate plugin UI id %q", entry.ID)
+			}
+			seen[entry.ID] = true
+			clean := filepath.ToSlash(filepath.Clean(entry.Entry))
+			if entry.Entry == "" || filepath.IsAbs(entry.Entry) || strings.Contains(entry.Entry, "\\") || clean == ".." || strings.HasPrefix(clean, "../") {
+				return fmt.Errorf("plugin UI entry must stay inside its directory: %q", entry.Entry)
+			}
+		}
 	}
 	if m.Preview.Renderer != "" {
 		if m.Native == "" {

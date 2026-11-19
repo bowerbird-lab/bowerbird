@@ -1445,16 +1445,6 @@ func (a *App) itemContextMenu(m *ui.Menu, item core.Item) {
 		for _, action := range actions {
 			action := action
 			if m.Item(action.Title).Chosen() {
-				if strings.HasSuffix(action.ID, ":open-editor") {
-					selected := a.fullWorkspaceItems(a.selectedItems())
-					var target *core.Item
-					if len(selected) > 0 {
-						cp := selected[0]
-						target = &cp
-					}
-					a.openAIEditorWindow(target)
-					continue
-				}
 				context := pluginContext(a.fullWorkspaceItems(a.selectedItems()), a.folderID)
 				go func() {
 					err := a.pluginHost.RunAction(action.ID, context)

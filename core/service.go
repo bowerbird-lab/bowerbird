@@ -726,25 +726,6 @@ func (s *Service) DeleteItemVersion(itemID string, versionID string) (*Item, err
 	return s.mgr.DeleteItemVersion(itemID, versionID)
 }
 
-// OpenAIEditorWindow opens or focuses the standalone AI image editor window.
-func (s *Service) OpenAIEditorWindow() error {
-	host := s.getHost()
-	if host == nil {
-		return ErrAppNotInitialized
-	}
-	return host.OpenWindow(WindowSpec{
-		Name:           "ai-editor",
-		Title:          "AI Image Studio",
-		URL:            "/#/ai-editor",
-		Width:          980,
-		Height:         700,
-		MinWidth:       780,
-		MinHeight:      560,
-		TitleBarHidden: true,
-		TitleBarHeight: 44,
-	})
-}
-
 func (s *Service) OpenExternalURL(rawURL string) error {
 	return OpenExternalURL(rawURL)
 }

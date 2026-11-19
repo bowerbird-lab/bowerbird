@@ -329,8 +329,6 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 			}
 		}
 
-		// Inline AI image edit plugin panel & backed-up historical versions.
-		a.viewInspectorAIEdit(c, item)
 		a.viewInspectorVersions(c, item)
 
 		a.inspectorDivider(c)
