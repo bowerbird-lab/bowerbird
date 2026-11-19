@@ -868,20 +868,35 @@ func (a *App) settingsPlugins(c *ui.Context) {
 				if hosted, ok := a.pluginHost.Get(pl.ID); ok {
 					for _, setting := range hosted.Manifest.Settings {
 						setting := setting
-						val := hosted.Settings[setting.Key]
-						if val == "" {
+						val, exists := hosted.Settings[setting.Key]
+						if !exists {
 							val = setting.Default
 						}
+						fieldID := pl.ID + ":" + setting.Key
 						a.settingsRow(c, setting.Label, setting.Help, func() {
-							input := ui.TextInput(c.Key("plugin-setting-"+pl.ID+"-"+setting.Key), &val).Width(220).FontSize(12)
-							if setting.Placeholder != "" {
-								input.Placeholder(setting.Placeholder)
-							}
-							if setting.Secret {
-								input.Password()
-							}
-							input.OnChange(func() {
-								a.pluginHost.SetSetting(pl.ID, setting.Key, val)
+							ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
+								input := ui.TextInput(c.Key("plugin-setting-"+fieldID), &val).Width(220).FontSize(12)
+								if setting.Placeholder != "" {
+									input.Placeholder(setting.Placeholder)
+								}
+								if setting.Secret && !a.pluginSecretVisible[fieldID] {
+									input.Password()
+								}
+								input.OnChange(func() {
+									a.pluginHost.SetSetting(pl.ID, setting.Key, val)
+								})
+								if setting.Secret {
+									label := a.t("settings.plugins.showSecret")
+									if a.pluginSecretVisible[fieldID] {
+										label = a.t("settings.plugins.hideSecret")
+									}
+									a.iconButton(c, "plugin-secret-"+fieldID, iconEye, a.pluginSecretVisible[fieldID], label, func() {
+										if a.pluginSecretVisible == nil {
+											a.pluginSecretVisible = make(map[string]bool)
+										}
+										a.pluginSecretVisible[fieldID] = !a.pluginSecretVisible[fieldID]
+									})
+								}
 							})
 						})
 					}

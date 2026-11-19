@@ -555,6 +555,8 @@
       }
     },
     "plugins": {
+      "showSecret": "Show secret",
+      "hideSecret": "Hide secret",
       "alwaysEnabled": "Built-in · Active",
       "builtinBadge": "Built-in",
       "cannotDisableHint": "Built-in plugins can be disabled in Settings",

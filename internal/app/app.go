@@ -231,8 +231,8 @@ type App struct {
 	marqueeStartContentY float32
 	marqueeCurX          float32
 	marqueeCurY          float32
-	marqueeBase     map[string]bool
-	marqueeAdditive bool
+	marqueeBase          map[string]bool
+	marqueeAdditive      bool
 	// Inputs and popover state.
 	searchBox   ui.Handle
 	galleryBox  ui.Handle
@@ -290,60 +290,60 @@ type App struct {
 	filterColorDrag  bool
 
 	// Preview and playback.
-	previewOpen       bool
-	previewMode       string // "inline" (double click) or "full" (space key)
-	previewIndex      int
-	previewZoom       float32
-	previewPan        ui.Point
-	previewDragged    bool
-	previewPanning    bool
-	previewLastX      float32
-	previewLastY      float32
-	previewText       string
-	previewBitmap     *ui.Bitmap
-	previewImagePath  string
-	previewImages     *thumbCache
-	filmstripImages   *thumbCache
-	filmstripTrace    *filmstripLoadState
-	previewTrace      *previewLoadTrace
-	previewImageShown bool
-	previewSlowLogged bool
-	psdInfo           *core.PSDInfo
-	previewError      string
-	player            *player.Player
-	video             *player.VideoPlayer
-	videoErr          string
-	videoScrub        float64
-	videoVolScrub     float64
-	videoMoreOpen     bool
-	videoLastSeek     time.Time
-	videoPendingSeek  bool
-	videoDragging     bool
-	videoHovering     bool
-	videoHoverPos     float64
-	videoVolHover     bool
-	videoVolLeaveAt   time.Time
-	videoVolRightPad  float32
-	videoRateOpen     bool
-	videoRateRightPad float32
-	videoTrackAnim    float32
-	videoTrackRect    ui.Rect
-	videoLastMove      time.Time
+	previewOpen         bool
+	previewMode         string // "inline" (double click) or "full" (space key)
+	previewIndex        int
+	previewZoom         float32
+	previewPan          ui.Point
+	previewDragged      bool
+	previewPanning      bool
+	previewLastX        float32
+	previewLastY        float32
+	previewText         string
+	previewBitmap       *ui.Bitmap
+	previewImagePath    string
+	previewImages       *thumbCache
+	filmstripImages     *thumbCache
+	filmstripTrace      *filmstripLoadState
+	previewTrace        *previewLoadTrace
+	previewImageShown   bool
+	previewSlowLogged   bool
+	psdInfo             *core.PSDInfo
+	previewError        string
+	player              *player.Player
+	video               *player.VideoPlayer
+	videoErr            string
+	videoScrub          float64
+	videoVolScrub       float64
+	videoMoreOpen       bool
+	videoLastSeek       time.Time
+	videoPendingSeek    bool
+	videoDragging       bool
+	videoHovering       bool
+	videoHoverPos       float64
+	videoVolHover       bool
+	videoVolLeaveAt     time.Time
+	videoVolRightPad    float32
+	videoRateOpen       bool
+	videoRateRightPad   float32
+	videoTrackAnim      float32
+	videoTrackRect      ui.Rect
+	videoLastMove       time.Time
 	videoLastPtrX       float32
 	videoLastPtrY       float32
 	videoControlsHidden bool
 	videoResumeScrub    bool
-	videoSeq          uint64
-	previewSeq        uint64
+	videoSeq            uint64
+	previewSeq          uint64
 
 	// Settings values.
 	themeValue      string
 	languageValue   string
 	vibrancyValue   bool
 	importModeValue string
-	network       core.NetworkSettings
-	shortcuts     core.ShortcutSettings
-	shortcutPairs map[string]uiShortcut
+	network         core.NetworkSettings
+	shortcuts       core.ShortcutSettings
+	shortcutPairs   map[string]uiShortcut
 	// Shortcut recorder: the catalog id being recorded and the accelerator
 	// captured so far ("" while nothing is pressed yet).
 	shortcutEditID    string
@@ -377,9 +377,10 @@ type App struct {
 	logsFilterValid bool
 
 	// Plugins.
-	plugins        []installedPluginRow
-	pluginHost     *plugin.Host
-	pendingInstall *core.PluginInstallRequest
+	plugins             []installedPluginRow
+	pluginHost          *plugin.Host
+	pluginSecretVisible map[string]bool
+	pendingInstall      *core.PluginInstallRequest
 
 	// Themes and their resolved palettes. Both variants are kept ready so
 	// following the system can switch without loading files.
