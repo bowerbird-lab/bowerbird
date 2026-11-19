@@ -42,21 +42,20 @@ func safeSideInset(safe core.Edges) core.Points {
 	return max(safe.Left, safe.Right) + 12
 }
 
-// appCircleButton is the round surface button shared by the gallery menu and
-// page headers, keeping their size, shape and border identical.
-func appCircleButton(colors nsui.Colors, testID string, svg func() *core.SVG, onPress func(core.PressEvent)) core.Node {
-	return core.View{
-		TestID: testID,
-		StyleFunc: func() core.Style {
-			return core.Style{
-				Width: core.Pt(42), Height: core.Pt(42), CornerRadius: 21,
-				AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
-				Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+// appCircleButton is the unified 1:1 (52x52) surface button shared by the
+// gallery menu and page headers, keeping their size, theme corner radius and
+// border identical.
+func appCircleButton(cx *core.Scope, testID string, svg func() *core.SVG, onPress func(core.PressEvent)) core.Node {
+	return mobileIconButton(cx, mobileIconBtnSpec{
+		TestID:  testID,
+		Icon:    svg,
+		Variant: mobileIconSurface,
+		OnPress: func() {
+			if onPress != nil {
+				onPress(core.PressEvent{})
 			}
 		},
-		OnPress:  onPress,
-		Children: []core.Node{nsui.Icon(svg, 20, colors.Text)},
-	}
+	})
 }
 
 func (a *App) appHeader(cx *core.Scope, spec appHeaderSpec) core.Node {
@@ -70,8 +69,13 @@ func (a *App) appHeader(cx *core.Scope, spec appHeaderSpec) core.Node {
 			if label == "" {
 				label = "返回"
 			}
-			row = append(row, nsui.IconButton{Icon: lucide.ChevronLeft, Label: label, Size: 32,
-				TestID: spec.TestID + ".back", OnPress: spec.OnBack})
+			row = append(row, mobileIconButton(cx, mobileIconBtnSpec{
+				TestID:  spec.TestID + ".back",
+				Label:   label,
+				Icon:    lucide.ChevronLeft,
+				Variant: mobileIconGhost,
+				OnPress: spec.OnBack,
+			}))
 		}
 		row = append(row, core.Text{Content: spec.Title, MaxLines: 1, Role: core.RoleHeader,
 			Style:     nsui.TypeTitle.Merge(core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}),

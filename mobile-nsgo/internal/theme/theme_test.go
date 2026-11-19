@@ -121,3 +121,41 @@ func TestDesktopThemeFolderLoadsUnchanged(t *testing.T) {
 		}
 	}
 }
+
+func TestButtonRadiusDefaultsAndOverrides(t *testing.T) {
+	builtins, err := Builtins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, th := range builtins {
+		if got := th.ButtonRadius(); got != DefaultButtonRadius {
+			t.Fatalf("%s: ButtonRadius() = %v, want %v", th.ID, got, DefaultButtonRadius)
+		}
+	}
+
+	base := Default(Light)
+	custom, err := Parse("custom-light", []byte(`{"colors":{"accent":"#112233"},"material":{"buttonRadius":12}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := Merge(base, custom)
+	if got := merged.ButtonRadius(); got != 12 {
+		t.Fatalf("custom ButtonRadius() = %v, want 12", got)
+	}
+
+	zero, err := Parse("zero-light", []byte(`{"colors":{"accent":"#112233"},"material":{"buttonRadius":0}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Merge(base, zero).ButtonRadius(); got != 0 {
+		t.Fatalf("zero ButtonRadius() = %v, want 0", got)
+	}
+
+	inherited, err := Parse("inherited-light", []byte(`{"colors":{"accent":"#112233"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Merge(base, inherited).ButtonRadius(); got != DefaultButtonRadius {
+		t.Fatalf("inherited ButtonRadius() = %v, want %v", got, DefaultButtonRadius)
+	}
+}

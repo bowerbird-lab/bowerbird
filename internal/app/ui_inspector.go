@@ -316,18 +316,7 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 			a.metaRow(c, a.t("inspector.layers"), a.t("inspector.psdLayersHint"))
 		}
 
-		// Plugin-provided sections are rendered with the same native rows.
-		for _, section := range a.inspectSections {
-			a.inspectorDivider(c)
-			a.sectionLabel(c, section.Title)
-			for _, row := range section.Rows {
-				a.metaRowCopy(c, row.Label, row.Value, row.Copyable)
-			}
-			for _, block := range section.TextBlocks {
-				ui.Text(c, block.Title).FontSize(10).FontWeight(650).TextColor(p.faint).Margin(4, 0, 0, 0)
-				ui.Text(c, block.Text).FontSize(11.5).TextColor(p.muted).Wrap().MaxLines(8)
-			}
-		}
+		a.viewInspectorVersions(c, item)
 
 		a.inspectorDivider(c)
 		a.sectionLabel(c, a.t("inspector.metadata"))
@@ -364,7 +353,50 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 		if categoryOf(item) == "audio" && a.nativeFeature("official.audio-player") {
 			a.inspectorAudio(c, item)
 		}
+
+		// Plugin content follows the built-in asset details and controls.
+		for _, section := range a.inspectSections {
+			a.inspectorDivider(c)
+			a.sectionLabel(c, section.Title)
+			for _, row := range section.Rows {
+				a.metaRowCopy(c, row.Label, row.Value, row.Copyable)
+			}
+			for _, block := range section.TextBlocks {
+				ui.Text(c, block.Title).FontSize(10).FontWeight(650).TextColor(p.faint).Margin(4, 0, 0, 0)
+				ui.Text(c, block.Text).FontSize(11.5).TextColor(p.muted).Wrap().MaxLines(8)
+			}
+		}
+		a.viewInspectorPluginActions(c, item)
 	})
+}
+
+func (a *App) viewInspectorPluginActions(c *ui.Context, item core.Item) {
+	if a.pluginHost == nil {
+		return
+	}
+	shown := false
+	for _, p := range a.pluginHost.Plugins() {
+		if !p.Enabled || !p.MatchesItem(item.Extension, item.MimeType) {
+			continue
+		}
+		for _, action := range p.Manifest.UI.Inspector {
+			for _, window := range p.Manifest.UI.Windows {
+				if window.ID != action.Window {
+					continue
+				}
+				if !shown {
+					a.inspectorDivider(c)
+					shown = true
+				}
+				if ui.Button(c.Key("inspector-plugin-"+p.Manifest.ID+"-"+action.ID), action.Title).FillWidth().Clicked() {
+					if err := a.openPluginUIForItem(p.Manifest.ID, window, &item); err != nil {
+						a.showToast(err.Error())
+					}
+				}
+				break
+			}
+		}
+	}
 }
 
 func (a *App) saveDetails(id string) {

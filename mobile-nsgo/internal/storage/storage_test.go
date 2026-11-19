@@ -100,6 +100,44 @@ func TestConnectionHistoryIsCappedAndDeduped(t *testing.T) {
 	}
 }
 
+func TestConnectionMergesMultipleIPsIntoSingleDevice(t *testing.T) {
+	l := NewLocal(t.TempDir())
+	if err := l.Remember(Connection{
+		DeviceID:     "desk-1",
+		Name:         "Studio Mac",
+		BaseURL:      "http://192.168.1.10:17878",
+		CandidateIPs: []string{"192.168.1.10", "100.64.0.5"},
+		Port:         17878,
+		LibraryName:  "Main",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Saving a session on the second IP of the same device must merge into the
+	// existing device entry and preserve Name and all CandidateIPs.
+	if err := l.SaveSession(Session{
+		DeviceID:     "desk-1",
+		BaseURL:      "http://100.64.0.5:17878",
+		CandidateIPs: []string{"100.64.0.5", "10.0.0.2"},
+		Port:         17878,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := l.History()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 merged device, got %d: %+v", len(items), items)
+	}
+	got := items[0]
+	if got.Name != "Studio Mac" || got.BaseURL != "http://100.64.0.5:17878" {
+		t.Fatalf("merged = %+v", got)
+	}
+	if len(got.CandidateIPs) != 3 {
+		t.Fatalf("expected 3 merged candidate IPs, got %v", got.CandidateIPs)
+	}
+}
+
 func TestUsageHistoryIsScopedAndCapped(t *testing.T) {
 	l := NewLocal(t.TempDir())
 	for i := 0; i < 510; i++ {

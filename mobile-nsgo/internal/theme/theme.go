@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/nsgo-dev/nsgo/core"
@@ -59,12 +60,31 @@ type Colors struct {
 	Success    string `json:"success"`
 }
 
-// Material holds the desktop's blur parameters. The mobile app parses them so
-// a shared theme file validates, but does not paint blur.
+// DefaultButtonRadius is the default corner radius for mobile buttons (full pill/circle).
+const DefaultButtonRadius float32 = 999
+
+// Material holds the desktop's blur parameters and optional mobile/desktop
+// radius tokens. The mobile app parses blur fields so a shared theme file
+// validates, and uses ButtonRadius to unify button corner radii.
 type Material struct {
-	SidebarOpacity float32 `json:"sidebarOpacity"`
-	HeaderTint     string  `json:"headerTint"`
-	HeaderBlur     float32 `json:"headerBlurRadius"`
+	SidebarOpacity float32  `json:"sidebarOpacity"`
+	HeaderTint     string   `json:"headerTint"`
+	HeaderBlur     float32  `json:"headerBlurRadius"`
+	ButtonRadius   *float32 `json:"buttonRadius,omitempty"`
+}
+
+// ButtonRadius returns the configured button corner radius, falling back to
+// DefaultButtonRadius (full-round) when unset.
+func (t *Theme) ButtonRadius() float32 {
+	if t != nil && t.Material.ButtonRadius != nil && *t.Material.ButtonRadius >= 0 {
+		return *t.Material.ButtonRadius
+	}
+	return DefaultButtonRadius
+}
+
+// FormatButtonRadius formats r as a token string for core.Theme.Tokens.
+func FormatButtonRadius(r float32) string {
+	return strconv.FormatFloat(float64(r), 'f', -1, 32)
 }
 
 // Theme is one colour variant, loaded from one JSON file.
@@ -259,8 +279,13 @@ func Merge(base, t *Theme) *Theme {
 	t.Colors = c
 	if t.Material == (Material{}) {
 		t.Material = base.Material
-	} else if t.Material.HeaderTint == "" {
-		t.Material.HeaderTint = base.Material.HeaderTint
+	} else {
+		if t.Material.HeaderTint == "" {
+			t.Material.HeaderTint = base.Material.HeaderTint
+		}
+		if t.Material.ButtonRadius == nil {
+			t.Material.ButtonRadius = base.Material.ButtonRadius
+		}
 	}
 	return t
 }

@@ -28,7 +28,7 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 		btns := make([]core.Node, 0, len(options))
 		for _, opt := range options {
 			label, val := opt[0], opt[1]
-			btns = append(btns, drawerChip(colors, label,
+			btns = append(btns, drawerChip(cx, colors, label,
 				func() bool { return current() == val },
 				func() { set(val) }))
 		}
@@ -59,7 +59,7 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 		}
 
 		colorNodes := []core.Node{
-			drawerChip(colors, "全部", func() bool { return fColor.Get() == "" }, func() { fColor.Set("") }),
+			drawerChip(cx, colors, "全部", func() bool { return fColor.Get() == "" }, func() { fColor.Set("") }),
 		}
 		for _, hex := range a.colors {
 			h := hex
@@ -121,13 +121,17 @@ func (a *App) filterSheet(cx *core.Scope) core.Node {
 		Title:   "筛选条件",
 		TestID:  "filter.sheet",
 		Header: []core.Node{
-			nsui.Button{Text: "重置", Variant: nsui.ButtonGhost, OnPress: func() {
-				a.resetFilterDraft()
-			}},
-			nsui.Button{Text: "应用", OnPress: func() {
-				a.applyFilterDraft(cx)
-				a.filterOpen.Set(false)
-			}, TestID: "filter.apply"},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "重置", Variant: nsui.ButtonGhost, Compact: true,
+				OnPress: func() { a.resetFilterDraft() },
+			}),
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				TestID: "filter.apply", Text: "应用", Variant: nsui.ButtonPrimary, Compact: true,
+				OnPress: func() {
+					a.applyFilterDraft(cx)
+					a.filterOpen.Set(false)
+				},
+			}),
 		},
 		Children: []core.Node{
 			core.Show{When: func() bool { return !a.client.QuerySupported() }, Then: func(cx *core.Scope) core.Node {

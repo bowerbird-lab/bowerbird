@@ -6,12 +6,15 @@ import (
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
 )
 
-// RowKind distinguishes a month header from a row of gallery tiles.
+// RowKind distinguishes a month header, a subfolder header, a row of subfolder
+// cards, or a row of gallery tiles.
 type RowKind uint8
 
 const (
 	RowMonthHeader RowKind = iota
 	RowTileGroup
+	RowFolderHeader
+	RowFolderGroup
 )
 
 // TileSlot is one item cell inside a RowTileGroup along with its flat index in
@@ -23,11 +26,13 @@ type TileSlot struct {
 
 // GalleryRow is one virtualized row in core.List.
 type GalleryRow struct {
-	Key   string
-	Kind  RowKind
-	Title string
-	Count int
-	Slots []TileSlot
+	Key       string
+	Kind      RowKind
+	Title     string
+	Count     int
+	Collapsed bool
+	Folders   []model.Folder
+	Slots     []TileSlot
 }
 
 // BuildMonthRows groups items by month (preserving input order) and packs each
@@ -113,6 +118,46 @@ func BuildFlatRows(items []model.ItemSummary, cols int) []GalleryRow {
 		})
 	}
 	return rows
+}
+
+// BuildGalleryRows prepends the current folder's subfolders (if any) ahead of
+// the flat item rows.
+func BuildGalleryRows(subfolders []model.Folder, collapsed bool, items []model.ItemSummary, cols int) []GalleryRow {
+	if cols < 2 {
+		cols = 2
+	}
+	if cols > 5 {
+		cols = 5
+	}
+	var rows []GalleryRow
+	if len(subfolders) > 0 {
+		rows = append(rows, GalleryRow{
+			Key:       "fh",
+			Kind:      RowFolderHeader,
+			Title:     "子文件夹 (" + itoa(len(subfolders)) + ")",
+			Count:     len(subfolders),
+			Collapsed: collapsed,
+		})
+		if !collapsed {
+			for start := 0; start < len(subfolders); start += cols {
+				end := start + cols
+				if end > len(subfolders) {
+					end = len(subfolders)
+				}
+				chunk := subfolders[start:end]
+				rows = append(rows, GalleryRow{
+					Key:     "fr:" + chunk[0].ID,
+					Kind:    RowFolderGroup,
+					Folders: chunk,
+				})
+			}
+		}
+	}
+	itemRows := BuildFlatRows(items, cols)
+	if len(rows) == 0 {
+		return itemRows
+	}
+	return append(rows, itemRows...)
 }
 
 // FirstItemIDAtRow returns the first item ID at or after rowIdx, for anchor

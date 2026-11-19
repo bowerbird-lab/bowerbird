@@ -479,13 +479,23 @@ func TestSettingsScreenSelectsAndPersistsThemes(t *testing.T) {
 	app.FastForward(400 * time.Millisecond)
 
 	app.Press("id:settings.gridMore")
+	app.Press("id:settings.predictiveBack")
 
 	prefs, err := storage.NewLocal(dir).LoadPreferences()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prefs.ThemeMode != "dark" || prefs.LightTheme != "sand-light" || prefs.DarkTheme != "midnight-dark" || prefs.GridColumns != 4 {
+	if prefs.ThemeMode != "dark" || prefs.LightTheme != "sand-light" || prefs.DarkTheme != "midnight-dark" || prefs.GridColumns != 4 || prefs.PredictiveBackEnabled() {
 		t.Fatalf("persisted preferences = %+v", prefs)
+	}
+
+	app.Press("id:settings.predictiveBack")
+	prefs, err = storage.NewLocal(dir).LoadPreferences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prefs.PredictiveBackEnabled() {
+		t.Fatalf("expected predictiveBack re-enabled, got %+v", prefs)
 	}
 
 	// The settings screen returns to the welcome screen it was opened from.

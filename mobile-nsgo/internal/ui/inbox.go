@@ -31,7 +31,13 @@ func (a *App) inboxPage(cx *core.Scope) core.Node {
 	header := core.View{
 		Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8},
 		Children: []core.Node{
-			nsui.IconButton{Icon: lucide.ArrowLeft, Variant: nsui.IconButtonGhost, Label: "返回", OnPress: back, TestID: "historySave.back"},
+			mobileIconButton(cx, mobileIconBtnSpec{
+				TestID:  "historySave.back",
+				Label:   "返回",
+				Icon:    lucide.ArrowLeft,
+				Variant: mobileIconGhost,
+				OnPress: back,
+			}),
 			core.View{Style: core.Style{FlexGrow: 1}, Children: []core.Node{
 				core.Text{Content: "历史保存", Style: nsui.TypeTitle.Merge(core.Style{Color: colors.Text()})},
 				core.Text{ContentFunc: func() string {
@@ -39,15 +45,15 @@ func (a *App) inboxPage(cx *core.Scope) core.Node {
 					return saveHistoryCountText(a.saveHistoryIDs)
 				}, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
 			}},
-			nsui.Button{
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				TestID:  "historySave.refresh",
 				Text:    "刷新",
 				Variant: nsui.ButtonSecondary,
 				Disabled: func() bool {
 					return a.saveHistoryLoading.Get() || a.session.Current() == nil
 				},
 				OnPress: func() { a.loadSaveHistoryItems(cx) },
-				TestID:  "historySave.refresh",
-			},
+			}),
 		},
 	}
 

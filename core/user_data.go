@@ -297,6 +297,9 @@ type MobileSettings struct {
 	// ShareNotifyDisabled turns off desktop notifications when mobile shares
 	// are saved. Zero value (false) keeps notifications enabled by default.
 	ShareNotifyDisabled bool `json:"shareNotifyDisabled,omitempty"`
+	// DeviceID is a persistent unique identifier for this desktop instance so
+	// mobile clients can bind multiple IPs to the same desktop device.
+	DeviceID string `json:"deviceId,omitempty"`
 }
 
 // Token source identifiers for MobileTokenEntry.Source.
@@ -347,9 +350,43 @@ func (s *UserDataStore) SetMobileSettings(settings MobileSettings) error {
 	if settings.Tokens == nil {
 		settings.Tokens = []MobileTokenEntry{}
 	}
+	if settings.DeviceID == "" && s.data.Mobile != nil {
+		settings.DeviceID = s.data.Mobile.DeviceID
+	}
 	s.data.Mobile = &settings
 	s.data.UpdatedAt = time.Now().Unix()
 	return s.saveLocked()
+}
+
+// EnsureMobileDeviceID returns a persistent unique ID for this desktop's mobile server.
+func (s *UserDataStore) EnsureMobileDeviceID() string {
+	s.mu.RLock()
+	if s.data.Mobile != nil && s.data.Mobile.DeviceID != "" {
+		id := s.data.Mobile.DeviceID
+		s.mu.RUnlock()
+		return id
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.Mobile == nil {
+		s.data.Mobile = &MobileSettings{
+			Enabled:         true,
+			Port:            17878,
+			PairingRequired: true,
+			Tokens:          []MobileTokenEntry{},
+		}
+	}
+	if s.data.Mobile.DeviceID == "" {
+		buf := make([]byte, 16)
+		if _, err := rand.Read(buf); err == nil {
+			s.data.Mobile.DeviceID = hex.EncodeToString(buf)
+			s.data.UpdatedAt = time.Now().Unix()
+			_ = s.saveLocked()
+		}
+	}
+	return s.data.Mobile.DeviceID
 }
 
 // AddMobileToken stores a new authorized token.

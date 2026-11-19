@@ -26,6 +26,7 @@ import android.view.ViewParent
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.GridLayoutManager
@@ -49,7 +50,7 @@ class GalleryGridComponent(
 ) : NsgoComponent {
 
     data class GridEntry(
-        val kind: String, // "header" or "item"
+        val kind: String, // "header", "folder_header", "folder", or "item"
         val key: String,
         val title: String,
         val count: Int,
@@ -60,7 +61,9 @@ class GalleryGridComponent(
         val height: Int,
         val badge: String,
         val shareMarked: Boolean,
-        val selected: Boolean
+        val selected: Boolean,
+        val collapsed: Boolean = false,
+        val thumbUrls: List<String> = emptyList()
     )
 
     data class LayoutConfig(
@@ -98,6 +101,9 @@ class GalleryGridComponent(
     private var themeVersion = 0
     private var hasThemeColors = false
     private var lastScrollTopSeq = 0
+    private var pendingRestorePos = -1
+    private var pendingRestoreOffset = 0
+    private var hasRestoredInitialScroll = false
     private var topInsetDp = 0
     private var bottomInsetDp = 24
     private var horizontalInsetDp = 8
@@ -406,8 +412,20 @@ class GalleryGridComponent(
                 val seq = (value as? Number)?.toInt() ?: 0
                 if (seq != lastScrollTopSeq) {
                     lastScrollTopSeq = seq
+                    pendingRestorePos = -1
+                    pendingRestoreOffset = 0
                     cancelTransitionAndReset()
                     primaryLayer.rv.scrollToPosition(0)
+                }
+            }
+            "scrollPos" -> {
+                if (!hasRestoredInitialScroll) {
+                    pendingRestorePos = (value as? Number)?.toInt() ?: -1
+                }
+            }
+            "scrollOffset" -> {
+                if (!hasRestoredInitialScroll) {
+                    pendingRestoreOffset = (value as? Number)?.toInt() ?: 0
                 }
             }
             "rows" -> {
@@ -415,6 +433,12 @@ class GalleryGridComponent(
                 val parsed = ArrayList<GridEntry>(rawList.size)
                 for (raw in rawList) {
                     val m = raw as? Map<*, *> ?: continue
+                    val rawThumbs = m["thumbUrls"] as? List<*>
+                    val thumbUrls = if (rawThumbs != null) {
+                        rawThumbs.mapNotNull { it as? String }.filter { it.isNotEmpty() }.take(4)
+                    } else {
+                        emptyList()
+                    }
                     parsed.add(
                         GridEntry(
                             kind = (m["kind"] as? String).orEmpty(),
@@ -428,7 +452,9 @@ class GalleryGridComponent(
                             height = (m["height"] as? Number)?.toInt() ?: 0,
                             badge = (m["badge"] as? String).orEmpty(),
                             shareMarked = m["shareMarked"] == true,
-                            selected = m["selected"] == true
+                            selected = m["selected"] == true,
+                            collapsed = m["collapsed"] == true,
+                            thumbUrls = thumbUrls
                         )
                     )
                 }
@@ -451,6 +477,16 @@ class GalleryGridComponent(
                 diff.dispatchUpdatesTo(primaryLayer.adapter)
                 if (previewLayer.rv.visibility == View.VISIBLE || morphOverlay.visibility == View.VISIBLE) {
                     diff.dispatchUpdatesTo(previewLayer.adapter)
+                }
+                if (!hasRestoredInitialScroll && pendingRestorePos >= 0 && items.isNotEmpty()) {
+                    hasRestoredInitialScroll = true
+                    val targetPos = pendingRestorePos.coerceIn(0, items.lastIndex)
+                    val targetOffset = pendingRestoreOffset
+                    pendingRestorePos = -1
+                    pendingRestoreOffset = 0
+                    primaryLayer.rv.post {
+                        primaryLayer.scrollToPositionWithOffset(targetPos, targetOffset)
+                    }
                 }
                 updateEmptyVisibility()
             }
@@ -580,7 +616,7 @@ class GalleryGridComponent(
         for ((key, startPair) in startMap) {
             val (entry, fromRect) = startPair
             val endPair = endMap[key]
-            if (entry.kind == "header") {
+            if (entry.kind == "header" || entry.kind == "folder_header") {
                 val fromH = fromRect.height()
                 val toTop: Float
                 val toAlpha: Float
@@ -594,7 +630,7 @@ class GalleryGridComponent(
                 morphHeaders.add(
                     MorphHeader(
                         title = entry.title,
-                        countText = "${entry.count} 项",
+                        countText = if (entry.kind == "folder_header") "" else "${entry.count} 项",
                         left = fromRect.left,
                         right = fromRect.right,
                         height = fromH,
@@ -622,12 +658,12 @@ class GalleryGridComponent(
         for ((key, endPair) in endMap) {
             if (startMap.containsKey(key)) continue
             val (entry, toRect) = endPair
-            if (entry.kind == "header") {
+            if (entry.kind == "header" || entry.kind == "folder_header") {
                 val fromTop = scaleAroundY(toRect.top, previewAnchorY, invRatio) - shiftY
                 morphHeaders.add(
                     MorphHeader(
                         title = entry.title,
-                        countText = "${entry.count} 项",
+                        countText = if (entry.kind == "folder_header") "" else "${entry.count} 项",
                         left = toRect.left,
                         right = toRect.right,
                         height = toRect.height(),
@@ -653,7 +689,8 @@ class GalleryGridComponent(
         fromAlpha: Float,
         toAlpha: Float
     ): MorphTile {
-        val bmp = ThumbLoader.peekMemory(entry.thumbUrl)
+        val url = if (entry.kind == "folder") entry.thumbUrls.firstOrNull().orEmpty() else entry.thumbUrl
+        val bmp = ThumbLoader.peekMemory(url)
         val shader = bmp?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
         return MorphTile(
             from = fromRect,
@@ -886,8 +923,9 @@ class GalleryGridComponent(
     }
 
     private fun tileHeightFor(entry: GridEntry, parentWidthPx: Int, config: LayoutConfig): Int {
-        if (entry.kind == "header") return dp(38)
+        if (entry.kind == "header" || entry.kind == "folder_header") return dp(38)
         val colW = maxOf((parentWidthPx - dp(6) * config.cols) / config.cols, dp(48))
+        if (entry.kind == "folder") return colW + dp(28)
         if (!config.isWaterfall || entry.width <= 0 || entry.height <= 0) {
             return colW
         }
@@ -1145,6 +1183,16 @@ class GalleryGridComponent(
                         events.emit("loadMore", null)
                     }
                 }
+
+                override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                    if (this@GridLayer !== primaryLayer) return
+                    if (newState != RecyclerView.SCROLL_STATE_IDLE) return
+                    val pos = firstVisiblePosition()
+                    if (pos < 0) return
+                    val child = lm.findViewByPosition(pos)
+                    val offsetPx = if (child != null) child.top - rv.paddingTop else 0
+                    events.emit("scrollState", mapOf("pos" to pos, "offset" to offsetPx))
+                }
             })
         }
 
@@ -1156,7 +1204,7 @@ class GalleryGridComponent(
                 spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
                     override fun getSpanSize(position: Int): Int {
                         val item = items.getOrNull(position) ?: return 1
-                        return if (item.kind == "header") cfg.cols else 1
+                        return if (item.kind == "header" || item.kind == "folder_header") cfg.cols else 1
                     }
                 }
             }
@@ -1229,21 +1277,30 @@ class GalleryGridComponent(
 
         override fun getItemId(position: Int): Long = stableIdFor(items[position].key)
 
-        override fun getItemViewType(position: Int): Int =
-            if (items[position].kind == "header") TYPE_HEADER else TYPE_TILE
+        override fun getItemViewType(position: Int): Int = when (items[position].kind) {
+            "header" -> TYPE_HEADER
+            "folder_header" -> TYPE_FOLDER_HEADER
+            "folder" -> TYPE_FOLDER
+            else -> TYPE_TILE
+        }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
-            return if (viewType == TYPE_HEADER) HeaderHolder(createHeaderView())
-            else TileHolder(createTileView(), layer)
+            return when (viewType) {
+                TYPE_HEADER -> HeaderHolder(createHeaderView())
+                TYPE_FOLDER_HEADER -> FolderHeaderHolder(createFolderHeaderView())
+                TYPE_FOLDER -> FolderHolder(createFolderView(), layer)
+                else -> TileHolder(createTileView(), layer)
+            }
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
             val entry = items[position]
             val cfg = layer.config
-            if (holder is HeaderHolder) {
-                holder.bind(entry)
-            } else if (holder is TileHolder) {
-                holder.bind(entry, layer.parentWidthPx(cfg), cfg)
+            when (holder) {
+                is HeaderHolder -> holder.bind(entry)
+                is FolderHeaderHolder -> holder.bind(entry)
+                is FolderHolder -> holder.bind(entry, layer.parentWidthPx(cfg), cfg)
+                is TileHolder -> holder.bind(entry, layer.parentWidthPx(cfg), cfg)
             }
         }
     }
@@ -1435,7 +1492,7 @@ class GalleryGridComponent(
 
             for (i in 0 until items.size) {
                 val entry = items[i]
-                if (entry.kind == "header") {
+                if (entry.kind == "header" || entry.kind == "folder_header") {
                     var maxColY = 0
                     for (c in 0 until cols) {
                         if (colTops[c] > maxColY) maxColY = colTops[c]
@@ -1762,6 +1819,318 @@ class GalleryGridComponent(
         }
     }
 
+    private fun createFolderHeaderView(): View {
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38))
+            setPadding(dp(4), dp(8), dp(4), dp(4))
+        }
+        val chevron = TextView(context).apply {
+            id = ID_FOLDER_HEADER_CHEVRON
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(theme.textMuted)
+            setPadding(0, 0, dp(6), 0)
+        }
+        val title = TextView(context).apply {
+            id = ID_FOLDER_HEADER_TITLE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(theme.text)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        row.addView(chevron)
+        row.addView(title)
+        return row
+    }
+
+    private fun createFolderView(): View {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(120)
+            ).apply {
+                val m = dp(3)
+                setMargins(m, m, m, m)
+            }
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+            clipToOutline = true
+        }
+
+        val previewBox = FrameLayout(context).apply {
+            id = ID_FOLDER_PREVIEW
+            clipToOutline = true
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(6).toFloat())
+                }
+            }
+        }
+        card.addView(
+            previewBox,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        )
+
+        val singleImage = ImageView(context).apply {
+            id = ID_FOLDER_IMG_SINGLE
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            visibility = View.GONE
+        }
+        previewBox.addView(
+            singleImage,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        val grid2x2 = LinearLayout(context).apply {
+            id = ID_FOLDER_GRID
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        val slotIds = intArrayOf(ID_FOLDER_IMG_0, ID_FOLDER_IMG_1, ID_FOLDER_IMG_2, ID_FOLDER_IMG_3)
+        for (r in 0 until 2) {
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+            }
+            for (c in 0 until 2) {
+                val idx = r * 2 + c
+                val img = ImageView(context).apply {
+                    id = slotIds[idx]
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                }
+                row.addView(
+                    img,
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+                        if (c == 0) marginEnd = dp(1)
+                    }
+                )
+            }
+            grid2x2.addView(
+                row,
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f).apply {
+                    if (r == 0) bottomMargin = dp(1)
+                }
+            )
+        }
+        previewBox.addView(
+            grid2x2,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        val emptyIcon = FolderGlyphView(context).apply {
+            id = ID_FOLDER_EMPTY_ICON
+        }
+        previewBox.addView(
+            emptyIcon,
+            FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER)
+        )
+
+        val footer = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(4), dp(2), 0)
+        }
+        val smallIcon = FolderGlyphView(context).apply {
+            id = ID_FOLDER_FOOTER_ICON
+        }
+        footer.addView(
+            smallIcon,
+            LinearLayout.LayoutParams(dp(13), dp(13)).apply { marginEnd = dp(4) }
+        )
+        val nameView = TextView(context).apply {
+            id = ID_FOLDER_NAME
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTypeface(typeface, Typeface.BOLD)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        footer.addView(
+            nameView,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        val countView = TextView(context).apply {
+            id = ID_FOLDER_COUNT
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
+            setPadding(dp(4), 0, 0, 0)
+        }
+        footer.addView(countView)
+        card.addView(
+            footer,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(22)
+            )
+        )
+
+        return card
+    }
+
+    private class FolderGlyphView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        private val path = android.graphics.Path()
+        var tintColor: Int = Color.GRAY
+            set(value) {
+                if (field != value) {
+                    field = value
+                    invalidate()
+                }
+            }
+
+        override fun onDraw(canvas: Canvas) {
+            val w = width.toFloat()
+            val h = height.toFloat()
+            if (w <= 0f || h <= 0f) return
+            paint.color = tintColor
+            paint.strokeWidth = maxOf(w * 0.085f, 1.5f)
+            val l = w * 0.12f
+            val r = w * 0.88f
+            val t = h * 0.18f
+            val b = h * 0.84f
+            val tabR = w * 0.44f
+            val tabB = h * 0.30f
+            path.reset()
+            path.moveTo(l, t + h * 0.06f)
+            path.lineTo(l, b - h * 0.06f)
+            path.quadTo(l, b, l + w * 0.06f, b)
+            path.lineTo(r - w * 0.06f, b)
+            path.quadTo(r, b, r, b - h * 0.06f)
+            path.lineTo(r, tabB + h * 0.06f)
+            path.quadTo(r, tabB, r - w * 0.06f, tabB)
+            path.lineTo(tabR + w * 0.05f, tabB)
+            path.lineTo(tabR - w * 0.03f, t)
+            path.lineTo(l + w * 0.06f, t)
+            path.quadTo(l, t, l, t + h * 0.06f)
+            path.close()
+            canvas.drawPath(path, paint)
+        }
+    }
+
+    private inner class FolderHeaderHolder(private val view: View) : RecyclerView.ViewHolder(view) {
+        private val chevronView = view.findViewById<TextView>(ID_FOLDER_HEADER_CHEVRON)
+        private val titleView = view.findViewById<TextView>(ID_FOLDER_HEADER_TITLE)
+
+        init {
+            view.setOnClickListener {
+                if (isPinching || pinchBlockedUntilUp) return@setOnClickListener
+                events.emit("toggleSubfolders", emptyMap<String, Any>())
+            }
+        }
+
+        fun bind(entry: GridEntry) {
+            chevronView.text = if (entry.collapsed) "▸" else "▾"
+            chevronView.setTextColor(theme.textMuted)
+            titleView.text = entry.title
+            titleView.setTextColor(theme.text)
+        }
+    }
+
+    private inner class FolderHolder(
+        private val root: View,
+        private val layer: GridLayer
+    ) : RecyclerView.ViewHolder(root) {
+        private val previewBox = root.findViewById<FrameLayout>(ID_FOLDER_PREVIEW)
+        private val singleImage = root.findViewById<ImageView>(ID_FOLDER_IMG_SINGLE)
+        private val grid2x2 = root.findViewById<LinearLayout>(ID_FOLDER_GRID)
+        private val slotImages = arrayOf(
+            root.findViewById<ImageView>(ID_FOLDER_IMG_0),
+            root.findViewById<ImageView>(ID_FOLDER_IMG_1),
+            root.findViewById<ImageView>(ID_FOLDER_IMG_2),
+            root.findViewById<ImageView>(ID_FOLDER_IMG_3)
+        )
+        private val emptyIcon = root.findViewById<FolderGlyphView>(ID_FOLDER_EMPTY_ICON)
+        private val footerIcon = root.findViewById<FolderGlyphView>(ID_FOLDER_FOOTER_ICON)
+        private val nameView = root.findViewById<TextView>(ID_FOLDER_NAME)
+        private val countView = root.findViewById<TextView>(ID_FOLDER_COUNT)
+        private val cardBg = GradientDrawable().apply { cornerRadius = dp(10).toFloat() }
+        private val previewBg = GradientDrawable().apply { cornerRadius = dp(6).toFloat() }
+        private var boundThemeVersion = -1
+        private var currentEntry: GridEntry? = null
+
+        init {
+            root.setOnClickListener {
+                if (isPinching || pinchBlockedUntilUp || layer !== primaryLayer) return@setOnClickListener
+                currentEntry?.let { e ->
+                    events.emit("pressFolder", mapOf("id" to e.id))
+                }
+            }
+        }
+
+        fun bind(entry: GridEntry, parentWidthPx: Int, cfg: LayoutConfig) {
+            currentEntry = entry
+            val colWidth = maxOf((parentWidthPx - dp(6) * cfg.cols) / cfg.cols, dp(48))
+            val cellHeight = tileHeightFor(entry, parentWidthPx, cfg)
+            val lp = root.layoutParams
+            if (lp.height != cellHeight) {
+                lp.height = cellHeight
+                if (!cfg.isWaterfall) {
+                    root.layoutParams = lp
+                }
+            }
+            if (boundThemeVersion != themeVersion) {
+                boundThemeVersion = themeVersion
+                cardBg.setColor(theme.surface)
+                cardBg.setStroke(1, theme.border)
+                root.background = cardBg
+                previewBg.setColor(theme.surfaceAlt)
+                previewBox.background = previewBg
+                emptyIcon.tintColor = theme.accent
+                footerIcon.tintColor = theme.textMuted
+                nameView.setTextColor(theme.text)
+                countView.setTextColor(theme.faint)
+                for (img in slotImages) {
+                    img.setBackgroundColor(theme.surfaceAlt)
+                }
+            }
+            nameView.text = entry.title
+            countView.text = "${entry.count}"
+
+            val urls = entry.thumbUrls
+            when (urls.size) {
+                0 -> {
+                    singleImage.visibility = View.GONE
+                    grid2x2.visibility = View.GONE
+                    emptyIcon.visibility = View.VISIBLE
+                }
+                1 -> {
+                    emptyIcon.visibility = View.GONE
+                    grid2x2.visibility = View.GONE
+                    singleImage.visibility = View.VISIBLE
+                    ThumbLoader.load(context, singleImage, urls[0], colWidth)
+                }
+                else -> {
+                    emptyIcon.visibility = View.GONE
+                    singleImage.visibility = View.GONE
+                    grid2x2.visibility = View.VISIBLE
+                    val slotPx = maxOf(colWidth / 2, dp(32))
+                    for (i in 0 until 4) {
+                        val img = slotImages[i]
+                        if (i < urls.size) {
+                            ThumbLoader.load(context, img, urls[i], slotPx)
+                        } else {
+                            img.setImageDrawable(null)
+                            img.tag = null
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     companion object {
         private const val MODE_AUTO = "auto"
         private const val MODE_WATERFALL = "waterfall"
@@ -1772,6 +2141,8 @@ class GalleryGridComponent(
 
         private const val TYPE_HEADER = 0
         private const val TYPE_TILE = 1
+        private const val TYPE_FOLDER_HEADER = 2
+        private const val TYPE_FOLDER = 3
         private const val ID_HEADER_TITLE = 1001
         private const val ID_HEADER_COUNT = 1002
         private const val ID_TILE_IMAGE = 2001
@@ -1779,6 +2150,19 @@ class GalleryGridComponent(
         private const val ID_TILE_SHARE = 2003
         private const val ID_TILE_SELECT = 2004
         private const val ID_TILE_SELECT_CHECK = 2005
+        private const val ID_FOLDER_HEADER_CHEVRON = 3001
+        private const val ID_FOLDER_HEADER_TITLE = 3002
+        private const val ID_FOLDER_PREVIEW = 3003
+        private const val ID_FOLDER_IMG_SINGLE = 3004
+        private const val ID_FOLDER_GRID = 3005
+        private const val ID_FOLDER_IMG_0 = 3006
+        private const val ID_FOLDER_IMG_1 = 3007
+        private const val ID_FOLDER_IMG_2 = 3008
+        private const val ID_FOLDER_IMG_3 = 3009
+        private const val ID_FOLDER_EMPTY_ICON = 3010
+        private const val ID_FOLDER_FOOTER_ICON = 3011
+        private const val ID_FOLDER_NAME = 3012
+        private const val ID_FOLDER_COUNT = 3013
 
         private fun normalizeLayoutMode(raw: String?): String = when (raw) {
             MODE_WATERFALL -> MODE_WATERFALL

@@ -48,6 +48,7 @@ type Manifest struct {
 	URLPatterns   []string            `json:"urlPatterns,omitempty"`
 	URLHosts      []string            `json:"urlHosts,omitempty"`
 	Permissions   Permissions         `json:"permissions,omitempty"`
+	UI            PluginUI            `json:"ui,omitempty"`
 	Settings      []Setting           `json:"settings,omitempty"`
 	Hooks         []string            `json:"hooks,omitempty"`
 	Homepage      string              `json:"homepage,omitempty"`
@@ -68,9 +69,32 @@ type PreviewContribution struct {
 	Platforms    []string `json:"platforms,omitempty"`
 }
 
+// PluginUI describes HTML pages packaged with the plugin.
+type PluginUI struct {
+	Panels    []PluginUIEntry         `json:"panels,omitempty"`
+	Windows   []PluginUIEntry         `json:"windows,omitempty"`
+	Inspector []PluginInspectorAction `json:"inspector,omitempty"`
+}
+
+// PluginInspectorAction contributes a button for a selected asset.
+type PluginInspectorAction struct {
+	ID     string `json:"id"`
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Window string `json:"window"`
+}
+
+type PluginUIEntry struct {
+	ID       string `json:"id"`
+	Title    string `json:"title,omitempty"`
+	Location string `json:"location,omitempty"`
+	Entry    string `json:"entry"`
+}
+
 // Permissions declares the capabilities a plugin may use.
 type Permissions struct {
 	Network      []string `json:"network,omitempty"`
+	Assets       []string `json:"assets,omitempty"`
 	Process      []string `json:"process,omitempty"`
 	OpenExternal bool     `json:"openExternal,omitempty"`
 }
@@ -91,6 +115,7 @@ type Plugin struct {
 	Dir         string
 	Enabled     bool
 	Settings    map[string]string
+	Grants      map[string]string
 	urlPatterns []*regexp.Regexp
 }
 
@@ -114,6 +139,7 @@ type Host struct {
 type pluginState struct {
 	Enabled  bool              `json:"enabled"`
 	Settings map[string]string `json:"settings"`
+	Grants   map[string]string `json:"grants,omitempty"`
 }
 
 // urlMatchIndex makes URL drags O(1) for declared hosts and only runs regular
@@ -133,8 +159,8 @@ func NewHost(baseDir string) *Host {
 		plugins:    map[string]*Plugin{},
 		states:     map[string]pluginState{},
 		indexPath:  filepath.Join(baseDir, "native-plugins.json"),
-		timeout:    30 * time.Second,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		timeout:    60 * time.Second,
+		httpClient: &http.Client{Timeout: 60 * time.Second},
 		modules:    map[string]cachedModule{},
 	}
 	_ = os.MkdirAll(baseDir, 0o755)
@@ -205,18 +231,21 @@ func (h *Host) Scan() {
 			// Keep the live enabled/settings state.
 			found[id].Enabled = p.Enabled
 			found[id].Settings = p.Settings
+			found[id].Grants = p.Grants
 		}
 	}
 	for id, p := range found {
 		if old, ok := h.plugins[id]; ok {
 			p.Enabled = old.Enabled
 			p.Settings = old.Settings
+			p.Grants = old.Grants
 		} else if state, ok := h.states[id]; ok {
 			// NewHost may have pruned the placeholder for a missing directory
 			// before RegisterBuiltin runs. Keep persisted state until the
 			// built-in plugin is registered.
 			p.Enabled = state.Enabled
 			p.Settings = state.Settings
+			p.Grants = state.Grants
 		}
 		h.plugins[id] = p
 		h.logPlugin("info", p, "manifest.loaded", fmt.Sprintf("version=%s hooks=%v network=%v process=%v openExternal=%t", p.Manifest.Version, p.Manifest.Hooks, p.Manifest.Permissions.Network, p.Manifest.Permissions.Process, p.Manifest.Permissions.OpenExternal), 0)
@@ -322,7 +351,7 @@ func loadPlugin(dir string) (*Plugin, error) {
 	if err := validateManifest(&m); err != nil {
 		return nil, err
 	}
-	if m.Main == "" && m.Native == "" {
+	if m.Main == "" && m.Native == "" && len(m.UI.Panels) == 0 && len(m.UI.Windows) == 0 {
 		m.Main = "index.js"
 	}
 	if m.Main != "" {
@@ -365,6 +394,30 @@ func validateManifest(m *Manifest) error {
 	}
 	if m.Main != "" && (strings.Contains(m.Main, "..") || filepath.IsAbs(m.Main)) {
 		return errors.New("plugin main must stay inside its directory")
+	}
+	for _, entries := range [][]PluginUIEntry{m.UI.Panels, m.UI.Windows} {
+		seen := map[string]bool{}
+		for _, entry := range entries {
+			if entry.ID == "" || strings.ContainsAny(entry.ID, "/\\") || seen[entry.ID] {
+				return fmt.Errorf("invalid or duplicate plugin UI id %q", entry.ID)
+			}
+			seen[entry.ID] = true
+			clean := filepath.ToSlash(filepath.Clean(entry.Entry))
+			if entry.Entry == "" || filepath.IsAbs(entry.Entry) || strings.Contains(entry.Entry, "\\") || clean == ".." || strings.HasPrefix(clean, "../") {
+				return fmt.Errorf("plugin UI entry must stay inside its directory: %q", entry.Entry)
+			}
+		}
+	}
+	windowIDs := make(map[string]bool, len(m.UI.Windows))
+	for _, window := range m.UI.Windows {
+		windowIDs[window.ID] = true
+	}
+	actionIDs := map[string]bool{}
+	for _, action := range m.UI.Inspector {
+		if action.ID == "" || strings.ContainsAny(action.ID, "/\\") || actionIDs[action.ID] || strings.TrimSpace(action.Title) == "" || action.Type != "window" || !windowIDs[action.Window] {
+			return fmt.Errorf("invalid inspector action %q", action.ID)
+		}
+		actionIDs[action.ID] = true
 	}
 	if m.Preview.Renderer != "" {
 		if m.Native == "" {
@@ -417,6 +470,11 @@ func validateManifest(m *Manifest) error {
 	}
 	if m.Main == "" && len(m.Hooks) > 0 {
 		return errors.New("native plugins cannot declare JavaScript hooks")
+	}
+	for _, permission := range m.Permissions.Assets {
+		if permission != "read" && permission != "write" {
+			return fmt.Errorf("unknown asset permission %q", permission)
+		}
 	}
 	for _, host := range m.Permissions.Network {
 		host = strings.TrimSpace(host)
@@ -485,6 +543,14 @@ func (h *Host) IsEnabled(id string) bool {
 	defer h.mu.RUnlock()
 	p, ok := h.plugins[id]
 	return ok && p.Enabled
+}
+
+// MatchesItem reports whether a plugin declares support for an asset.
+func (p *Plugin) MatchesItem(extension, mimeType string) bool {
+	if len(p.Manifest.Extensions) == 0 && len(p.Manifest.MimePrefixes) == 0 {
+		return true
+	}
+	return manifestMatchesItem(p.Manifest, extension, mimeType)
 }
 
 func manifestMatchesItem(m Manifest, extension, mimeType string) bool {
@@ -1028,19 +1094,70 @@ func (h *Host) Actions(ctx ItemContext) []Action {
 	return out
 }
 
+// FindByCapability returns the first enabled plugin that advertises the given
+// capability string in its manifest (e.g. "ai-image-edit").
+func (h *Host) FindByCapability(capability string) *Plugin {
+	capability = strings.TrimSpace(capability)
+	if capability == "" {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var best *Plugin
+	for _, p := range h.plugins {
+		if !p.Enabled {
+			continue
+		}
+		matched := false
+		for _, capName := range p.Manifest.Capabilities {
+			if strings.EqualFold(strings.TrimSpace(capName), capability) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		if best == nil || p.Manifest.Priority > best.Manifest.Priority ||
+			(p.Manifest.Priority == best.Manifest.Priority && p.Manifest.ID < best.Manifest.ID) {
+			best = p
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	cp := *best
+	return &cp
+}
+
 // RunAction executes a previously advertised action.
 func (h *Host) RunAction(id string, ctx ItemContext) error {
 	pluginID, actionID, ok := strings.Cut(id, ":")
 	if !ok {
 		return errors.New("invalid action id")
 	}
+	return h.CallAction(pluginID, actionID, map[string]any{
+		"items":  ctx.Items,
+		"item":   ctx.Item,
+		"folder": ctx.Folder,
+	}, nil)
+}
+
+// CallAction invokes a plugin's runAction hook with arbitrary JSON parameters
+// and decodes the returned JSON value into out (when non-nil).
+func (h *Host) CallAction(pluginID, actionID string, params map[string]any, out any) error {
 	p, found := h.Get(pluginID)
 	if !found || !p.Enabled || p.Manifest.Main == "" || !hasHook(p.Manifest, "runAction") {
 		return errors.New("plugin action is not declared")
 	}
-	payload := map[string]any{"id": actionID, "items": ctx.Items, "item": ctx.Item, "folder": ctx.Folder}
-	var out any
-	return h.call(p, "runAction", payload, &out)
+	payload := map[string]any{"id": actionID}
+	for k, v := range params {
+		if k == "id" {
+			continue
+		}
+		payload[k] = v
+	}
+	return h.call(p, "runAction", payload, out)
 }
 
 // CanGenerateThumbnail reports whether an enabled JS plugin advertises the
@@ -1100,7 +1217,7 @@ func (h *Host) loadIndex() {
 	}
 	for id, s := range state {
 		h.states[id] = s
-		h.plugins[id] = &Plugin{Manifest: Manifest{ID: id}, Enabled: s.Enabled, Settings: s.Settings}
+		h.plugins[id] = &Plugin{Manifest: Manifest{ID: id}, Enabled: s.Enabled, Settings: s.Settings, Grants: s.Grants}
 	}
 }
 
@@ -1110,7 +1227,7 @@ func (h *Host) saveIndexLocked() {
 		if p.Manifest.Name == "" {
 			continue
 		}
-		entry := pluginState{Enabled: p.Enabled, Settings: p.Settings}
+		entry := pluginState{Enabled: p.Enabled, Settings: p.Settings, Grants: p.Grants}
 		h.states[id] = entry
 		state[id] = entry
 	}

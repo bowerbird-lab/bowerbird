@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/coder/websocket v1.8.14
 	github.com/dop251/goja v0.0.0-20261027234916-5f913d1693d9
-	github.com/nsgo-dev/nsgo v0.1.0
+	github.com/nsgo-dev/nsgo v0.2.0
 )
 
 require (
@@ -33,3 +33,5 @@ require (
 )
 
 tool github.com/nsgo-dev/nsgo/cmd/nsgo
+
+replace github.com/nsgo-dev/nsgo => github.com/owocc/nsgo v0.2.1-0.20261119090342-7334ec15f677

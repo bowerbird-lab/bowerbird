@@ -534,7 +534,10 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 				},
 				Children: []core.Node{
 					core.Text{Content: "素材已不在当前列表", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Muted)},
-					nsui.Button{Text: "返回", Variant: nsui.ButtonSecondary, OnPress: func() { a.backFromDetail() }},
+					mobileActionButton(cx, colors, mobileBtnSpec{
+						Text: "返回", Variant: nsui.ButtonSecondary,
+						OnPress: func() { a.backFromDetail() },
+					}),
 				},
 			}
 		}
@@ -821,30 +824,48 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 						}
 					},
 					Children: []core.Node{
-						nsui.IconButton{Icon: lucide.ArrowLeft, Label: "返回", Size: 36, IconSize: 20, Tint: onPreview,
-							OnPress: func() { a.backFromDetail() }, TestID: "detail.back"},
+						mobileIconButton(cx, mobileIconBtnSpec{
+							TestID: "detail.back", Label: "返回", Icon: lucide.ArrowLeft,
+							Variant: mobileIconGhost, Tint: onPreview,
+							OnPress: func() { a.backFromDetail() },
+						}),
 						core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 1}, Children: []core.Node{
 							core.Text{Content: item.DisplayName(), MaxLines: 1,
 								Style: nsui.TypeBody.Merge(core.Style{Color: onPreview()})},
 							core.Text{Content: itoa(index+1) + " / " + itoa(total),
 								Style: nsui.TypeCaption.Merge(core.Style{Color: onPreviewMuted()})},
 						}},
-						nsui.IconButton{Icon: lucide.Info, Label: "信息", Size: 36, IconSize: 19, Tint: onPreview,
+						mobileIconButton(cx, mobileIconBtnSpec{
+							TestID: "detail.meta", Label: "信息", Icon: lucide.Info, IconSize: 19,
+							Variant: mobileIconGhost, Tint: onPreview,
 							OnPress: func() {
 								a.ensureItemDetail(cx, item.ID)
 								a.metaOpen.Set(true)
-							}, TestID: "detail.meta"},
-						nsui.IconButton{Icon: lucide.Copy, Label: "复制", Size: 36, IconSize: 19, Tint: onPreview,
-							OnPress: func() { a.copyItemContent(cx, item) }, TestID: "detail.copy"},
-						nsui.IconButton{Icon: lucide.Download, Label: "下载", Size: 36, IconSize: 19, Tint: onPreview,
-							OnPress: func() { a.exportItem(cx, item, false) }, TestID: "detail.download"},
-						nsui.IconButton{Icon: lucide.Share2, Label: "分享", Size: 36, IconSize: 19, Tint: onPreview,
-							OnPress: func() { a.exportItem(cx, item, true) }, TestID: "detail.share"},
-						nsui.IconButton{Icon: lucide.Trash, Label: "删除", Size: 36, IconSize: 19, Tint: onPreview,
+							},
+						}),
+						mobileIconButton(cx, mobileIconBtnSpec{
+							TestID: "detail.copy", Label: "复制", Icon: lucide.Copy, IconSize: 19,
+							Variant: mobileIconGhost, Tint: onPreview,
+							OnPress: func() { a.copyItemContent(cx, item) },
+						}),
+						mobileIconButton(cx, mobileIconBtnSpec{
+							TestID: "detail.download", Label: "下载", Icon: lucide.Download, IconSize: 19,
+							Variant: mobileIconGhost, Tint: onPreview,
+							OnPress: func() { a.exportItem(cx, item, false) },
+						}),
+						mobileIconButton(cx, mobileIconBtnSpec{
+							TestID: "detail.share", Label: "分享", Icon: lucide.Share2, IconSize: 19,
+							Variant: mobileIconGhost, Tint: onPreview,
+							OnPress: func() { a.exportItem(cx, item, true) },
+						}),
+						mobileIconButton(cx, mobileIconBtnSpec{
+							TestID: "detail.delete", Label: "删除", Icon: lucide.Trash, IconSize: 19,
+							Variant: mobileIconGhost, Tint: onPreview,
 							OnPress: func() {
 								a.quickDelTarget = item
 								a.confirmDel.Set(true)
-							}, TestID: "detail.delete"},
+							},
+						}),
 					},
 				}
 			},
@@ -876,8 +897,14 @@ func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Nod
 				core.Text{Content: "视频无法在应用内播放", Style: nsui.TypeTitle, StyleFunc: nsui.Colored(colors.Text)},
 				core.Text{Content: msg, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{TextAlign: core.TextAlignCenter}), StyleFunc: nsui.Colored(colors.Muted)},
 				core.View{Style: core.Style{Direction: core.Row, Gap: 8}, Children: []core.Node{
-					nsui.Button{Text: "下载原视频", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, false) }},
-					nsui.Button{Text: "用其他应用打开", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, true) }},
+					mobileActionButton(cx, colors, mobileBtnSpec{
+						Text: "下载原视频", Variant: nsui.ButtonSecondary,
+						OnPress: func() { a.exportItem(cx, item, false) },
+					}),
+					mobileActionButton(cx, colors, mobileBtnSpec{
+						Text: "用其他应用打开", Variant: nsui.ButtonSecondary,
+						OnPress: func() { a.exportItem(cx, item, true) },
+					}),
 				}},
 			}}
 		}
@@ -985,11 +1012,11 @@ func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Nod
 						}
 					},
 					Children: []core.Node{
-						nsui.Button{
+						mobileActionButton(cx, colors, mobileBtnSpec{
 							Text:    func() string { if a.videoPaused.Get() { return "播放" }; return "暂停" }(),
-							Variant: nsui.ButtonSecondary,
+							Variant: nsui.ButtonSecondary, Compact: true,
 							OnPress: func() { a.videoPaused.Set(!a.videoPaused.Get()) },
-						},
+						}),
 						core.View{
 							Style: core.Style{FlexGrow: 1, Gap: 4},
 							Children: []core.Node{
@@ -1031,14 +1058,14 @@ func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Nod
 								},
 							},
 						},
-						nsui.Button{
+						mobileActionButton(cx, colors, mobileBtnSpec{
 							Text:    func() string { if a.videoMuted.Get() { return "静音" }; return "音量" }(),
-							Variant: nsui.ButtonSecondary,
+							Variant: nsui.ButtonSecondary, Compact: true,
 							OnPress: func() { a.videoMuted.Set(!a.videoMuted.Get()) },
-						},
-						nsui.Button{
+						}),
+						mobileActionButton(cx, colors, mobileBtnSpec{
 							Text:    func() string { return fmt.Sprintf("%.1fx", a.videoRate.Get()) }(),
-							Variant: nsui.ButtonGhost,
+							Variant: nsui.ButtonGhost, Compact: true,
 							OnPress: func() {
 								if a.videoRate.Get() > 1.5 {
 									a.videoRate.Set(1.0)
@@ -1046,7 +1073,7 @@ func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Nod
 									a.videoRate.Set(2.0)
 								}
 							},
-						},
+						}),
 					},
 				},
 			},
@@ -1059,8 +1086,14 @@ func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Nod
 			core.Text{Content: "当前版本没有内置音频播放器，可下载或分享后用其他应用播放", MaxLines: 3,
 				Style: nsui.TypeCaption.Merge(core.Style{TextAlign: core.TextAlignCenter}), StyleFunc: nsui.Colored(colors.Muted)},
 			core.View{Style: core.Style{Direction: core.Row, Gap: 8}, Children: []core.Node{
-				nsui.Button{Text: "下载", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, false) }},
-				nsui.Button{Text: "分享", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, true) }},
+				mobileActionButton(cx, colors, mobileBtnSpec{
+					Text: "下载", Variant: nsui.ButtonSecondary,
+					OnPress: func() { a.exportItem(cx, item, false) },
+				}),
+				mobileActionButton(cx, colors, mobileBtnSpec{
+					Text: "分享", Variant: nsui.ButtonSecondary,
+					OnPress: func() { a.exportItem(cx, item, true) },
+				}),
 			}},
 		}}
 	}
@@ -1069,8 +1102,14 @@ func (a *App) nonImageMediaNode(cx *core.Scope, item model.ItemSummary) core.Nod
 		core.Text{Content: item.Filename, MaxLines: 2, Style: nsui.TypeCaption.Merge(core.Style{TextAlign: core.TextAlignCenter}), StyleFunc: nsui.Colored(colors.Muted)},
 		core.Text{Content: "可点击屏幕显示顶部菜单进行下载或分享", Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 		core.View{Style: core.Style{Direction: core.Row, Gap: 8}, Children: []core.Node{
-			nsui.Button{Text: "下载", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, false) }},
-			nsui.Button{Text: "分享", Variant: nsui.ButtonSecondary, OnPress: func() { a.exportItem(cx, item, true) }},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "下载", Variant: nsui.ButtonSecondary,
+				OnPress: func() { a.exportItem(cx, item, false) },
+			}),
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "分享", Variant: nsui.ButtonSecondary,
+				OnPress: func() { a.exportItem(cx, item, true) },
+			}),
 		}},
 	}}
 }
@@ -1082,11 +1121,14 @@ func (a *App) metadataSheet(cx *core.Scope, item model.ItemSummary) core.Node {
 		OnClose: func() { a.metaOpen.Set(false) },
 		Title:   "完整元数据",
 		Header: []core.Node{
-			nsui.Button{Text: "复制汇总", Variant: nsui.ButtonSecondary, OnPress: func() {
-				detail := a.detailCache[item.ID]
-				cx.SetClipboard(itemInfoText(item, detail))
-				a.showToast("已复制 汇总信息")
-			}},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "复制汇总", Variant: nsui.ButtonSecondary, Compact: true,
+				OnPress: func() {
+					detail := a.detailCache[item.ID]
+					cx.SetClipboard(itemInfoText(item, detail))
+					a.showToast("已复制 汇总信息")
+				},
+			}),
 		},
 		Children: []core.Node{
 			core.Dynamic(func(cx *core.Scope) core.Node {
@@ -1105,13 +1147,13 @@ func (a *App) metadataSheet(cx *core.Scope, item model.ItemSummary) core.Node {
 					}
 					var copyBtn core.Node = core.View{}
 					if copyable {
-						copyBtn = nsui.IconButton{
+						copyBtn = mobileIconButton(cx, mobileIconBtnSpec{
 							Icon:     lucide.Copy,
 							Label:    "复制" + label,
-							Size:     26,
-							IconSize: 14,
+							IconSize: 16,
+							Variant:  mobileIconGhost,
 							OnPress:  func() { copyField(label, value) },
-						}
+						})
 					}
 					return core.View{
 						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, Padding: core.Symmetric(4, 0)},
@@ -1179,7 +1221,10 @@ func (a *App) metadataSheet(cx *core.Scope, item model.ItemSummary) core.Node {
 								core.Text{Content: "主色", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted(), Width: core.Pt(76)})},
 								swatch,
 								core.Text{Content: dc, Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Text(), FlexGrow: 1})},
-								nsui.IconButton{Icon: lucide.Copy, Label: "复制主色", Size: 26, IconSize: 14, OnPress: func() { copyField("主色", dc) }},
+								mobileIconButton(cx, mobileIconBtnSpec{
+									Icon: lucide.Copy, Label: "复制主色", IconSize: 16, Variant: mobileIconGhost,
+									OnPress: func() { copyField("主色", dc) },
+								}),
 							},
 						})
 					}
@@ -1199,8 +1244,10 @@ func (a *App) metadataSheet(cx *core.Scope, item model.ItemSummary) core.Node {
 							Children: []core.Node{
 								core.Text{Content: "调色板", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted(), Width: core.Pt(76)})},
 								core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 6, FlexGrow: 1}, Children: swatches},
-								nsui.IconButton{Icon: lucide.Copy, Label: "复制调色板", Size: 26, IconSize: 14,
-									OnPress: func() { copyField("调色板", strings.Join(detail.Palette, ", ")) }},
+								mobileIconButton(cx, mobileIconBtnSpec{
+									Icon: lucide.Copy, Label: "复制调色板", IconSize: 16, Variant: mobileIconGhost,
+									OnPress: func() { copyField("调色板", strings.Join(detail.Palette, ", ")) },
+								}),
 							},
 						})
 					}
@@ -1223,17 +1270,24 @@ func (a *App) metadataSheet(cx *core.Scope, item model.ItemSummary) core.Node {
 }
 
 func (a *App) deleteDialog(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
 	return nsui.Dialog{
 		Open:         func() bool { return a.confirmDel.Get() },
 		OnOpenChange: func(open bool, _ base.Reason) { a.confirmDel.Set(open) },
 		Title:        "删除素材？",
 		Description:  "「" + a.quickDelTarget.DisplayName() + "」将移到电脑的废纸篓，可在废纸篓中恢复。",
 		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.confirmDel.Set(false) }},
-			nsui.Button{Text: "移到废纸篓", OnPress: func() {
-				a.confirmDel.Set(false)
-				a.deleteItem(cx, a.quickDelTarget)
-			}},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "取消", Variant: nsui.ButtonGhost,
+				OnPress: func() { a.confirmDel.Set(false) },
+			}),
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "移到废纸篓", Variant: nsui.ButtonPrimary,
+				OnPress: func() {
+					a.confirmDel.Set(false)
+					a.deleteItem(cx, a.quickDelTarget)
+				},
+			}),
 		},
 	}
 }
@@ -1471,7 +1525,7 @@ func (a *App) renderPluginUI(cx *core.Scope, item model.ItemSummary, node plugin
 		}
 	case "button":
 		action := node.Action
-		return nsui.Button{
+		return mobileActionButton(cx, colors, mobileBtnSpec{
 			Text:    node.Text,
 			Variant: nsui.ButtonSecondary,
 			OnPress: func() {
@@ -1482,7 +1536,7 @@ func (a *App) renderPluginUI(cx *core.Scope, item model.ItemSummary, node plugin
 					a.exportItem(cx, item, true)
 				}
 			},
-		}
+		})
 	case "row":
 		var children []core.Node
 		for _, ch := range node.Children {

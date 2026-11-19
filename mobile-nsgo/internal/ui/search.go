@@ -33,13 +33,15 @@ func (a *App) searchPage(cx *core.Scope) core.Node {
 		Value: func() string { return a.searchText.Get() }, OnChange: a.searchText.Set,
 		Placeholder: "搜索名称、标签、备注…", OnSubmit: func(string) { a.applySearch(cx) },
 		ReturnKeyType: core.ReturnKeySearch, TestID: "search.text",
-		Style: core.Style{
-			FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Height: core.Pt(42),
-			CornerRadius: 21, Padding: core.Symmetric(0, 16),
-			Background: colors.Field(), BorderWidth: 1, BorderColor: colors.FieldBorder(),
-			FontSize: 14, LineHeight: 18, Color: colors.Text(),
-			PlaceholderColor: colors.Faint(), CaretColor: colors.Accent(),
-			SelectionColor: cx.Palette().Selection,
+		StyleFunc: func() core.Style {
+			return core.Style{
+				FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Height: core.Pt(mobileIconButtonSize),
+				CornerRadius: themeButtonRadius(cx), Padding: core.Symmetric(0, 18),
+				Background: colors.Field(), BorderWidth: 1, BorderColor: colors.FieldBorder(),
+				FontSize: 14, LineHeight: 18, Color: colors.Text(),
+				PlaceholderColor: colors.Faint(), CaretColor: colors.Accent(),
+				SelectionColor: cx.Palette().Selection,
+			}
 		},
 	}
 	header := a.appHeader(cx, appHeaderSpec{
@@ -47,7 +49,7 @@ func (a *App) searchPage(cx *core.Scope) core.Node {
 		TestID: "search.header",
 		Children: []core.Node{
 			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
-				appCircleButton(colors, "search.back", lucide.ChevronLeft, func(core.PressEvent) {
+				appCircleButton(cx, "search.back", lucide.ChevronLeft, func(core.PressEvent) {
 					a.detailFrom = screenGallery
 					a.screen.Set(screenGallery)
 				}),
@@ -87,13 +89,20 @@ func (a *App) searchPage(cx *core.Scope) core.Node {
 			Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
 		}
 	}
-	return core.View{Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}, Children: []core.Node{
+	return core.View{
+		StyleFunc: func() core.Style {
+			return core.Style{
+				Width: core.Pct(100), Height: core.Pct(100),
+				Background: colors.Background(), Overflow: core.Hidden,
+			}
+		},
+		Children: []core.Node{
 		core.View{StyleFunc: func() core.Style {
 			safe := cx.Env().SafeArea()
 			pad := safeSideInset(safe)
 			return core.Style{
 				Width: core.Pct(100), Height: core.Pct(100), Gap: 8,
-				Padding: core.Edges{Top: safe.Top + 56, Bottom: safe.Bottom + 12, Left: pad, Right: pad},
+				Padding: core.Edges{Top: safe.Top + 58, Bottom: safe.Bottom + 12, Left: pad, Right: pad},
 			}
 		}, Children: []core.Node{
 			filterRow,
@@ -102,13 +111,16 @@ func (a *App) searchPage(cx *core.Scope) core.Node {
 					a.rev.Get()
 					return searchCount(a.searchGallery.Snapshot())
 				}, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
-				nsui.Button{Text: "重置", Variant: nsui.ButtonGhost, OnPress: func() {
-					a.searchText.Set("")
-					a.searchType.Set("")
-					a.searchOrient.Set("")
-					a.searchExtra = query.Spec{}
-					a.applySearch(cx)
-				}},
+				mobileActionButton(cx, colors, mobileBtnSpec{
+					Text: "重置", Variant: nsui.ButtonGhost, Compact: true,
+					OnPress: func() {
+						a.searchText.Set("")
+						a.searchType.Set("")
+						a.searchOrient.Set("")
+						a.searchExtra = query.Spec{}
+						a.applySearch(cx)
+					},
+				}),
 			}},
 			a.errorBanner(cx, func() error { a.rev.Get(); return a.searchGallery.Snapshot().Err }),
 			results,
@@ -125,21 +137,17 @@ func (a *App) searchPage(cx *core.Scope) core.Node {
 // every condition, so the search page no longer shows a chip for each value.
 func (a *App) searchFilterRow(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
-	children := []core.Node{core.View{
-		TestID: "search.filter", Label: "添加筛选条件",
-		StyleFunc: func() core.Style {
-			return core.Style{
-				Width: core.Pt(32), Height: core.Pt(32), CornerRadius: 16,
-				AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
-				Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
-			}
-		},
-		OnPress:  func(core.PressEvent) { a.openFilterSheet("search") },
-		Children: []core.Node{nsui.Icon(lucide.Plus, 18, colors.Text)},
-	}}
+	children := []core.Node{mobileIconButton(cx, mobileIconBtnSpec{
+		TestID:   "search.filter",
+		Label:    "添加筛选条件",
+		Icon:     lucide.Plus,
+		IconSize: 20,
+		Variant:  mobileIconSurface,
+		OnPress:  func() { a.openFilterSheet("search") },
+	})}
 	for _, label := range a.searchFilterLabels() {
 		label := label
-		children = append(children, drawerChip(colors, label, func() bool { return true }, func() {
+		children = append(children, drawerChip(cx, colors, label, func() bool { return true }, func() {
 			a.openFilterSheet("search")
 		}))
 	}
@@ -312,5 +320,5 @@ func (a *App) currentGalleryFor(from string) *appstate.Gallery {
 	if from == screenSearch {
 		return a.searchGallery
 	}
-	return a.gallery
+	return a.activeGallery()
 }

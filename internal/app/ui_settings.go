@@ -822,6 +822,9 @@ func (a *App) settingsPlugins(c *ui.Context) {
 			a.dialogValue = ""
 			a.pendingInstall = a.svc.GetPendingPluginInstall()
 		}
+		if ui.Button(c.Key("plugin-refresh"), a.t("settings.plugins.refresh")).Disabled(a.pluginScanning || a.pluginHost == nil).Clicked() {
+			a.rescanPlugins()
+		}
 		if ui.Button(c, a.t("settings.plugins.openFolder")).Clicked() {
 			_ = a.svc.OpenPluginsFolder()
 		}
@@ -856,6 +859,9 @@ func (a *App) settingsPlugins(c *ui.Context) {
 						_ = a.svc.SetPluginEnabled(pl.ID, on)
 					}
 					pl.Enabled = on
+					if a.win != nil {
+						a.win.Invalidate()
+					}
 					if on {
 						// Enabling a preview plugin may unlock cover generation for
 						// items already loaded on the page.
@@ -866,25 +872,83 @@ func (a *App) settingsPlugins(c *ui.Context) {
 			// Plugin settings rendered from the manifest.
 			if a.pluginHost != nil {
 				if hosted, ok := a.pluginHost.Get(pl.ID); ok {
+					if len(hosted.Manifest.UI.Windows)+len(hosted.Manifest.UI.Panels) > 0 {
+						if len(hosted.Manifest.Permissions.Network) > 0 {
+							on := a.pluginHost.UIGranted(pl.ID, "network")
+							a.settingsRow(c, a.t("settings.plugins.allowNetwork"), strings.Join(hosted.Manifest.Permissions.Network, ", "), func() {
+								if ui.Switch(c.Key("plugin-network-"+pl.ID), &on).Changed() {
+									a.pluginHost.SetUIGrant(pl.ID, "network", on)
+								}
+							})
+						}
+						for _, capability := range hosted.Manifest.Permissions.Assets {
+							capability := capability
+							grant := "assets." + capability
+							on := a.pluginHost.UIGranted(pl.ID, grant)
+							label := a.t("settings.plugins.allowAssetRead")
+							if capability == "write" {
+								label = a.t("settings.plugins.allowAssetWrite")
+							}
+							a.settingsRow(c, label, "", func() {
+								if ui.Switch(c.Key("plugin-grant-"+pl.ID+grant), &on).Changed() {
+									a.pluginHost.SetUIGrant(pl.ID, grant, on)
+								}
+							})
+						}
+					}
 					for _, setting := range hosted.Manifest.Settings {
 						setting := setting
-						val := hosted.Settings[setting.Key]
-						if val == "" {
+						val, exists := hosted.Settings[setting.Key]
+						if !exists {
 							val = setting.Default
 						}
+						fieldID := pl.ID + ":" + setting.Key
 						a.settingsRow(c, setting.Label, setting.Help, func() {
-							input := ui.TextInput(c.Key("plugin-setting-"+pl.ID+"-"+setting.Key), &val).Width(220).FontSize(12)
-							if setting.Placeholder != "" {
-								input.Placeholder(setting.Placeholder)
-							}
-							input.OnSubmit(func() {
-								a.pluginHost.SetSetting(pl.ID, setting.Key, val)
+							ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
+								input := ui.TextInput(c.Key("plugin-setting-"+fieldID), &val).Width(220).FontSize(12)
+								if setting.Placeholder != "" {
+									input.Placeholder(setting.Placeholder)
+								}
+								if setting.Secret && !a.pluginSecretVisible[fieldID] {
+									input.Password()
+								}
+								input.OnChange(func() {
+									a.pluginHost.SetSetting(pl.ID, setting.Key, val)
+								})
+								if setting.Secret {
+									label := a.t("settings.plugins.showSecret")
+									if a.pluginSecretVisible[fieldID] {
+										label = a.t("settings.plugins.hideSecret")
+									}
+									a.iconButton(c, "plugin-secret-"+fieldID, iconEye, a.pluginSecretVisible[fieldID], label, func() {
+										if a.pluginSecretVisible == nil {
+											a.pluginSecretVisible = make(map[string]bool)
+										}
+										a.pluginSecretVisible[fieldID] = !a.pluginSecretVisible[fieldID]
+									})
+								}
 							})
 						})
 					}
 				}
 			}
 			ui.Row(c).Gap(8).Children(func() {
+				if a.pluginHost != nil {
+					if hosted, ok := a.pluginHost.Get(pl.ID); ok && hosted.Enabled {
+						for _, window := range hosted.Manifest.UI.Windows {
+							window := window
+							label := window.Title
+							if label == "" {
+								label = a.t("settings.plugins.openPluginWindow")
+							}
+							if ui.Button(c.Key("plugin-window-"+pl.ID+"-"+window.ID), label).Clicked() {
+								if err := a.openPluginUI(pl.ID, window); err != nil {
+									a.showToast(err.Error())
+								}
+							}
+						}
+					}
+				}
 				if ui.Button(c, a.t("settings.plugins.openStore")).Clicked() {
 					a.openPluginStore(pl.ID)
 				}
@@ -894,6 +958,28 @@ func (a *App) settingsPlugins(c *ui.Context) {
 			})
 		})
 	}
+}
+
+// rescanPlugins discovers manually added or removed plugins without blocking the settings UI.
+func (a *App) rescanPlugins() {
+	if a.pluginHost == nil || a.pluginScanning {
+		return
+	}
+	a.pluginScanning = true
+	go func() {
+		a.pluginHost.Scan()
+		var installed []core.InstalledPlugin
+		if a.svc != nil {
+			installed, _ = a.svc.ListInstalledPlugins()
+		}
+		a.postSettings(func() {
+			a.plugins = a.pluginRows(installed)
+			a.pluginScanning = false
+			if a.win != nil {
+				a.win.Invalidate()
+			}
+		})
+	}()
 }
 
 // openPluginStore opens the marketplace detail page for one plugin.

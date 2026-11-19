@@ -46,68 +46,94 @@ type ImageMeta struct {
 	Megapixels  string `json:"megapixels,omitempty"`
 }
 
+// ItemVersion records a backed-up historical file stored inside items/<id>/.
+type ItemVersion struct {
+	ID        string `json:"id"`
+	Filename  string `json:"filename"`
+	Extension string `json:"extension"`
+	MimeType  string `json:"mimeType,omitempty"`
+	Size      int64  `json:"size"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	Hex       string `json:"hex,omitempty"`
+	CreatedAt int64  `json:"createdAt"`
+	Note      string `json:"note,omitempty"`
+	Prompt    string `json:"prompt,omitempty"`
+	Source    string `json:"source,omitempty"`
+}
+
+// ReplaceItemOptions specifies metadata when replacing an item's physical file with a backup.
+type ReplaceItemOptions struct {
+	Extension string `json:"extension,omitempty"`
+	Prompt    string `json:"prompt,omitempty"`
+	Note      string `json:"note,omitempty"`
+	Source    string `json:"source,omitempty"`
+}
+
 // Item represents a single managed asset in the library.
 type Item struct {
-	ID            string     `json:"id"`
-	Hex           string     `json:"hex"` // uppercase content hash (SHA-256)
-	Name          string     `json:"name"`
-	Extension     string     `json:"extension"`
-	Filename      string     `json:"filename"`
-	Size          int64      `json:"size"`
-	MimeType      string     `json:"mimeType"`
-	Width         int        `json:"width"`
-	Height        int        `json:"height"`
-	HasThumbnail  bool       `json:"hasThumbnail"`
-	DominantColor string     `json:"dominantColor"`
-	Palette       []string   `json:"palette"`
-	Meta          *ImageMeta `json:"meta,omitempty"`
-	Note          string     `json:"note"`
-	URL           string     `json:"url"`
-	Rating        int        `json:"rating"`
-	Prompt        string     `json:"prompt"`
-	Tags          []string   `json:"tags"`
-	Folders       []string   `json:"folders"`
-	InTrash       bool       `json:"inTrash"`
-	TrashedAt     int64      `json:"trashedAt"`
-	CreatedAt     int64      `json:"createdAt"`
-	ImportedAt    int64      `json:"importedAt"`
-	UpdatedAt     int64      `json:"updatedAt"`
-	ItemPath      string     `json:"itemPath"`     // local disk path of item directory (items/<ID>)
-	FilePath      string     `json:"filePath"`     // absolute local path to physical file
-	ShellPath     string     `json:"shellPath"`    // shell-escaped path with backslash spaces
-	FileURL       string     `json:"fileUrl"`      // file:// URI with spaces %20-encoded
-	OriginalURL   string     `json:"originalUrl"`  // HTTP stream URL
-	ThumbnailURL  string     `json:"thumbnailUrl"` // HTTP thumbnail URL
-	DownloadURL   string     `json:"downloadUrl"`  // HTTP download URL for OS drag-out
+	ID            string        `json:"id"`
+	Hex           string        `json:"hex"` // uppercase content hash (SHA-256)
+	Name          string        `json:"name"`
+	Extension     string        `json:"extension"`
+	Filename      string        `json:"filename"`
+	Size          int64         `json:"size"`
+	MimeType      string        `json:"mimeType"`
+	Width         int           `json:"width"`
+	Height        int           `json:"height"`
+	HasThumbnail  bool          `json:"hasThumbnail"`
+	DominantColor string        `json:"dominantColor"`
+	Palette       []string      `json:"palette"`
+	Meta          *ImageMeta    `json:"meta,omitempty"`
+	Note          string        `json:"note"`
+	URL           string        `json:"url"`
+	Rating        int           `json:"rating"`
+	Prompt        string        `json:"prompt"`
+	Tags          []string      `json:"tags"`
+	Folders       []string      `json:"folders"`
+	Versions      []ItemVersion `json:"versions,omitempty"`
+	InTrash       bool          `json:"inTrash"`
+	TrashedAt     int64         `json:"trashedAt"`
+	CreatedAt     int64         `json:"createdAt"`
+	ImportedAt    int64         `json:"importedAt"`
+	UpdatedAt     int64         `json:"updatedAt"`
+	ItemPath      string        `json:"itemPath"`     // local disk path of item directory (items/<ID>)
+	FilePath      string        `json:"filePath"`     // absolute local path to physical file
+	ShellPath     string        `json:"shellPath"`    // shell-escaped path with backslash spaces
+	FileURL       string        `json:"fileUrl"`      // file:// URI with spaces %20-encoded
+	OriginalURL   string        `json:"originalUrl"`  // HTTP stream URL
+	ThumbnailURL  string        `json:"thumbnailUrl"` // HTTP thumbnail URL
+	DownloadURL   string        `json:"downloadUrl"`  // HTTP download URL for OS drag-out
 }
 
 // ItemMetadata is serialized inside items/<id>/metadata.json.
 type ItemMetadata struct {
-	ID             string     `json:"id"`
-	Hex            string     `json:"hex"`
-	Name           string     `json:"name"`
-	Extension      string     `json:"extension"`
-	Filename       string     `json:"filename"`
-	Size           int64      `json:"size"`
-	MimeType       string     `json:"mimeType"`
-	Width          int        `json:"width"`
-	Height         int        `json:"height"`
-	HasThumbnail   bool       `json:"hasThumbnail"`
-	DominantColor  string     `json:"dominantColor,omitempty"`
-	Palette        []string   `json:"palette,omitempty"`
-	Meta           *ImageMeta `json:"meta,omitempty"`
-	Note           string     `json:"note,omitempty"`
-	URL            string     `json:"url,omitempty"`
-	Rating         int        `json:"rating,omitempty"`
-	Prompt         string     `json:"prompt,omitempty"`
-	Tags           []string   `json:"tags"`
-	Folders        []string   `json:"folders"`
-	InTrash        bool       `json:"inTrash,omitempty"`
-	TrashedAt      int64      `json:"trashedAt,omitempty"`
-	TrashedFolders []string   `json:"trashedFolders,omitempty"`
-	CreatedAt      int64      `json:"createdAt"`
-	ImportedAt     int64      `json:"importedAt"`
-	UpdatedAt      int64      `json:"updatedAt,omitempty"`
+	ID             string        `json:"id"`
+	Hex            string        `json:"hex"`
+	Name           string        `json:"name"`
+	Extension      string        `json:"extension"`
+	Filename       string        `json:"filename"`
+	Size           int64         `json:"size"`
+	MimeType       string        `json:"mimeType"`
+	Width          int           `json:"width"`
+	Height         int           `json:"height"`
+	HasThumbnail   bool          `json:"hasThumbnail"`
+	DominantColor  string        `json:"dominantColor,omitempty"`
+	Palette        []string      `json:"palette,omitempty"`
+	Meta           *ImageMeta    `json:"meta,omitempty"`
+	Note           string        `json:"note,omitempty"`
+	URL            string        `json:"url,omitempty"`
+	Rating         int           `json:"rating,omitempty"`
+	Prompt         string        `json:"prompt,omitempty"`
+	Tags           []string      `json:"tags"`
+	Folders        []string      `json:"folders"`
+	Versions       []ItemVersion `json:"versions,omitempty"`
+	InTrash        bool          `json:"inTrash,omitempty"`
+	TrashedAt      int64         `json:"trashedAt,omitempty"`
+	TrashedFolders []string      `json:"trashedFolders,omitempty"`
+	CreatedAt      int64         `json:"createdAt"`
+	ImportedAt     int64         `json:"importedAt"`
+	UpdatedAt      int64         `json:"updatedAt,omitempty"`
 }
 
 // ImportItemOptions specifies metadata when importing items via API or browser extension.

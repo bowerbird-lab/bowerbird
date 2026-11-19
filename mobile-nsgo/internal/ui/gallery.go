@@ -27,9 +27,60 @@ var drawerSlideTransition = core.Transition{
 }
 
 func (a *App) galleryPage(cx *core.Scope) core.Node {
+	return a.galleryPageFor(cx, nil)
+}
+
+func (a *App) galleryDialogs(cx *core.Scope) core.Node {
+	return core.Group{
+		a.filterSheet(cx),
+		a.menuDialog(cx),
+		a.disconnectDialog(cx),
+		a.librariesDialog(cx),
+		a.quickPreviewSheet(cx),
+		a.restoreDialog(cx),
+		a.emptyTrashDialog(cx),
+		a.batchTagDialog(cx),
+		a.batchFolderDialog(cx),
+		a.batchDeleteDialog(cx),
+	}
+}
+
+func (a *App) galleryPageFor(cx *core.Scope, frame *folderFrame) core.Node {
 	colors := nsui.ColorsOf(cx)
 	contentPad := safeSideInset(cx.Env().SafeArea())
-	a.post(func() { a.ensureLoaded(cx) })
+	if frame == nil {
+		a.post(func() { a.ensureLoaded(cx) })
+	}
+	_, _, g, ref := a.frameSpec(frame)
+	isTop := func() bool {
+		frames := a.folderStackItems()
+		if len(frames) == 0 {
+			return frame == nil
+		}
+		return frame != nil && frames[len(frames)-1].key == frame.key
+	}
+	var leadingBtn core.Node
+	if frame == nil {
+		leadingBtn = mobileIconButton(cx, mobileIconBtnSpec{
+			TestID:  "gallery.drawer",
+			Label:   "菜单",
+			Icon:    lucide.Menu,
+			Variant: mobileIconSurface,
+			OnPress: func() {
+				a.setDrawerOpen(cx, !a.drawerOpen.Get())
+			},
+		})
+	} else {
+		leadingBtn = mobileIconButton(cx, mobileIconBtnSpec{
+			TestID:  "gallery.back",
+			Label:   "返回",
+			Icon:    lucide.ChevronLeft,
+			Variant: mobileIconSurface,
+			OnPress: func() {
+				a.popFolder()
+			},
+		})
+	}
 
 	// Floating simplified header (matches Flutter GalleryHeader + HeaderActionPill)
 	floatingHeader := a.appHeader(cx, appHeaderSpec{
@@ -45,24 +96,36 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 						StyleFunc: func() core.Style {
 							return core.Style{
 								Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4,
-								Padding: core.Symmetric(4, 8), CornerRadius: 22,
+								Padding: core.Symmetric(4, 8), CornerRadius: themeButtonRadius(cx),
 								Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
 							}
 						},
 						Children: []core.Node{
-							nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.exitMultiSelect() }},
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "取消", Variant: nsui.ButtonGhost, Compact: true,
+								OnPress: func() { a.exitMultiSelect() },
+							}),
 							core.Text{ContentFunc: func() string { a.rev.Get(); return "已选 " + itoa(len(a.selectedIDs)) + " 项" },
 								Style: nsui.TypeBody.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Text)},
-							nsui.Button{Text: "全选", Variant: nsui.ButtonGhost, OnPress: func() { a.selectAllVisible() }},
-							nsui.Button{Text: "标签", Variant: nsui.ButtonGhost,
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "全选", Variant: nsui.ButtonGhost, Compact: true,
+								OnPress: func() { a.selectAllVisible() },
+							}),
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "标签", Variant: nsui.ButtonGhost, Compact: true,
 								Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
-								OnPress:  func() { a.batchTagOpen.Set(true) }},
-							nsui.Button{Text: "目录", Variant: nsui.ButtonGhost,
+								OnPress:  func() { a.batchTagOpen.Set(true) },
+							}),
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "目录", Variant: nsui.ButtonGhost, Compact: true,
 								Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
-								OnPress:  func() { a.batchFolderOpen.Set(true) }},
-							nsui.Button{Text: "删除", Variant: nsui.ButtonGhost,
+								OnPress:  func() { a.batchFolderOpen.Set(true) },
+							}),
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "删除", Variant: nsui.ButtonGhost, Compact: true,
 								Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
-								OnPress:  func() { a.batchDelOpen.Set(true) }},
+								OnPress:  func() { a.batchDelOpen.Set(true) },
+							}),
 						},
 					}
 				},
@@ -70,35 +133,34 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 					return core.View{
 						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8},
 						Children: []core.Node{
-							core.View{
-								TestID: "gallery.drawer",
-								StyleFunc: func() core.Style {
-									return core.Style{
-										Width: core.Pt(42), Height: core.Pt(42), CornerRadius: 21,
-										AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
-										Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
-									}
-								},
-								OnPress: func(core.PressEvent) {
-									a.setDrawerOpen(cx, !a.drawerOpen.Get())
-								},
-								Children: []core.Node{nsui.Icon(lucide.Menu, 20, colors.Text)},
-							},
+							leadingBtn,
 							core.Show{
-								When: func() bool { a.rev.Get(); return a.sidebarView != SidebarAll },
+								When: func() bool { a.rev.Get(); return frame != nil || a.sidebarView != SidebarAll },
 								Then: func(cx *core.Scope) core.Node {
 									return core.View{
 										StyleFunc: func() core.Style {
 											return core.Style{
-												Padding: core.Symmetric(6, 12), CornerRadius: 16,
-												Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+												Height:         core.Pt(mobileButtonHeight),
+												Padding:        core.Symmetric(0, 14),
+												CornerRadius:   themeButtonRadius(cx),
+												JustifyContent: core.JustifyCenter,
+												Background:     colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
 											}
 										},
 										OnPress: func(core.PressEvent) {
 											a.setDrawerOpen(cx, true)
 										},
 										Children: []core.Node{
-											core.Text{ContentFunc: func() string { a.rev.Get(); return a.currentViewTitle() },
+											core.Text{ContentFunc: func() string {
+												a.rev.Get()
+												if frame != nil {
+													if name := strings.TrimSpace(a.findFolderName(frame.folderID)); name != "" {
+														return name
+													}
+													return "文件夹"
+												}
+												return a.currentViewTitle()
+											},
 												MaxLines: 1, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Text)},
 										},
 									}
@@ -109,7 +171,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 								StyleFunc: func() core.Style {
 									return core.Style{
 										Direction: core.Row, AlignItems: core.AlignCenter,
-										Height: core.Pt(42), CornerRadius: 21, Overflow: core.Hidden,
+										Height: core.Pt(mobileIconButtonSize), CornerRadius: themeButtonRadius(cx), Overflow: core.Hidden,
 										Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
 									}
 								},
@@ -117,21 +179,21 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 									core.View{
 										TestID: "gallery.search",
 										Style: core.Style{
-											Width: core.Pt(44), Height: core.Pt(42),
+											Width: core.Pt(mobileIconButtonSize), Height: core.Pt(mobileIconButtonSize),
 											AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
 										},
 										OnPress:  func(core.PressEvent) { a.openSearchPage() },
-										Children: []core.Node{nsui.Icon(lucide.Search, 19, colors.Text)},
+										Children: []core.Node{nsui.Icon(lucide.Search, 20, colors.Text)},
 									},
 									core.View{
 										TestID: "gallery.more",
 										Style: core.Style{
-											Width: core.Pt(44), Height: core.Pt(42),
+											Width: core.Pt(mobileIconButtonSize), Height: core.Pt(mobileIconButtonSize),
 											AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
 										},
 										OnPress: func(core.PressEvent) { a.menuOpen.Set(true) },
 										Children: []core.Node{
-											nsui.Icon(lucide.Ellipsis, 19, colors.Text),
+											nsui.Icon(lucide.Ellipsis, 20, colors.Text),
 											core.Show{
 												When: func() bool {
 													a.rev.Get()
@@ -169,7 +231,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 		},
 		Children: []core.Node{
 			core.Show{
-				When: func() bool { a.rev.Get(); return a.sidebarView == SidebarTrash && !a.multiSelect.Get() },
+				When: func() bool { a.rev.Get(); return frame == nil && a.sidebarView == SidebarTrash && !a.multiSelect.Get() },
 				Then: func(cx *core.Scope) core.Node {
 					return core.View{
 						StyleFunc: func() core.Style {
@@ -178,9 +240,11 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 						},
 						Children: []core.Node{
 							core.Text{Content: "废纸篓：点按素材可恢复", Style: nsui.TypeCaption.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Muted)},
-							nsui.Button{Text: "清空", Variant: nsui.ButtonGhost,
-								Disabled: func() bool { a.rev.Get(); return len(a.gallery.Snapshot().Items) == 0 },
-								OnPress:  func() { a.emptyTrashOpen.Set(true) }},
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "清空", Variant: nsui.ButtonGhost, Compact: true,
+								Disabled: func() bool { a.rev.Get(); return len(g.Snapshot().Items) == 0 },
+								OnPress:  func() { a.emptyTrashOpen.Set(true) },
+							}),
 						},
 					}
 				},
@@ -195,41 +259,54 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 						},
 						Children: []core.Node{
 							core.Text{ContentFunc: a.uploadStatus.Get, Style: nsui.TypeCaption.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Text)},
-							nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.cancelActiveUpload() }},
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "取消", Variant: nsui.ButtonGhost, Compact: true,
+								OnPress: func() { a.cancelActiveUpload() },
+							}),
 						},
 					}
 				},
 			},
-			a.errorBanner(cx, func() error { a.rev.Get(); return a.gallery.Snapshot().Err }),
+			a.errorBanner(cx, func() error { a.rev.Get(); return g.Snapshot().Err }),
 		},
 	}
 
 	var gridNode core.Node
 	if a.env.HasHost {
-		gridNode = a.nativeGridNode(cx, false)
+		native := a.nativeGridNodeFor(cx, false, frame)
+		gridNode = core.Show{
+			When: func() bool { return a.isWarmGalleryPage(frame) },
+			Then: func(*core.Scope) core.Node { return native },
+		}
 	} else {
+		frameRows := func() []GalleryRow {
+			if frame != nil {
+				return frame.cachedRows
+			}
+			return a.cachedRows
+		}
 		bodyList := core.List{
-			Count: func() int { a.galleryRev.Get(); return len(a.cachedRows) },
+			Count: func() int { a.galleryRev.Get(); return len(frameRows()) },
 			Key: func(i int) any {
-				r := a.cachedRows
+				r := frameRows()
 				if i < 0 || i >= len(r) {
 					return i
 				}
 				return r[i].Key
 			},
 			Row: func(cx *core.Scope, row core.ListRow) core.Node {
-				return a.galleryListRow(cx, false, row, screenGallery)
+				return a.galleryListRowFor(cx, false, row, screenGallery, frame)
 			},
 			NumColumns:    1,
 			Gap:           6,
 			EstimatedSize: a.cachedTileSize + 6,
-			OnLoadMore:    func() { a.loadMoreGalleryView(cx) },
-			Ref:           a.galleryRef,
+			OnLoadMore:    func() { a.loadMoreGalleryFrame(cx, frame) },
+			Ref:           ref,
 			TestID:        "gallery.list",
-			Footer: core.Show{When: func() bool { a.rev.Get(); return a.gallery.Snapshot().LoadingMore }, Then: func(cx *core.Scope) core.Node {
+			Footer: core.Show{When: func() bool { a.rev.Get(); return g.Snapshot().LoadingMore }, Then: func(cx *core.Scope) core.Node {
 				return core.Text{Content: "加载更多…", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted(), TextAlign: core.TextAlignCenter, Padding: core.All(12)})}
 			}},
-			Empty: a.emptyState(cx),
+			Empty: a.emptyStateFor(cx, frame),
 			Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0), Padding: core.Edges{Top: 56, Left: contentPad, Right: contentPad}},
 		}
 		gridNode = core.View{
@@ -244,7 +321,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 	uploadFAB := core.Show{
 		When: func() bool {
 			a.rev.Get()
-			return !a.multiSelect.Get() && a.sidebarView != SidebarTrash
+			return !a.multiSelect.Get() && (frame != nil || a.sidebarView != SidebarTrash)
 		},
 		Then: func(cx *core.Scope) core.Node {
 			return core.View{
@@ -253,7 +330,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 					safe := cx.Env().SafeArea()
 					return core.Style{
 						Position: core.Absolute, Right: core.Pt(safeSideInset(safe)), Bottom: core.Pt(safe.Bottom + 18),
-						Width: core.Pt(52), Height: core.Pt(52), CornerRadius: 16,
+						Width: core.Pt(mobileFabSize), Height: core.Pt(mobileFabSize), CornerRadius: themeButtonRadius(cx),
 						AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
 						Background: colors.AccentFill(), ZIndex: 12,
 					}
@@ -265,7 +342,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 	}
 
 	scrim := core.Show{
-		When: func() bool { return a.drawerOpen.Get() || a.drawerDragging.Get() },
+		When: func() bool { return isTop() && (a.drawerOpen.Get() || a.drawerDragging.Get()) },
 		Then: func(cx *core.Scope) core.Node {
 			return core.View{
 				StyleFunc: func() core.Style {
@@ -310,7 +387,10 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 	mainShift := core.View{
 		TestID: "gallery.main",
 		StyleFunc: func() core.Style {
-			pos := a.drawerPosition(cx)
+			pos := core.Points(0)
+			if isTop() {
+				pos = a.drawerPosition(cx)
+			}
 			rad := core.Points(0)
 			if pos > 0 {
 				rad = 28
@@ -350,20 +430,6 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 		Children: []core.Node{
 			a.leftDrawerPanel(cx),
 			mainShift,
-			core.Show{When: func() bool { return a.screen.Get() == screenGallery }, Then: func(cx *core.Scope) core.Node {
-				return core.Group{
-					a.filterSheet(cx),
-					a.menuDialog(cx),
-					a.disconnectDialog(cx),
-					a.librariesDialog(cx),
-					a.quickPreviewSheet(cx),
-					a.restoreDialog(cx),
-					a.emptyTrashDialog(cx),
-					a.batchTagDialog(cx),
-					a.batchFolderDialog(cx),
-					a.batchDeleteDialog(cx),
-				}
-			}},
 		},
 	}
 }
@@ -373,6 +439,10 @@ func (a *App) galleryRows() []GalleryRow {
 }
 
 func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
+	return a.nativeGridNodeFor(cx, isSearch, nil)
+}
+
+func (a *App) nativeGridNodeFor(cx *core.Scope, isSearch bool, frame *folderFrame) core.Node {
 	return core.Native{
 		Component: "gallery_grid",
 		Style:     core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
@@ -385,11 +455,29 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 				g = a.searchGallery
 				from = screenSearch
 				scrollSeq = a.searchScrollSeq.Get()
+			} else if frame != nil {
+				g = frame.gallery
+				if frame.scrollSeq != nil {
+					scrollSeq = frame.scrollSeq.Get()
+				}
 			}
 			snap := g.Snapshot()
 			entries := a.buildNativeGridEntries(snap.Items, false, from)
+			if !isSearch {
+				folderID := ""
+				collapsed := a.subfoldersCollapsed
+				if frame != nil {
+					folderID = frame.folderID
+					collapsed = frame.subfoldersCollapsed
+				} else if a.sidebarView == SidebarFolder {
+					folderID = a.activeFolderID
+				}
+				if subEntries := a.buildNativeSubfolderEntriesFor(folderID, collapsed); len(subEntries) > 0 {
+					entries = append(subEntries, entries...)
+				}
+			}
 			emptyText := ""
-			if len(snap.Items) == 0 {
+			if len(entries) == 0 {
 				if isSearch {
 					if snap.Loading {
 						emptyText = "查询中…"
@@ -399,7 +487,11 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 						emptyText = "输入关键词，或选择筛选条件"
 					}
 				} else {
-					emptyText = a.galleryEmptyMessage(snap)
+					view := a.sidebarView
+					if frame != nil {
+						view = SidebarFolder
+					}
+					emptyText = a.galleryEmptyMessageFor(snap, view)
 				}
 			}
 			safe := cx.Env().SafeArea()
@@ -420,6 +512,17 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 					themeColors[name] = apptheme.FormatColor(c)
 				}
 			}
+			scrollPos := -1
+			scrollOffset := 0
+			if !isSearch {
+				if frame != nil {
+					scrollPos = frame.scrollPos
+					scrollOffset = frame.scrollOffset
+				} else {
+					scrollPos = a.rootScrollPos
+					scrollOffset = a.rootScrollOffset
+				}
+			}
 			return map[string]any{
 				"cols":              a.effectiveGridCols(),
 				"layoutMode":        a.galleryLayout.Get(),
@@ -427,6 +530,8 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 				"theme":             themeColors,
 				"emptyText":         emptyText,
 				"scrollTopSeq":      scrollSeq,
+				"scrollPos":         scrollPos,
+				"scrollOffset":      scrollOffset,
 				"topInsetDp":        topDp,
 				"bottomInsetDp":     bottomDp,
 				"horizontalInsetDp": sideDp,
@@ -440,13 +545,25 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 				if isSearch {
 					a.applySearch(cx)
 				} else {
-					a.refreshGalleryView(cx, false)
+					a.refreshGalleryFrame(cx, frame, false)
 				}
 			case "loadMore":
 				if isSearch {
 					a.loadSearchMore(cx)
 				} else {
-					a.loadMoreGalleryView(cx)
+					a.loadMoreGalleryFrame(cx, frame)
+				}
+			case "scrollState":
+				if !isSearch {
+					pos := nativeInt(m, "pos")
+					offset := nativeInt(m, "offset")
+					if frame != nil {
+						frame.scrollPos = pos
+						frame.scrollOffset = offset
+					} else {
+						a.rootScrollPos = pos
+						a.rootScrollOffset = offset
+					}
 				}
 			case "pinchCols":
 				layout := a.galleryLayout.Get()
@@ -459,7 +576,7 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 			case "press":
 				idx := nativeInt(m, "index")
 				id := nativeStr(m, "id")
-				if !isSearch && a.sidebarView == SidebarTrash {
+				if !isSearch && frame == nil && a.sidebarView == SidebarTrash {
 					for _, it := range a.gallery.Snapshot().Items {
 						if it.ID == id {
 							a.restoreTarget = it
@@ -480,7 +597,7 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 				}
 				a.openDetail(cx, idx, from, nativeBounds(m))
 			case "longPress":
-				if isSearch || a.sidebarView == SidebarTrash || a.sidebarView == SidebarHistory {
+				if isSearch || (frame == nil && (a.sidebarView == SidebarTrash || a.sidebarView == SidebarHistory)) {
 					return
 				}
 				idx := nativeInt(m, "index")
@@ -489,13 +606,73 @@ func (a *App) nativeGridNode(cx *core.Scope, isSearch bool) core.Node {
 					a.toggleSelectItem(id)
 					return
 				}
-				items := a.gallery.Snapshot().Items
+				g := a.gallery
+				if frame != nil {
+					g = frame.gallery
+				}
+				items := g.Snapshot().Items
 				if idx >= 0 && idx < len(items) {
 					a.openQuickPreview(items[idx], idx)
+				}
+			case "toggleSubfolders":
+				if !isSearch {
+					if frame != nil {
+						frame.subfoldersCollapsed = !frame.subfoldersCollapsed
+					} else {
+						a.subfoldersCollapsed = !a.subfoldersCollapsed
+					}
+					a.rebuildFrameRows(frame)
+					a.bump()
+				}
+			case "pressFolder":
+				if !isSearch {
+					if id := nativeStr(m, "id"); id != "" {
+						a.selectFolder(cx, id)
+					}
 				}
 			}
 		},
 	}
+}
+
+func (a *App) buildNativeSubfolderEntries() []map[string]any {
+	if a.sidebarView != SidebarFolder || a.activeFolderID == "" {
+		return nil
+	}
+	return a.buildNativeSubfolderEntriesFor(a.activeFolderID, a.subfoldersCollapsed)
+}
+
+func (a *App) buildNativeSubfolderEntriesFor(folderID string, collapsed bool) []map[string]any {
+	subfolders := a.subfoldersForFolder(folderID)
+	if len(subfolders) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, 1+len(subfolders))
+	out = append(out, map[string]any{
+		"kind":      "folder_header",
+		"key":       "folder_header:" + folderID,
+		"title":     "子文件夹 (" + itoa(len(subfolders)) + ")",
+		"count":     len(subfolders),
+		"collapsed": collapsed,
+	})
+	if collapsed {
+		return out
+	}
+	for _, f := range subfolders {
+		thumbs := a.folderPreviews[f.ID]
+		if len(thumbs) > 4 {
+			thumbs = thumbs[:4]
+		}
+		out = append(out, map[string]any{
+			"kind":      "folder",
+			"key":       "folder:" + f.ID,
+			"id":        f.ID,
+			"title":     f.Name,
+			"count":     f.ItemCount,
+			"thumbUrls": thumbs,
+		})
+	}
+	return out
 }
 
 func (a *App) buildNativeGridEntries(items []model.ItemSummary, monthGrouped bool, from string) []map[string]any {
@@ -553,20 +730,24 @@ func (a *App) buildNativeGridEntries(items []model.ItemSummary, monthGrouped boo
 }
 
 func (a *App) galleryEmptyMessage(snap appstate.GallerySnapshot) string {
+	return a.galleryEmptyMessageFor(snap, a.sidebarView)
+}
+
+func (a *App) galleryEmptyMessageFor(snap appstate.GallerySnapshot, view SidebarView) string {
 	switch {
 	case snap.Loading:
 		return "正在加载…"
 	case snap.Err != nil:
 		return "加载失败"
-	case a.sidebarView == SidebarTrash:
+	case view == SidebarTrash:
 		return "废纸篓是空的"
-	case a.sidebarView == SidebarUntagged:
+	case view == SidebarUntagged:
 		return "没有未打标签的素材"
-	case a.sidebarView == SidebarUncategorized:
+	case view == SidebarUncategorized:
 		return "没有未分类的素材"
-	case a.sidebarView == SidebarHistory:
+	case view == SidebarHistory:
 		return "还没有使用记录，下载、分享或复制素材后会出现在这里"
-	case a.sidebarView == SidebarFolder:
+	case view == SidebarFolder:
 		return "这个文件夹是空的"
 	default:
 		return "还没有素材"
@@ -634,12 +815,18 @@ func (a *App) previewTileBounds(at core.Point) core.Bounds {
 }
 
 func (a *App) galleryListRow(cx *core.Scope, isSearch bool, row core.ListRow, from string) core.Node {
+	return a.galleryListRowFor(cx, isSearch, row, from, nil)
+}
+
+func (a *App) galleryListRowFor(cx *core.Scope, isSearch bool, row core.ListRow, from string, frame *folderFrame) core.Node {
 	colors := nsui.ColorsOf(cx)
 	rowAt := func() (GalleryRow, bool) {
 		a.galleryRev.Get()
 		rows := a.cachedRows
 		if isSearch {
 			rows = a.cachedSearchRows
+		} else if frame != nil {
+			rows = frame.cachedRows
 		}
 		i := row.Index()
 		if i < 0 || i >= len(rows) {
@@ -651,6 +838,16 @@ func (a *App) galleryListRow(cx *core.Scope, isSearch bool, row core.ListRow, fr
 	isHeader := func() bool {
 		r, ok := rowAt()
 		return ok && r.Kind == RowMonthHeader
+	}
+
+	isFolderHeader := func() bool {
+		r, ok := rowAt()
+		return ok && r.Kind == RowFolderHeader
+	}
+
+	isFolderGroup := func() bool {
+		r, ok := rowAt()
+		return ok && r.Kind == RowFolderGroup
 	}
 
 	headerNode := func(cx *core.Scope) core.Node {
@@ -670,28 +867,197 @@ func (a *App) galleryListRow(cx *core.Scope, isSearch bool, row core.ListRow, fr
 		}
 	}
 
+	folderHeaderNode := func(cx *core.Scope) core.Node {
+		return core.View{
+			TestID: "gallery.subfolders.toggle",
+			Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6,
+				Padding: core.Edges{Top: 8, Bottom: 4, Left: 2, Right: 2}},
+			OnPress: func(core.PressEvent) {
+				if frame != nil {
+					frame.subfoldersCollapsed = !frame.subfoldersCollapsed
+				} else {
+					a.subfoldersCollapsed = !a.subfoldersCollapsed
+				}
+				a.rebuildFrameRows(frame)
+				a.bump()
+			},
+			Children: []core.Node{
+				core.Show{
+					When: func() bool { r, _ := rowAt(); return r.Collapsed },
+					Then: func(cx *core.Scope) core.Node { return nsui.Icon(lucide.ChevronRight, 14, colors.Muted) },
+					Else: func(cx *core.Scope) core.Node { return nsui.Icon(lucide.ChevronDown, 14, colors.Muted) },
+				},
+				core.Text{ContentFunc: func() string {
+					r, _ := rowAt()
+					return r.Title
+				}, Style: nsui.TypeLabel.Merge(core.Style{Color: colors.Text()})},
+			},
+		}
+	}
+
+	folderGroupNode := func(cx *core.Scope) core.Node {
+		return core.Dynamic(func(cx *core.Scope) core.Node {
+			cols := a.effectiveGridCols()
+			slots := make([]core.Node, 0, cols)
+			for slotIdx := 0; slotIdx < cols; slotIdx++ {
+				si := slotIdx
+				folderAt := func() (model.Folder, bool) {
+					r, ok := rowAt()
+					if !ok || r.Kind != RowFolderGroup || si >= len(r.Folders) {
+						return model.Folder{}, false
+					}
+					return r.Folders[si], true
+				}
+				slots = append(slots, a.folderCardTile(cx, folderAt))
+			}
+			return core.View{
+				Style:    core.Style{Direction: core.Row, Gap: 6},
+				Children: slots,
+			}
+		})
+	}
+
 	return core.View{
 		Children: []core.Node{
 			core.Show{When: isHeader, Then: headerNode, Else: func(cx *core.Scope) core.Node {
-				return core.Dynamic(func(cx *core.Scope) core.Node {
-					cols := a.effectiveGridCols()
-					slots := make([]core.Node, 0, cols)
-					for slotIdx := 0; slotIdx < cols; slotIdx++ {
-						si := slotIdx
-						slotAt := func() (TileSlot, bool) {
-							r, ok := rowAt()
-							if !ok || r.Kind != RowTileGroup || si >= len(r.Slots) {
-								return TileSlot{}, false
+				return core.Show{When: isFolderHeader, Then: folderHeaderNode, Else: func(cx *core.Scope) core.Node {
+					return core.Show{When: isFolderGroup, Then: folderGroupNode, Else: func(cx *core.Scope) core.Node {
+						return core.Dynamic(func(cx *core.Scope) core.Node {
+							cols := a.effectiveGridCols()
+							slots := make([]core.Node, 0, cols)
+							for slotIdx := 0; slotIdx < cols; slotIdx++ {
+								si := slotIdx
+								slotAt := func() (TileSlot, bool) {
+									r, ok := rowAt()
+									if !ok || r.Kind != RowTileGroup || si >= len(r.Slots) {
+										return TileSlot{}, false
+									}
+									return r.Slots[si], true
+								}
+								slots = append(slots, a.slotTile(cx, slotAt, from))
 							}
-							return r.Slots[si], true
+							return core.View{
+								Style:    core.Style{Direction: core.Row, Gap: 6},
+								Children: slots,
+							}
+						})
+					}}
+				}}
+			}},
+		},
+	}
+}
+
+func (a *App) folderCardTile(cx *core.Scope, folderAt func() (model.Folder, bool)) core.Node {
+	colors := nsui.ColorsOf(cx)
+	hasFolder := func() bool { _, ok := folderAt(); return ok }
+
+	return core.View{
+		StyleFunc: func() core.Style {
+			a.galleryRev.Get()
+			size := a.cachedTileSize
+			return core.Style{
+				Width: core.Pt(size), Height: core.Pt(size),
+			}
+		},
+		Children: []core.Node{
+			core.Show{When: hasFolder, Then: func(cx *core.Scope) core.Node {
+				return core.View{
+					TestID: "gallery.folder",
+					StyleFunc: func() core.Style {
+						return core.Style{
+							Width: core.Pct(100), Height: core.Pct(100),
+							Padding: core.All(5), Gap: 4, CornerRadius: 10,
+							Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
 						}
-						slots = append(slots, a.slotTile(cx, slotAt, from))
-					}
-					return core.View{
-						Style:    core.Style{Direction: core.Row, Gap: 6},
-						Children: slots,
-					}
-				})
+					},
+					OnPress: func(core.PressEvent) {
+						if f, ok := folderAt(); ok {
+							a.selectFolder(cx, f.ID)
+						}
+					},
+					Children: []core.Node{
+						core.Dynamic(func(cx *core.Scope) core.Node {
+							f, ok := folderAt()
+							if !ok {
+								return core.View{Style: core.Style{FlexGrow: 1}}
+							}
+							urls := a.folderPreviews[f.ID]
+							var previewBody core.Node
+							switch len(urls) {
+							case 0:
+								previewBody = core.View{
+									Style:    core.Style{Width: core.Pct(100), Height: core.Pct(100), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
+									Children: []core.Node{nsui.Icon(lucide.Folder, 24, colors.Accent)},
+								}
+							case 1:
+								previewBody = core.Image{
+									Source:     core.Src(urls[0]),
+									ResizeMode: core.Cover,
+									Style:      core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+								}
+							default:
+								gridCell := func(idx int) core.Node {
+									if idx < len(urls) {
+										return core.Image{
+											Source:     core.Src(urls[idx]),
+											ResizeMode: core.Cover,
+											Style:      core.Style{FlexGrow: 1, FlexShrink: 1, Height: core.Pct(100)},
+										}
+									}
+									return core.View{
+										StyleFunc: func() core.Style {
+											return core.Style{FlexGrow: 1, FlexShrink: 1, Height: core.Pct(100), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Background: colors.Hover()}
+										},
+										Children: []core.Node{nsui.Icon(lucide.Folder, 12, colors.Faint)},
+									}
+								}
+								previewBody = core.View{
+									Style: core.Style{Width: core.Pct(100), Height: core.Pct(100), Gap: 1},
+									Children: []core.Node{
+										core.View{Style: core.Style{Direction: core.Row, FlexGrow: 1, Gap: 1}, Children: []core.Node{gridCell(0), gridCell(1)}},
+										core.View{Style: core.Style{Direction: core.Row, FlexGrow: 1, Gap: 1}, Children: []core.Node{gridCell(2), gridCell(3)}},
+									},
+								}
+							}
+							return core.View{
+								StyleFunc: func() core.Style {
+									return core.Style{
+										Width: core.Pct(100), FlexGrow: 1, MinHeight: core.Pt(0),
+										CornerRadius: 6, Overflow: core.Hidden, Background: colors.Inset(),
+									}
+								},
+								Children: []core.Node{previewBody},
+							}
+						}),
+						core.View{
+							Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4, Height: core.Pt(18)},
+							Children: []core.Node{
+								nsui.Icon(lucide.Folder, 12, colors.Muted),
+								core.Text{
+									ContentFunc: func() string {
+										if f, ok := folderAt(); ok {
+											return f.Name
+										}
+										return ""
+									},
+									MaxLines:  1,
+									Style:     nsui.TypeCaption.Merge(core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)}),
+									StyleFunc: nsui.Colored(colors.Text),
+								},
+								core.Text{
+									ContentFunc: func() string {
+										if f, ok := folderAt(); ok {
+											return itoa(f.ItemCount)
+										}
+										return ""
+									},
+									Style:     core.Style{FontSize: 10, Color: colors.Faint()},
+								},
+							},
+						},
+					},
+				}
 			}},
 		},
 	}
@@ -1028,7 +1394,7 @@ func (a *App) toggleSelectItem(id string) {
 }
 
 func (a *App) selectAllVisible() {
-	for _, item := range a.gallery.Snapshot().Items {
+	for _, item := range a.activeGallery().Snapshot().Items {
 		a.selectedIDs[item.ID] = true
 	}
 	a.bumpGallery()
@@ -1037,7 +1403,7 @@ func (a *App) selectAllVisible() {
 
 func (a *App) selectedIDSlice() []string {
 	out := make([]string, 0, len(a.selectedIDs))
-	for _, item := range a.gallery.Snapshot().Items {
+	for _, item := range a.activeGallery().Snapshot().Items {
 		if a.selectedIDs[item.ID] {
 			out = append(out, item.ID)
 		}
@@ -1052,8 +1418,11 @@ func (a *App) batchTagDialog(cx *core.Scope) core.Node {
 		OnClose: func() { a.batchTagOpen.Set(false) },
 		Title:   "批量添加标签",
 		Header: []core.Node{
-			nsui.Button{Text: "添加", Disabled: func() bool { return a.batchBusy.Get() || strings.TrimSpace(a.batchTagInput.Get()) == "" },
-				OnPress: func() { a.runBatchAddTag(cx) }},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "添加", Variant: nsui.ButtonPrimary, Compact: true,
+				Disabled: func() bool { return a.batchBusy.Get() || strings.TrimSpace(a.batchTagInput.Get()) == "" },
+				OnPress:  func() { a.runBatchAddTag(cx) },
+			}),
 		},
 		Children: []core.Node{
 			nsui.Input{Value: func() string { return a.batchTagInput.Get() }, OnChange: a.batchTagInput.Set,
@@ -1068,7 +1437,7 @@ func (a *App) batchTagDialog(cx *core.Scope) core.Node {
 						break
 					}
 					tagName := t.Name
-					tagChips = append(tagChips, drawerChip(colors, tagName, nil,
+					tagChips = append(tagChips, drawerChip(cx, colors, tagName, nil,
 						func() { a.batchTagInput.Set(tagName) }))
 				}
 				if len(tagChips) == 0 {
@@ -1126,79 +1495,92 @@ func (a *App) batchFolderDialog(cx *core.Scope) core.Node {
 }
 
 func (a *App) batchDeleteDialog(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
 	return nsui.Dialog{
 		Open:         func() bool { return a.batchDelOpen.Get() },
 		OnOpenChange: func(open bool, _ base.Reason) { a.batchDelOpen.Set(open) },
 		Title:        "删除已选素材？",
 		Description:  "将把已选的 " + itoa(len(a.selectedIDs)) + " 项移到桌面端废纸篓。",
 		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.batchDelOpen.Set(false) }},
-			nsui.Button{Text: "移到废纸篓", OnPress: func() {
-				a.batchDelOpen.Set(false)
-				a.runBatchDelete(cx)
-			}},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "取消", Variant: nsui.ButtonGhost,
+				OnPress: func() { a.batchDelOpen.Set(false) },
+			}),
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "移到废纸篓", Variant: nsui.ButtonPrimary,
+				OnPress: func() {
+					a.batchDelOpen.Set(false)
+					a.runBatchDelete(cx)
+				},
+			}),
 		},
 	}
 }
 
 func (a *App) restoreDialog(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
 	return nsui.Dialog{
 		Open:         func() bool { return a.restoreOpen.Get() },
 		OnOpenChange: func(open bool, _ base.Reason) { a.restoreOpen.Set(open) },
 		Title:        "恢复素材？",
 		Description:  "将「" + a.restoreTarget.DisplayName() + "」从废纸篓恢复回原位置。",
 		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.restoreOpen.Set(false) }},
-			nsui.Button{Text: "恢复", OnPress: func() {
-				a.restoreOpen.Set(false)
-				a.restoreItem(cx, a.restoreTarget)
-			}},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "取消", Variant: nsui.ButtonGhost,
+				OnPress: func() { a.restoreOpen.Set(false) },
+			}),
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "恢复", Variant: nsui.ButtonPrimary,
+				OnPress: func() {
+					a.restoreOpen.Set(false)
+					a.restoreItem(cx, a.restoreTarget)
+				},
+			}),
 		},
 	}
 }
 
 func (a *App) emptyTrashDialog(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
 	return nsui.Dialog{
 		Open:         func() bool { return a.emptyTrashOpen.Get() },
 		OnOpenChange: func(open bool, _ base.Reason) { a.emptyTrashOpen.Set(open) },
 		Title:        "清空废纸篓？",
 		Description:  "废纸篓中的素材将被永久删除，无法恢复！",
 		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.emptyTrashOpen.Set(false) }},
-			nsui.Button{Text: "永久清空", OnPress: func() {
-				a.emptyTrashOpen.Set(false)
-				a.emptyTrash(cx)
-			}},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "取消", Variant: nsui.ButtonGhost,
+				OnPress: func() { a.emptyTrashOpen.Set(false) },
+			}),
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "永久清空", Variant: nsui.ButtonPrimary,
+				OnPress: func() {
+					a.emptyTrashOpen.Set(false)
+					a.emptyTrash(cx)
+				},
+			}),
 		},
 	}
 }
 
 func (a *App) emptyState(cx *core.Scope) core.Node {
+	return a.emptyStateFor(cx, nil)
+}
+
+func (a *App) emptyStateFor(cx *core.Scope, frame *folderFrame) core.Node {
 	colors := nsui.ColorsOf(cx)
 	return core.Dynamic(func(cx *core.Scope) core.Node {
 		_ = a.rev.Get()
-		snap := a.gallery.Snapshot()
-		text := "还没有素材"
-		switch {
-		case snap.Loading:
-			text = "正在加载…"
-		case snap.Err != nil:
-			text = "加载失败"
-		case a.sidebarView == SidebarTrash:
-			text = "废纸篓是空的"
-		case a.sidebarView == SidebarUntagged:
-			text = "没有未打标签的素材"
-		case a.sidebarView == SidebarUncategorized:
-			text = "没有未分类的素材"
-		case a.sidebarView == SidebarHistory:
-			text = "还没有使用记录，下载、分享或复制素材后会出现在这里"
-		case a.sidebarView == SidebarFolder:
-			text = "这个文件夹是空的"
-		}
+		view, _, g, _ := a.frameSpec(frame)
+		snap := g.Snapshot()
+		text := a.galleryEmptyMessageFor(snap, view)
 		return core.View{Style: core.Style{FlexGrow: 1, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 8, Padding: core.All(24)}, Children: []core.Node{
 			core.Text{Content: text, MaxLines: 3, Style: nsui.TypeBody.Merge(core.Style{Color: colors.Muted(), TextAlign: core.TextAlignCenter})},
 			core.Show{When: func() bool { return snap.Err != nil }, Then: func(cx *core.Scope) core.Node {
-				return nsui.Button{Text: "重试", Variant: nsui.ButtonSecondary, OnPress: func() { a.refreshGalleryView(cx, true) }}
+				return mobileActionButton(cx, colors, mobileBtnSpec{
+					Text: "重试", Variant: nsui.ButtonSecondary,
+					OnPress: func() { a.refreshGalleryFrame(cx, frame, true) },
+				})
 			}},
 		}}
 	})
@@ -1219,7 +1601,10 @@ func (a *App) errorBanner(cx *core.Scope, errFn func() error) core.Node {
 					}
 					return ""
 				}, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Danger)},
-				nsui.Button{Text: "重试", Variant: nsui.ButtonGhost, OnPress: func() { a.refreshGalleryView(cx, true) }},
+				mobileActionButton(cx, colors, mobileBtnSpec{
+					Text: "重试", Variant: nsui.ButtonGhost, Compact: true,
+					OnPress: func() { a.refreshGalleryView(cx, true) },
+				}),
 			},
 		}
 	}}
@@ -1301,14 +1686,15 @@ func (a *App) runBatchDelete(cx *core.Scope) {
 		res := a.client.BatchDelete(ctx, ids, nil)
 		a.post(func() {
 			a.batchBusy.Set(false)
-			gen := a.gallery.Generation()
+			g := a.activeGallery()
+			gen := g.Generation()
 			failed := map[string]bool{}
 			for _, f := range res.Failures {
 				failed[f.ID] = true
 			}
 			for _, id := range ids {
 				if !failed[id] {
-					a.gallery.Remove(gen, id)
+					g.Remove(gen, id)
 					_ = a.local.RemoveShareTag(a.session.ScopeKey(), id)
 					_ = a.local.RemoveShareTag(a.session.LegacyNameScope(), id)
 				}
