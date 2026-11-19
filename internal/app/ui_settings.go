@@ -859,9 +859,6 @@ func (a *App) settingsPlugins(c *ui.Context) {
 						_ = a.svc.SetPluginEnabled(pl.ID, on)
 					}
 					pl.Enabled = on
-					if a.win != nil {
-						a.win.Invalidate()
-					}
 					if on {
 						// Enabling a preview plugin may unlock cover generation for
 						// items already loaded on the page.
@@ -975,9 +972,6 @@ func (a *App) rescanPlugins() {
 		a.postSettings(func() {
 			a.plugins = a.pluginRows(installed)
 			a.pluginScanning = false
-			if a.win != nil {
-				a.win.Invalidate()
-			}
 		})
 	}()
 }

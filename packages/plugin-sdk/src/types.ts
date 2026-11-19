@@ -78,10 +78,6 @@ export interface PluginUIEntry {
   location?: "inspector";
 }
 
-export type PluginSidebarItem =
-  | { id: string; type: "group"; title: string; children: PluginSidebarItem[] }
-  | { id: string; type: "window"; title: string; window: string };
-
 /**
  * `plugin.json` schema. Only `id`, `name` and `version` are mandatory; native
  * plugins may omit `main` when all of their behaviour is declared through the
@@ -126,7 +122,7 @@ export interface PluginManifest {
 
   permissions?: PluginPermissions;
   /** HTML UI contributions; requires a host version that supports plugin WebViews. */
-  ui?: { panels?: PluginUIEntry[]; windows?: PluginUIEntry[]; sidebar?: PluginSidebarItem[] };
+  ui?: { panels?: PluginUIEntry[]; windows?: PluginUIEntry[] };
   settings?: PluginSetting[];
 
   /** Hooks implemented by `main`. Purely informational for native plugins. */

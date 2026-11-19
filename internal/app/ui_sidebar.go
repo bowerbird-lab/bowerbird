@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"bowerbird/core"
-	"bowerbird/internal/plugin"
 
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
@@ -39,22 +38,12 @@ func (a *App) viewSidebar(c *ui.Context) {
 		ui.Row(c).Height(sidebarHeaderHeight).FillWidth().Padding(0, 8, 0, bar.Left+gallerySidePadding).DragWindow()
 		a.sidebarLibrarySwitcher(c)
 		ui.Scroll(c).Grow(1).Shrink(1).Padding(4, 10, 12, 10).Children(func() {
-			for _, item := range []struct {
-				nav   Nav
-				icon  *ui.SVG
-				label string
-				count int
-			}{
-				{NavAll, iconAll, "sidebar.allItems", a.stats.Total},
-				{NavRecent, iconRecent, "sidebar.recent", a.recentUsedCount},
-				{NavUntagged, iconInbox, "sidebar.untagged", a.stats.UntaggedCount},
-				{NavUncategorized, iconUncategorized, "sidebar.uncategorized", a.stats.UncategorizedCount},
-				{NavTags, iconTag, "sidebar.tags", len(a.tags)},
-				{NavTrash, iconTrash, "sidebar.trash", a.trashCount},
-			} {
-				a.navRow(c, item.nav, item.icon, a.t(item.label), item.count)
-			}
-			a.pluginSidebar(c)
+			a.navRow(c, NavAll, iconAll, a.t("sidebar.allItems"), a.stats.Total)
+			a.navRow(c, NavRecent, iconRecent, a.t("sidebar.recent"), a.recentUsedCount)
+			a.navRow(c, NavUntagged, iconInbox, a.t("sidebar.untagged"), a.stats.UntaggedCount)
+			a.navRow(c, NavUncategorized, iconUncategorized, a.t("sidebar.uncategorized"), a.stats.UncategorizedCount)
+			a.navRow(c, NavTags, iconTag, a.t("sidebar.tags"), len(a.tags))
+			a.navRow(c, NavTrash, iconTrash, a.t("sidebar.trash"), a.trashCount)
 
 			foldersHeader := ui.Row(c).FillWidth().Height(folderRowHeight).PaddingX(4).Margin(12, 0, 0, 0).Radius(6).AlignItems(ui.Center)
 			rootDrag, rootOver := ui.DragOver[sidebarDrag](foldersHeader)
@@ -79,75 +68,6 @@ func (a *App) viewSidebar(c *ui.Context) {
 			}
 		})
 	})
-}
-
-// pluginSidebar renders contributions from enabled plugins without product-specific UI.
-func (a *App) pluginSidebar(c *ui.Context) {
-	if a.pluginHost == nil {
-		return
-	}
-	var plugins []*plugin.Plugin
-	for _, p := range a.pluginHost.Plugins() {
-		if p.Enabled && len(p.Manifest.UI.Sidebar) > 0 {
-			plugins = append(plugins, p)
-		}
-	}
-	if len(plugins) == 0 {
-		return
-	}
-	ui.Box(c).Height(12)
-	a.sectionLabel(c, a.t("sidebar.plugins"))
-	for _, p := range plugins {
-		for _, node := range p.Manifest.UI.Sidebar {
-			a.pluginSidebarRow(c, p, node, 0)
-		}
-	}
-}
-
-func (a *App) pluginSidebarRow(c *ui.Context, p *plugin.Plugin, node plugin.PluginSidebarItem, depth int) {
-	key := p.Manifest.ID + ":" + node.ID
-	palette := a.palette(c)
-	row := ui.ButtonBase(c.Key("plugin-sidebar-" + key)).FillWidth().Height(30).PaddingStart(8 + float32(depth)*14).PaddingEnd(8).Radius(7).FocusRing(false).AlignItems(ui.Center).Gap(8)
-	if row.Hovered() {
-		row.Background(palette.hover)
-	}
-	row.Children(func() {
-		icon := iconSparkles
-		if node.Type == "group" {
-			icon = iconFolder
-		}
-		ui.Icon(c, icon).Size(15, 15).TextColor(palette.muted)
-		ui.Text(c, node.Title).FontSize(12.5).Grow(1).Shrink(1).SingleLine().TextColor(palette.text)
-		if node.Type == "group" {
-			arrow := iconChevron
-			if a.pluginSidebarClosed[key] {
-				arrow = iconChevronR
-			}
-			ui.Icon(c, arrow).Size(12, 12).TextColor(palette.faint)
-		}
-	})
-	if row.Clicked() {
-		if node.Type == "group" {
-			if a.pluginSidebarClosed == nil {
-				a.pluginSidebarClosed = map[string]bool{}
-			}
-			a.pluginSidebarClosed[key] = !a.pluginSidebarClosed[key]
-		} else if node.Type == "window" {
-			for _, window := range p.Manifest.UI.Windows {
-				if window.ID == node.Window {
-					if err := a.openPluginUI(p.Manifest.ID, window); err != nil {
-						a.showToast(err.Error())
-					}
-					break
-				}
-			}
-		}
-	}
-	if node.Type == "group" && !a.pluginSidebarClosed[key] {
-		for _, child := range node.Children {
-			a.pluginSidebarRow(c, p, child, depth+1)
-		}
-	}
 }
 
 // newFolderPlusButton is the bare plus that creates a folder. It stays hidden
