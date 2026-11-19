@@ -71,8 +71,18 @@ type PreviewContribution struct {
 
 // PluginUI describes HTML pages packaged with the plugin.
 type PluginUI struct {
-	Panels  []PluginUIEntry `json:"panels,omitempty"`
-	Windows []PluginUIEntry `json:"windows,omitempty"`
+	Panels  []PluginUIEntry     `json:"panels,omitempty"`
+	Windows []PluginUIEntry     `json:"windows,omitempty"`
+	Sidebar []PluginSidebarItem `json:"sidebar,omitempty"`
+}
+
+// PluginSidebarItem declares a sidebar group or an entry opening a plugin window.
+type PluginSidebarItem struct {
+	ID       string              `json:"id"`
+	Type     string              `json:"type"`
+	Title    string              `json:"title"`
+	Window   string              `json:"window,omitempty"`
+	Children []PluginSidebarItem `json:"children,omitempty"`
 }
 
 type PluginUIEntry struct {
@@ -398,6 +408,9 @@ func validateManifest(m *Manifest) error {
 				return fmt.Errorf("plugin UI entry must stay inside its directory: %q", entry.Entry)
 			}
 		}
+	}
+	if err := validateSidebar(m.UI.Sidebar, m.UI.Windows); err != nil {
+		return err
 	}
 	if m.Preview.Renderer != "" {
 		if m.Native == "" {

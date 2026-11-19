@@ -379,6 +379,7 @@ type App struct {
 	pluginSecretVisible map[string]bool
 	pluginUISessions    plugin.UISessions
 	pluginUIWindows     map[string]*mygo.Window
+	pluginSidebarClosed map[string]bool
 	pluginScanning      bool
 	pendingInstall      *core.PluginInstallRequest
 

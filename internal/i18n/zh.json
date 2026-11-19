@@ -832,6 +832,7 @@
     "folderName": "文件夹名称",
     "folderNamePlaceholder": "例如：设计、灵感…",
     "defaultFolderName": "新建文件夹",
+    "plugins": "插件",
     "folders": "文件夹",
     "history": "使用历史",
     "libraryList": "资源库列表",

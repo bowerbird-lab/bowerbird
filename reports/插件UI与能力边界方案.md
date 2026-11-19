@@ -28,8 +28,10 @@ manifest 可声明贡献位置和本地入口，不把 AI、Mage、模型或参�
   "name": "Mage AI Image",
   "version": "2.0.0",
   "ui": {
-    "panels": [{ "id": "editor", "location": "inspector", "entry": "ui/panel.html" }],
-    "windows": [{ "id": "studio", "title": "Mage Studio", "entry": "ui/studio.html" }]
+    "windows": [{ "id": "studio", "title": "Mage Studio", "entry": "ui/studio.html" }],
+    "sidebar": [{ "id": "tools", "type": "group", "title": "Mage AI", "children": [
+      { "id": "editor", "type": "window", "title": "图片编辑", "window": "studio" }
+    ] }]
   },
   "permissions": {
     "assets": ["read", "write"],
@@ -39,7 +41,9 @@ manifest 可声明贡献位置和本地入口，不把 AI、Mage、模型或参�
 }
 ```
 
-权限仅作示例：插件实际发布时只声明确实使用的能力。插件从面板打开自身声明的窗口不需要额外权限；禁止任意路径作为入口，入口文件与静态资源必须位于该插件目录中。
+权限仅作示例，插件应只声明实际使用的能力；UI 入口文件和静态资源必须位于插件目录中。
+
+侧边栏使用 `ui.sidebar` 声明：`group` 节点可嵌套 `children`，`window` 节点通过 `window` 引用同一个插件在 `ui.windows` 中声明的窗口 ID。插件禁用后隐藏入口；`type` 不合法、重复 ID 或引用不存在的窗口会拒绝该清单。目前侧边栏入口打开独立 WebView 窗口，检查器内嵌面板尚未实现。
 
 ## 权限与用户体验
 
