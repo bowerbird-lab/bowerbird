@@ -313,5 +313,5 @@ func (a *App) currentGalleryFor(from string) *appstate.Gallery {
 	if from == screenSearch {
 		return a.searchGallery
 	}
-	return a.gallery
+	return a.activeGallery()
 }

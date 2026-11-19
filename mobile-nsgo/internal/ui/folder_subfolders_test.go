@@ -1,9 +1,17 @@
 package ui
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/nsgo-dev/nsgo/core"
+	"github.com/nsgo-dev/nsgo/nsgotest"
 
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
+	"github.com/owocc/bowerbird/mobile-nsgo/internal/storage"
 )
 
 func TestCurrentUploadFolderIDMatchesDesktopLogic(t *testing.T) {
@@ -101,5 +109,140 @@ func TestBuildNativeSubfolderEntries(t *testing.T) {
 	collapsed := a.buildNativeSubfolderEntries()
 	if len(collapsed) != 1 || collapsed[0]["collapsed"] != true {
 		t.Fatalf("collapsed entries = %+v", collapsed)
+	}
+}
+
+func TestFolderNavigationStackAndBack(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/status":
+			_ = json.NewEncoder(w).Encode(model.Status{Name: "Lib", PairingRequired: false, Capabilities: []string{"query"}})
+		case "/api/v1/folders":
+			_ = json.NewEncoder(w).Encode([]model.Folder{
+				{
+					ID: "folder-a", Name: "Folder A", ItemCount: 2,
+					Children: []model.Folder{
+						{ID: "folder-b", Name: "Folder B", ItemCount: 1},
+					},
+				},
+			})
+		case "/api/v1/query":
+			folder := r.URL.Query().Get("folder")
+			itemID := "root-item"
+			switch folder {
+			case "folder-a":
+				itemID = "a-item"
+			case "folder-b":
+				itemID = "b-item"
+			}
+			_ = json.NewEncoder(w).Encode(model.ItemsPage{
+				Total: 1,
+				Items: []model.ItemSummary{{
+					ID: itemID, Name: itemID, Filename: itemID + ".jpg",
+					Extension: "jpg", MimeType: "image/jpeg", Size: 1024, Width: 400, Height: 400,
+				}},
+			})
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+		}
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	local := storage.NewLocal(dir)
+	if err := local.SaveSession(storage.Session{BaseURL: srv.URL, Token: "tok", LibraryID: "lib1", LibraryName: "Lib"}); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	var appState *App
+	app := nsgotest.Start(t, func(cx *core.Scope) core.Node {
+		node := rootWithDir(cx, dir)
+		appState = node.(*App)
+		return node
+	}, nsgotest.Size(420, 800))
+
+	app.WaitFor("id:screen.gallery", 2*time.Second)
+	app.WaitFor("id:gallery.tile", 2*time.Second)
+
+	// Enter Folder A, wait for it to load, then enter subfolder Folder B.
+	appState.scope.Post(func() {
+		appState.selectFolder(appState.scope, "folder-a")
+	})
+	app.WaitFor("id:screen.folder.folder-a", 2*time.Second)
+	app.Advance(50 * time.Millisecond)
+	appState.scope.Post(func() {
+		appState.selectFolder(appState.scope, "folder-b")
+	})
+	app.WaitFor("id:screen.folder.folder-b", 2*time.Second)
+	app.Advance(50 * time.Millisecond)
+
+	if got := len(appState.folderStack); got != 2 {
+		t.Fatalf("folderStack len = %d, want 2", got)
+	}
+	if len(app.QueryMounted("id:screen.gallery")) == 0 || len(app.QueryMounted("id:screen.folder.folder-a")) == 0 {
+		t.Fatal("lower screens should stay mounted behind top folder screen")
+	}
+
+	// Opening drawer while in Folder B: first Back closes drawer without popping Folder B.
+	appState.scope.Post(func() {
+		appState.setDrawerOpen(appState.scope, true)
+	})
+	app.Advance(300 * time.Millisecond)
+	app.Back()
+	app.Advance(300 * time.Millisecond)
+	if appState.drawerOpen.Get() {
+		t.Fatal("expected first Back to close drawer")
+	}
+	if got := len(appState.folderStack); got != 2 {
+		t.Fatalf("folderStack len after closing drawer = %d, want 2", got)
+	}
+
+	// Next Back pops Folder B back to Folder A.
+	app.Back()
+	app.Advance(400 * time.Millisecond)
+	if got := len(appState.folderStack); got != 1 {
+		t.Fatalf("folderStack len after popping B = %d, want 1", got)
+	}
+	if appState.activeFolderID != "folder-a" || appState.sidebarView != SidebarFolder {
+		t.Fatalf("after popping B: sidebarView=%q activeFolderID=%q", appState.sidebarView, appState.activeFolderID)
+	}
+	if len(app.QueryMounted("id:screen.folder.folder-b")) != 0 {
+		t.Fatal("screen.folder.folder-b should unmount after pop")
+	}
+
+	// Next Back pops Folder A back to root gallery (without disconnecting).
+	app.Back()
+	app.Advance(400 * time.Millisecond)
+	if got := len(appState.folderStack); got != 0 {
+		t.Fatalf("folderStack len after popping A = %d, want 0", got)
+	}
+	if appState.screen.Get() != screenGallery {
+		t.Fatalf("screen after popping A = %q, want %q", appState.screen.Get(), screenGallery)
+	}
+	if appState.sidebarView != SidebarAll || appState.activeFolderID != "" {
+		t.Fatalf("after popping A: sidebarView=%q activeFolderID=%q", appState.sidebarView, appState.activeFolderID)
+	}
+	if app.Find("id:drawer.all") == nil || app.Find("text:Folder A") == nil {
+		t.Fatal("sidebar drawer content should remain intact after popping back")
+	}
+
+	// Back at root gallery does not disconnect to devices screen.
+	app.Back()
+	app.Advance(200 * time.Millisecond)
+	if appState.screen.Get() != screenGallery {
+		t.Fatalf("screen after back at root = %q, want %q", appState.screen.Get(), screenGallery)
+	}
+
+	// Header back button also pops a pushed folder screen.
+	appState.scope.Post(func() {
+		appState.selectFolder(appState.scope, "folder-a")
+	})
+	app.WaitFor("id:screen.folder.folder-a", 2*time.Second)
+	app.WaitFor("id:gallery.back", 2*time.Second)
+	app.Press("id:gallery.back")
+	app.Advance(400 * time.Millisecond)
+	if got := len(appState.folderStack); got != 0 {
+		t.Fatalf("folderStack len after pressing gallery.back = %d, want 0", got)
 	}
 }

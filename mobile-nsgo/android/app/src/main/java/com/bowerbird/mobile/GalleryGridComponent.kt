@@ -101,6 +101,9 @@ class GalleryGridComponent(
     private var themeVersion = 0
     private var hasThemeColors = false
     private var lastScrollTopSeq = 0
+    private var pendingRestorePos = -1
+    private var pendingRestoreOffset = 0
+    private var hasRestoredInitialScroll = false
     private var topInsetDp = 0
     private var bottomInsetDp = 24
     private var horizontalInsetDp = 8
@@ -409,8 +412,20 @@ class GalleryGridComponent(
                 val seq = (value as? Number)?.toInt() ?: 0
                 if (seq != lastScrollTopSeq) {
                     lastScrollTopSeq = seq
+                    pendingRestorePos = -1
+                    pendingRestoreOffset = 0
                     cancelTransitionAndReset()
                     primaryLayer.rv.scrollToPosition(0)
+                }
+            }
+            "scrollPos" -> {
+                if (!hasRestoredInitialScroll) {
+                    pendingRestorePos = (value as? Number)?.toInt() ?: -1
+                }
+            }
+            "scrollOffset" -> {
+                if (!hasRestoredInitialScroll) {
+                    pendingRestoreOffset = (value as? Number)?.toInt() ?: 0
                 }
             }
             "rows" -> {
@@ -462,6 +477,16 @@ class GalleryGridComponent(
                 diff.dispatchUpdatesTo(primaryLayer.adapter)
                 if (previewLayer.rv.visibility == View.VISIBLE || morphOverlay.visibility == View.VISIBLE) {
                     diff.dispatchUpdatesTo(previewLayer.adapter)
+                }
+                if (!hasRestoredInitialScroll && pendingRestorePos >= 0 && items.isNotEmpty()) {
+                    hasRestoredInitialScroll = true
+                    val targetPos = pendingRestorePos.coerceIn(0, items.lastIndex)
+                    val targetOffset = pendingRestoreOffset
+                    pendingRestorePos = -1
+                    pendingRestoreOffset = 0
+                    primaryLayer.rv.post {
+                        primaryLayer.scrollToPositionWithOffset(targetPos, targetOffset)
+                    }
                 }
                 updateEmptyVisibility()
             }
@@ -1157,6 +1182,16 @@ class GalleryGridComponent(
                         loadMoreTriggeredForSize = total
                         events.emit("loadMore", null)
                     }
+                }
+
+                override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                    if (this@GridLayer !== primaryLayer) return
+                    if (newState != RecyclerView.SCROLL_STATE_IDLE) return
+                    val pos = firstVisiblePosition()
+                    if (pos < 0) return
+                    val child = lm.findViewByPosition(pos)
+                    val offsetPx = if (child != null) child.top - rv.paddingTop else 0
+                    events.emit("scrollState", mapOf("pos" to pos, "offset" to offsetPx))
                 }
             })
         }

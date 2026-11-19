@@ -39,6 +39,23 @@ const (
 	screenSettings = "settings"
 )
 
+// folderFrame holds the per-screen state for a folder pushed onto the
+// gallery navigation stack so lower screens stay mounted with their own
+// items and scroll offsets during Android predictive back.
+const maxWarmGalleryPages = 3
+
+type folderFrame struct {
+	key                 int
+	folderID            string
+	gallery             *app.Gallery
+	cachedRows          []GalleryRow
+	subfoldersCollapsed bool
+	galleryRef          *core.Ref
+	scrollSeq           *core.Signal[int]
+	scrollPos           int
+	scrollOffset        int
+}
+
 // App is the root component's state.
 type App struct {
 	scope   *core.Scope
@@ -57,7 +74,13 @@ type App struct {
 
 	// Sidebar & library navigation
 	sidebarView         SidebarView
+	rootSidebarView     SidebarView
 	activeFolderID      string
+	folderStack         []*folderFrame
+	folderStackRev      *core.Signal[int]
+	nextFolderKey       int
+	rootScrollPos       int
+	rootScrollOffset    int
 	expandedFolders     map[string]bool
 	subfoldersCollapsed bool
 	folderPreviews      map[string][]string
@@ -386,6 +409,9 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		pluginsSyncing:       core.NewSignal(cx, false),
 		toast:                core.NewSignal(cx, ""),
 		sidebarView:          SidebarAll,
+		rootSidebarView:      SidebarAll,
+		folderStackRev:       core.NewSignal(cx, 0),
+		rootScrollPos:        -1,
 		expandedFolders:      map[string]bool{},
 		folderPreviews:       map[string][]string{},
 		shareTagIDs:          map[string]bool{},
@@ -533,6 +559,7 @@ func (a *App) Render(cx *core.Scope) core.Node {
 				s := a.screen.Get()
 				return s == screenGallery || s == screenSearch || s == screenDetail
 			}, Then: a.mainStack},
+			core.Show{When: func() bool { return a.screen.Get() == screenGallery }, Then: a.galleryDialogs},
 			core.Show{When: func() bool { return a.screen.Get() == screenInbox }, Then: a.inboxPage},
 			core.Show{When: func() bool { return a.screen.Get() == screenSettings }, Then: a.settingsPage},
 			a.shareFolderPickerDialog(cx),
@@ -577,17 +604,29 @@ func (a *App) Render(cx *core.Scope) core.Node {
 	}
 }
 
-// mainStack keeps the library, search and preview as screens of one stack:
-// the screens below stay mounted, so their scroll offsets survive a preview,
-// and Android's predictive back can reveal them under the page being popped.
+// mainStack keeps the library, pushed folders, search and preview as screens of
+// one stack: the screens below stay mounted, so their scroll offsets survive
+// entering subfolders or previews, and Android's predictive back can reveal
+// them under the page being popped.
 func (a *App) mainStack(cx *core.Scope) core.Node {
-	// The library screen is built once and stays mounted under search and
-	// preview, so its list keeps its scroll. Only the screens above it come
-	// and go.
+	// The library screen is built once and stays mounted under folders, search
+	// and preview, so its list keeps its scroll. Only the screens above it
+	// come and go.
 	gallery := core.Screen{
 		TestID: "screen.gallery", HeaderHidden: true,
-		Children: []core.Node{a.galleryPage(cx)},
+		Children: []core.Node{a.galleryPageFor(cx, nil)},
 	}
+	folders := core.Each(a.folderStackItems, func(f *folderFrame) int { return f.key },
+		func(cx *core.Scope, f func() *folderFrame, _ func() int) core.Node {
+			frame := f()
+			return core.Screen{
+				TestID:       "screen.folder." + frame.folderID,
+				HeaderHidden: true,
+				OnDismiss:    func() { a.removeFolderFrame(frame.key) },
+				Children:     []core.Node{a.galleryPageFor(cx, frame)},
+			}
+		},
+	)
 	search := core.Show{
 		When: func() bool {
 			s := a.screen.Get()
@@ -620,19 +659,21 @@ func (a *App) mainStack(cx *core.Scope) core.Node {
 	}
 	return core.Stack{
 		Style:    core.Style{Width: core.Pct(100), Height: core.Pct(100)},
-		Children: []core.Node{gallery, search, detail},
+		Children: []core.Node{gallery, folders, search, detail},
 	}
 }
 
 // backGuard takes back on the screens that do not pop a stack and whose
 // state is not a modal: the library drawer and multi-select, settings and
-// the inbox. It is absent on the preview stack so Android's predictive back
-// can run there.
+// the inbox. It is absent on the folder/preview stack so Android's predictive
+// back can run there.
 func (a *App) backGuard(cx *core.Scope) core.Node {
 	return core.Show{
 		When: func() bool {
 			switch a.screen.Get() {
-			case screenGallery, screenConnect, screenSettings, screenInbox:
+			case screenGallery:
+				return a.multiSelect.Get() || a.drawerOpen.Get()
+			case screenConnect, screenSettings, screenInbox:
 				return true
 			case screenWelcome:
 				return a.welcomeSheetMode.Get() != "" || a.entryScreen() == screenDevices
@@ -695,13 +736,6 @@ func (a *App) handleBack(cx *core.Scope) {
 		a.setDrawerOpen(cx, false)
 		return
 	}
-	if a.screen.Get() == screenGallery {
-		a.stopWS()
-		_ = a.session.Disconnect()
-		a.resetSessionState()
-		a.screen.Set(screenDevices)
-		a.bump()
-	}
 }
 
 func (a *App) rootCtx() context.Context {
@@ -715,14 +749,131 @@ func (a *App) after(d time.Duration, fn func()) { a.scope.AfterFunc(d, fn) }
 func (a *App) bump()                            { a.rev.Update(func(v int) int { return v + 1 }) }
 func (a *App) bumpGallery()                     { a.galleryRev.Update(func(v int) int { return v + 1 }) }
 
-func (a *App) rebuildGalleryRows() {
-	snap := a.gallery.Snapshot()
-	if a.sidebarView == SidebarFolder && a.activeFolderID != "" {
-		a.cachedRows = BuildGalleryRows(a.currentSubfolders(), a.subfoldersCollapsed, snap.Items, a.effectiveGridCols())
-	} else {
-		a.cachedRows = BuildFlatRows(snap.Items, a.effectiveGridCols())
+func (a *App) folderStackItems() []*folderFrame {
+	if a.folderStackRev != nil {
+		a.folderStackRev.Get()
 	}
+	return a.folderStack
+}
+
+func (a *App) isWarmGalleryPage(frame *folderFrame) bool {
+	frames := a.folderStackItems()
+	total := len(frames) + 1
+	idx := 0
+	if frame != nil {
+		idx = -1
+		for i, f := range frames {
+			if f.key == frame.key {
+				idx = i + 1
+				break
+			}
+		}
+		if idx < 0 {
+			return false
+		}
+	}
+	return (total - 1 - idx) < maxWarmGalleryPages
+}
+
+func (a *App) bumpFolderStack() {
+	if a.folderStackRev != nil {
+		a.folderStackRev.Update(func(v int) int { return v + 1 })
+	}
+}
+
+func (a *App) topFolder() *folderFrame {
+	if len(a.folderStack) == 0 {
+		return nil
+	}
+	return a.folderStack[len(a.folderStack)-1]
+}
+
+func (a *App) activeGallery() *app.Gallery {
+	if top := a.topFolder(); top != nil {
+		return top.gallery
+	}
+	return a.gallery
+}
+
+func (a *App) syncFolderStateFromStack() {
+	if top := a.topFolder(); top != nil {
+		a.sidebarView = SidebarFolder
+		a.activeFolderID = top.folderID
+		return
+	}
+	if a.rootSidebarView == "" || a.rootSidebarView == SidebarFolder {
+		a.rootSidebarView = SidebarAll
+	}
+	a.sidebarView = a.rootSidebarView
+	a.activeFolderID = ""
+}
+
+func (a *App) clearFolderStack() {
+	if len(a.folderStack) > 0 {
+		a.folderStack = nil
+		a.bumpFolderStack()
+	}
+}
+
+func (a *App) removeFolderFrame(key int) {
+	if len(a.folderStack) == 0 {
+		return
+	}
+	changed := false
+	out := a.folderStack[:0:0]
+	for _, f := range a.folderStack {
+		if f.key != key {
+			out = append(out, f)
+		} else {
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	a.folderStack = out
+	a.bumpFolderStack()
+	a.exitMultiSelect()
+	a.syncFolderStateFromStack()
+	a.bump()
 	a.bumpGallery()
+}
+
+func (a *App) popFolder() {
+	if top := a.topFolder(); top != nil {
+		a.removeFolderFrame(top.key)
+	}
+}
+
+func (a *App) subfoldersForFolder(folderID string) []model.Folder {
+	if folderID == "" {
+		return nil
+	}
+	f, ok := a.findFolderByID(folderID)
+	if !ok || len(f.Children) == 0 {
+		return nil
+	}
+	return f.Children
+}
+
+func (a *App) rebuildFrameRows(frame *folderFrame) {
+	if frame == nil {
+		snap := a.gallery.Snapshot()
+		if a.sidebarView == SidebarFolder && a.activeFolderID != "" {
+			a.cachedRows = BuildGalleryRows(a.currentSubfolders(), a.subfoldersCollapsed, snap.Items, a.effectiveGridCols())
+		} else {
+			a.cachedRows = BuildFlatRows(snap.Items, a.effectiveGridCols())
+		}
+		a.bumpGallery()
+		return
+	}
+	snap := frame.gallery.Snapshot()
+	frame.cachedRows = BuildGalleryRows(a.subfoldersForFolder(frame.folderID), frame.subfoldersCollapsed, snap.Items, a.effectiveGridCols())
+	a.bumpGallery()
+}
+
+func (a *App) rebuildGalleryRows() {
+	a.rebuildFrameRows(a.topFolder())
 }
 
 func (a *App) rebuildSearchRows() {
@@ -763,18 +914,48 @@ func (a *App) effectiveGallerySpec() query.Spec {
 }
 
 func (a *App) selectCollection(cx *core.Scope, next SidebarView) {
-	if a.sidebarView == next && next != SidebarFolder {
+	if a.sidebarView == next && next != SidebarFolder && a.topFolder() == nil {
 		return
 	}
 	a.exitMultiSelect()
+	a.clearFolderStack()
+	a.rootSidebarView = next
 	a.sidebarView = next
 	a.activeFolderID = ""
 	a.bump()
-	a.refreshGalleryView(cx, true)
+	a.refreshGalleryFrame(cx, nil, true)
 }
 
 func (a *App) selectFolder(cx *core.Scope, folderID string) {
+	if folderID == "" {
+		return
+	}
+	if a.sidebarView == SidebarFolder && a.activeFolderID == folderID {
+		return
+	}
 	a.exitMultiSelect()
+	if a.folderStackRev != nil {
+		if len(a.folderStack) == 0 && a.sidebarView != SidebarFolder {
+			a.rootSidebarView = a.sidebarView
+		}
+		a.nextFolderKey++
+		frame := &folderFrame{
+			key:        a.nextFolderKey,
+			folderID:   folderID,
+			gallery:    app.NewGallery(),
+			galleryRef: &core.Ref{},
+			scrollSeq:  core.NewSignal(cx, 0),
+			scrollPos:  -1,
+		}
+		a.folderStack = append(a.folderStack, frame)
+		a.bumpFolderStack()
+		a.sidebarView = SidebarFolder
+		a.activeFolderID = folderID
+		a.bump()
+		a.refreshGalleryFrame(cx, frame, true)
+		a.fetchSubfolderPreviews(cx, folderID)
+		return
+	}
 	a.sidebarView = SidebarFolder
 	a.activeFolderID = folderID
 	a.bump()
@@ -861,7 +1042,13 @@ func (a *App) fetchSubfolderPreviews(cx *core.Scope, folderID string) {
 			for id, urls := range results {
 				a.folderPreviews[id] = urls
 			}
-			if a.sidebarView == SidebarFolder && a.activeFolderID == folderID {
+			if a.folderStackRev != nil {
+				for _, frame := range a.folderStack {
+					if frame.folderID == folderID {
+						a.rebuildFrameRows(frame)
+					}
+				}
+			} else if a.sidebarView == SidebarFolder && a.activeFolderID == folderID {
 				a.rebuildGalleryRows()
 			}
 		})
@@ -876,31 +1063,52 @@ func (a *App) ensureLoaded(cx *core.Scope) {
 	a.refreshGalleryView(cx, true)
 }
 
+func (a *App) frameSpec(frame *folderFrame) (SidebarView, query.Spec, *app.Gallery, *core.Ref) {
+	if frame != nil {
+		spec := a.galleryFilter
+		spec.Folder = frame.folderID
+		spec.Untagged = false
+		spec.Uncategorized = false
+		return SidebarFolder, spec, frame.gallery, frame.galleryRef
+	}
+	return a.sidebarView, a.effectiveGallerySpec(), a.gallery, a.galleryRef
+}
+
 func (a *App) refreshGalleryView(cx *core.Scope, jumpTop bool) {
-	spec := a.effectiveGallerySpec()
-	token := a.gallery.Reset(spec, model.SortDesc, model.DefaultPageSize)
-	a.rebuildGalleryRows()
+	a.refreshGalleryFrame(cx, a.topFolder(), jumpTop)
+}
+
+func (a *App) refreshGalleryFrame(cx *core.Scope, frame *folderFrame, jumpTop bool) {
+	view, spec, g, _ := a.frameSpec(frame)
+	token := g.Reset(spec, model.SortDesc, model.DefaultPageSize)
+	a.rebuildFrameRows(frame)
 	a.bump()
-	a.fetchGalleryPage(cx, token, a.sidebarView, spec, 0, model.DefaultPageSize, false, jumpTop)
+	a.fetchGalleryPage(cx, frame, token, view, spec, 0, model.DefaultPageSize, false, jumpTop)
 }
 
 func (a *App) loadMoreGalleryView(cx *core.Scope) {
-	token, spec, _, offset, limit, ok := a.gallery.Request(true)
+	a.loadMoreGalleryFrame(cx, a.topFolder())
+}
+
+func (a *App) loadMoreGalleryFrame(cx *core.Scope, frame *folderFrame) {
+	view, _, g, _ := a.frameSpec(frame)
+	token, spec, _, offset, limit, ok := g.Request(true)
 	if !ok {
 		return
 	}
 	a.bump()
-	a.fetchGalleryPage(cx, token, a.sidebarView, spec, offset, limit, true, false)
+	a.fetchGalleryPage(cx, frame, token, view, spec, offset, limit, true, false)
 }
 
 func (a *App) reloadWindow(cx *core.Scope) {
 	if a.session.Current() == nil {
 		return
 	}
-	winLimit := a.gallery.WindowLimit()
-	spec := a.effectiveGallerySpec()
-	token := a.gallery.Invalidate()
-	a.fetchGalleryPage(cx, token, a.sidebarView, spec, 0, winLimit, false, false)
+	frame := a.topFolder()
+	view, spec, g, _ := a.frameSpec(frame)
+	winLimit := g.WindowLimit()
+	token := g.Invalidate()
+	a.fetchGalleryPage(cx, frame, token, view, spec, 0, winLimit, false, false)
 	if a.screen.Get() == screenSearch {
 		sSpec := a.searchSpec()
 		sLimit := a.searchGallery.WindowLimit()
@@ -918,7 +1126,8 @@ func (a *App) reloadWindow(cx *core.Scope) {
 	}
 }
 
-func (a *App) fetchGalleryPage(cx *core.Scope, token uint64, view SidebarView, spec query.Spec, offset, limit int, appendPage, jumpTop bool) {
+func (a *App) fetchGalleryPage(cx *core.Scope, frame *folderFrame, token uint64, view SidebarView, spec query.Spec, offset, limit int, appendPage, jumpTop bool) {
+	_, _, g, ref := a.frameSpec(frame)
 	go func() {
 		ctx, cancel := context.WithTimeout(a.rootCtx(), 25*time.Second)
 		defer cancel()
@@ -947,13 +1156,23 @@ func (a *App) fetchGalleryPage(cx *core.Scope, token uint64, view SidebarView, s
 			page, err = a.client.List(ctx, spec, model.SortDesc, offset, limit)
 		}
 		a.post(func() {
-			applied := a.gallery.Apply(token, page, appendPage, err)
+			applied := g.Apply(token, page, appendPage, err)
 			if applied {
-				a.rebuildGalleryRows()
+				a.rebuildFrameRows(frame)
 			}
 			a.bump()
 			if applied && jumpTop && !appendPage {
-				a.scrollTop(cx, a.galleryRef)
+				if frame != nil {
+					frame.scrollPos = -1
+					frame.scrollOffset = 0
+					if frame.scrollSeq != nil {
+						frame.scrollSeq.Update(func(v int) int { return v + 1 })
+					}
+				} else {
+					a.rootScrollPos = -1
+					a.rootScrollOffset = 0
+				}
+				a.scrollTop(cx, ref)
 			}
 		})
 	}()
@@ -1049,7 +1268,7 @@ func (a *App) scrollTop(cx *core.Scope, ref *core.Ref) {
 	if a.env.HasHost {
 		if ref == a.searchRef {
 			a.searchScrollSeq.Update(func(v int) int { return v + 1 })
-		} else {
+		} else if ref == a.galleryRef {
 			a.galleryScrollSeq.Update(func(v int) int { return v + 1 })
 		}
 		return
@@ -1107,6 +1326,8 @@ func (a *App) switchLibrary(cx *core.Scope, lib model.Library) {
 
 func (a *App) invalidateForLibraryChange(cx *core.Scope) {
 	a.exitMultiSelect()
+	a.clearFolderStack()
+	a.rootSidebarView = SidebarAll
 	a.sidebarView = SidebarAll
 	a.activeFolderID = ""
 	a.galleryFilter = query.Spec{}
@@ -1134,6 +1355,10 @@ func (a *App) invalidateForLibraryChange(cx *core.Scope) {
 
 func (a *App) resetSessionState() {
 	a.exitMultiSelect()
+	a.clearFolderStack()
+	a.rootSidebarView = SidebarAll
+	a.sidebarView = SidebarAll
+	a.activeFolderID = ""
 	a.gallery.Reset(query.Spec{}, model.SortDesc, model.DefaultPageSize)
 	a.searchGallery.Reset(query.Spec{}, model.SortDesc, model.DefaultPageSize)
 	a.cachedRows = nil
