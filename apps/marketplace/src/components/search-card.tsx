@@ -38,7 +38,7 @@ export function SearchCard({ plugin }: Props) {
 
             <div className="flex flex-wrap gap-1 mt-1">
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground font-medium border border-border/60">
-                {plugin.kind === "preview" ? "预览扩展" : "元数据透视"}
+                {({ preview: "预览扩展", metadata: "元数据透视", resolver: "链接解析", action: "操作扩展" } as Record<string, string>)[plugin.kind] || plugin.kind}
               </span>
               {plugin.extensions.slice(0, 3).map((ext) => (
                 <span
