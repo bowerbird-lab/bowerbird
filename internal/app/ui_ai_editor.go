@@ -91,6 +91,8 @@ type aiEditorState struct {
 	hasAPIKey       bool
 	gemsBalance     string
 	selectedArch    string
+	customArch      string
+	customModelID   string
 	aspectRatio     string
 	seedText        string
 	prompt          string
@@ -324,12 +326,17 @@ func (a *App) startAIEdit(target *core.Item) {
 	a.aiEditor.cancelURL = ""
 	a.aiEditor.gemsCharged = 0
 
-	arch := a.aiEditor.selectedArch
-	var modelID string
-	for _, m := range a.aiEditor.models {
-		if m.ID == arch {
-			modelID = m.ModelID
-			break
+	arch := strings.TrimSpace(a.aiEditor.customArch)
+	if arch == "" {
+		arch = a.aiEditor.selectedArch
+	}
+	modelID := strings.TrimSpace(a.aiEditor.customModelID)
+	if modelID == "" {
+		for _, m := range a.aiEditor.models {
+			if m.ID == arch {
+				modelID = m.ModelID
+				break
+			}
 		}
 	}
 	aspect := a.aiEditor.aspectRatio
@@ -845,7 +852,12 @@ func (a *App) viewInspectorAIEdit(c *ui.Context, item core.Item) {
 	arch, changed := a.dropdown(c, "inspector-ai-model", a.aiEditor.selectedArch, a.aiModelSelectOptions())
 	if changed {
 		a.aiEditor.selectedArch = arch
+		a.aiEditor.customArch = ""
 	}
+	ui.TextInput(c.Key("inspector-ai-custom-arch"), &a.aiEditor.customArch).
+		FontSize(11.5).Placeholder(a.t("aiEditor.customArchPlaceholder"))
+	ui.TextInput(c.Key("inspector-ai-custom-model"), &a.aiEditor.customModelID).
+		FontSize(11.5).Placeholder(a.t("aiEditor.customModelPlaceholder"))
 
 	// Prompt input
 	ui.TextArea(c.Key("inspector-ai-prompt"), &a.aiEditor.prompt).
@@ -1065,7 +1077,14 @@ func (a *App) viewAIEditorWindow(c *ui.Context) {
 						arch, changed := a.dropdown(c, "win-ai-model", a.aiEditor.selectedArch, a.aiModelSelectOptions())
 						if changed {
 							a.aiEditor.selectedArch = arch
+							a.aiEditor.customArch = ""
 						}
+						a.sectionLabel(c, a.t("aiEditor.customArch"))
+						ui.TextInput(c.Key("win-ai-custom-arch"), &a.aiEditor.customArch).
+							FontSize(12).Placeholder(a.t("aiEditor.customArchPlaceholder"))
+						a.sectionLabel(c, a.t("aiEditor.customModel"))
+						ui.TextInput(c.Key("win-ai-custom-model"), &a.aiEditor.customModelID).
+							FontSize(12).Placeholder(a.t("aiEditor.customModelPlaceholder"))
 
 						a.sectionLabel(c, a.t("aiEditor.aspectRatio"))
 						ar, arChanged := a.dropdown(c, "win-ai-aspect", a.aiEditor.aspectRatio, a.aiAspectSelectOptions())

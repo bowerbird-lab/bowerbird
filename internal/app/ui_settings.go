@@ -877,7 +877,10 @@ func (a *App) settingsPlugins(c *ui.Context) {
 							if setting.Placeholder != "" {
 								input.Placeholder(setting.Placeholder)
 							}
-							input.OnSubmit(func() {
+							if setting.Secret {
+								input.Password()
+							}
+							input.OnChange(func() {
 								a.pluginHost.SetSetting(pl.ID, setting.Key, val)
 							})
 						})
