@@ -869,6 +869,30 @@ func (a *App) settingsPlugins(c *ui.Context) {
 			// Plugin settings rendered from the manifest.
 			if a.pluginHost != nil {
 				if hosted, ok := a.pluginHost.Get(pl.ID); ok {
+					if len(hosted.Manifest.UI.Windows)+len(hosted.Manifest.UI.Panels) > 0 {
+						if len(hosted.Manifest.Permissions.Network) > 0 {
+							on := a.pluginHost.UIGranted(pl.ID, "network")
+							a.settingsRow(c, a.t("settings.plugins.allowNetwork"), strings.Join(hosted.Manifest.Permissions.Network, ", "), func() {
+								if ui.Switch(c.Key("plugin-network-"+pl.ID), &on).Changed() {
+									a.pluginHost.SetUIGrant(pl.ID, "network", on)
+								}
+							})
+						}
+						for _, capability := range hosted.Manifest.Permissions.Assets {
+							capability := capability
+							grant := "assets." + capability
+							on := a.pluginHost.UIGranted(pl.ID, grant)
+							label := a.t("settings.plugins.allowAssetRead")
+							if capability == "write" {
+								label = a.t("settings.plugins.allowAssetWrite")
+							}
+							a.settingsRow(c, label, "", func() {
+								if ui.Switch(c.Key("plugin-grant-"+pl.ID+grant), &on).Changed() {
+									a.pluginHost.SetUIGrant(pl.ID, grant, on)
+								}
+							})
+						}
+					}
 					for _, setting := range hosted.Manifest.Settings {
 						setting := setting
 						val, exists := hosted.Settings[setting.Key]

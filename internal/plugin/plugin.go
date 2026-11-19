@@ -85,6 +85,7 @@ type PluginUIEntry struct {
 // Permissions declares the capabilities a plugin may use.
 type Permissions struct {
 	Network      []string `json:"network,omitempty"`
+	Assets       []string `json:"assets,omitempty"`
 	Process      []string `json:"process,omitempty"`
 	OpenExternal bool     `json:"openExternal,omitempty"`
 }
@@ -105,6 +106,7 @@ type Plugin struct {
 	Dir         string
 	Enabled     bool
 	Settings    map[string]string
+	Grants      map[string]string
 	urlPatterns []*regexp.Regexp
 }
 
@@ -128,6 +130,7 @@ type Host struct {
 type pluginState struct {
 	Enabled  bool              `json:"enabled"`
 	Settings map[string]string `json:"settings"`
+	Grants   map[string]string `json:"grants,omitempty"`
 }
 
 // urlMatchIndex makes URL drags O(1) for declared hosts and only runs regular
@@ -219,18 +222,21 @@ func (h *Host) Scan() {
 			// Keep the live enabled/settings state.
 			found[id].Enabled = p.Enabled
 			found[id].Settings = p.Settings
+			found[id].Grants = p.Grants
 		}
 	}
 	for id, p := range found {
 		if old, ok := h.plugins[id]; ok {
 			p.Enabled = old.Enabled
 			p.Settings = old.Settings
+			p.Grants = old.Grants
 		} else if state, ok := h.states[id]; ok {
 			// NewHost may have pruned the placeholder for a missing directory
 			// before RegisterBuiltin runs. Keep persisted state until the
 			// built-in plugin is registered.
 			p.Enabled = state.Enabled
 			p.Settings = state.Settings
+			p.Grants = state.Grants
 		}
 		h.plugins[id] = p
 		h.logPlugin("info", p, "manifest.loaded", fmt.Sprintf("version=%s hooks=%v network=%v process=%v openExternal=%t", p.Manifest.Version, p.Manifest.Hooks, p.Manifest.Permissions.Network, p.Manifest.Permissions.Process, p.Manifest.Permissions.OpenExternal), 0)
@@ -444,6 +450,11 @@ func validateManifest(m *Manifest) error {
 	}
 	if m.Main == "" && len(m.Hooks) > 0 {
 		return errors.New("native plugins cannot declare JavaScript hooks")
+	}
+	for _, permission := range m.Permissions.Assets {
+		if permission != "read" && permission != "write" {
+			return fmt.Errorf("unknown asset permission %q", permission)
+		}
 	}
 	for _, host := range m.Permissions.Network {
 		host = strings.TrimSpace(host)
@@ -1178,7 +1189,7 @@ func (h *Host) loadIndex() {
 	}
 	for id, s := range state {
 		h.states[id] = s
-		h.plugins[id] = &Plugin{Manifest: Manifest{ID: id}, Enabled: s.Enabled, Settings: s.Settings}
+		h.plugins[id] = &Plugin{Manifest: Manifest{ID: id}, Enabled: s.Enabled, Settings: s.Settings, Grants: s.Grants}
 	}
 }
 
@@ -1188,7 +1199,7 @@ func (h *Host) saveIndexLocked() {
 		if p.Manifest.Name == "" {
 			continue
 		}
-		entry := pluginState{Enabled: p.Enabled, Settings: p.Settings}
+		entry := pluginState{Enabled: p.Enabled, Settings: p.Settings, Grants: p.Grants}
 		h.states[id] = entry
 		state[id] = entry
 	}

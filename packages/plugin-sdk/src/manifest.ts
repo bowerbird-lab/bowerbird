@@ -97,6 +97,9 @@ export function validatePluginManifest(manifest: unknown): ManifestValidationRes
   }
   if (m.permissions !== undefined) {
     const permissions = m.permissions as Record<string, unknown>;
+    if (permissions.assets !== undefined && (!Array.isArray(permissions.assets) || permissions.assets.some((v) => v !== "read" && v !== "write"))) {
+      errors.push("'permissions.assets' must contain only 'read' and 'write'");
+    }
     if (permissions.network !== undefined && !isStringArray(permissions.network)) {
       errors.push("'permissions.network' must be an array of strings");
     }
@@ -157,6 +160,7 @@ export function normalizePluginManifest(manifest: PluginManifest): PluginManifes
     priority: manifest.priority ?? preview?.priority ?? 50,
     supportsZoom: manifest.supportsZoom ?? preview?.supportsZoom ?? false,
     permissions: {
+      assets: manifest.permissions?.assets ?? [],
       network: normalizeList(manifest.permissions?.network),
       process: normalizeList(manifest.permissions?.process),
       openExternal: manifest.permissions?.openExternal ?? false,
@@ -164,7 +168,7 @@ export function normalizePluginManifest(manifest: PluginManifest): PluginManifes
     settings: (manifest.settings ?? []) as PluginSetting[],
     hooks: normalizeList(manifest.hooks) as PluginHookName[],
   };
-  if (!normalized.main && normalized.native) {
+  if (!normalized.main && (normalized.native || normalized.ui?.windows?.length || normalized.ui?.panels?.length)) {
     delete normalized.main;
   } else if (!normalized.main) {
     normalized.main = "index.js";

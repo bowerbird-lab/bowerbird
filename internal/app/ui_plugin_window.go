@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"bowerbird/core"
 	"bowerbird/internal/plugin"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -68,10 +69,15 @@ func (a *App) openPluginUI(pluginID string, entry plugin.PluginUIEntry) error {
 	}
 	view = created
 	page := view.Page()
+	var selected *core.Item
+	if a.activeItem != nil {
+		copy := *a.activeItem
+		selected = &copy
+	}
 	a.pluginUISessions.Attach(page, dir, func() bool {
 		current, ok := a.pluginHost.Get(pluginID)
 		return ok && a.pluginHost.IsEnabled(pluginID) && current.Dir == dir
-	}, a.pluginHost.UISettingsHandler(pluginID))
+	}, a.pluginWindowAPI(pluginID, selected))
 	a.pluginUIWindows[key] = win
 	win.OnClosed(func() { a.pluginUISessions.Detach(page); delete(a.pluginUIWindows, key) })
 	// Escape each path segment without allowing entry to alter the URL origin.

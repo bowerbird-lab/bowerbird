@@ -555,6 +555,9 @@
       }
     },
     "plugins": {
+      "allowNetwork": "允许联网（可能上传数据）",
+      "allowAssetRead": "允许读取选中素材",
+      "allowAssetWrite": "允许新建和替换素材",
       "refresh": "刷新插件",
       "openPluginWindow": "打开插件窗口",
       "showSecret": "显示密钥",

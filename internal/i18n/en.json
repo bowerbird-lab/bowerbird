@@ -555,6 +555,9 @@
       }
     },
     "plugins": {
+      "allowNetwork": "Allow network access (may upload data)",
+      "allowAssetRead": "Allow reading selected assets",
+      "allowAssetWrite": "Allow creating and replacing assets",
       "refresh": "Refresh plugins",
       "openPluginWindow": "Open plugin window",
       "showSecret": "Show secret",

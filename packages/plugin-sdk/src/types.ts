@@ -27,6 +27,8 @@ export type NativeRenderer =
 
 /** Capabilities a plugin may request from the host sandbox. */
 export interface PluginPermissions {
+  /** Read the selected asset or create/replace assets after user approval. */
+  assets?: ("read" | "write")[];
   /**
    * Hostname allow-list for `host.fetch`. Exact hosts and `*.example.com`
    * wildcards are supported. Empty means no network access.
