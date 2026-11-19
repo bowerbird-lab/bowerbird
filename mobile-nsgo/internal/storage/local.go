@@ -844,8 +844,14 @@ type Preferences struct {
 	SystemAccent        bool   `json:"systemAccent"`
 	GridColumns         int    `json:"gridColumns"`
 	GalleryLayout       string `json:"galleryLayout"` // "auto", "waterfall" or "grid"
-	ShareMode           string `json:"shareMode"`     // "auto" or "choose"
-	ShareNotifyDisabled bool   `json:"shareNotifyDisabled,omitempty"`
+	ShareMode              string `json:"shareMode"`     // "auto" or "choose"
+	ShareNotifyDisabled    bool   `json:"shareNotifyDisabled,omitempty"`
+	PredictiveBackDisabled bool   `json:"predictiveBackDisabled,omitempty"`
+}
+
+// PredictiveBackEnabled reports whether Android predictive back is enabled.
+func (p Preferences) PredictiveBackEnabled() bool {
+	return !p.PredictiveBackDisabled
 }
 
 // PreferencesVersion is the current preferences document version.

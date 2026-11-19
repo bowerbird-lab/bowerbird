@@ -180,8 +180,9 @@ type App struct {
 	settingsMode         *core.Signal[string]
 	settingsLightTheme   *core.Signal[string]
 	settingsDarkTheme    *core.Signal[string]
-	settingsSystemAccent *core.Signal[bool]
-	settingsThemeOpen    *core.Signal[bool]
+	settingsSystemAccent   *core.Signal[bool]
+	settingsPredictiveBack *core.Signal[bool]
+	settingsThemeOpen      *core.Signal[bool]
 	settingsThemePick    apptheme.Appearance
 	settingsBackScreen   string
 	themes               []*apptheme.Theme
@@ -303,8 +304,9 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		settingsMode:         core.NewSignal(cx, prefs.ThemeMode),
 		settingsLightTheme:   core.NewSignal(cx, prefs.LightTheme),
 		settingsDarkTheme:    core.NewSignal(cx, prefs.DarkTheme),
-		settingsSystemAccent: core.NewSignal(cx, prefs.SystemAccent),
-		settingsThemeOpen:    core.NewSignal(cx, false),
+		settingsSystemAccent:   core.NewSignal(cx, prefs.SystemAccent),
+		settingsPredictiveBack: core.NewSignal(cx, prefs.PredictiveBackEnabled()),
+		settingsThemeOpen:      core.NewSignal(cx, false),
 		settingsThemePick:    apptheme.Light,
 		detailCache:          map[string]model.ItemDetail{},
 		detailLoading:        map[string]bool{},
@@ -511,9 +513,9 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		}
 		stage := a.matchStage.Get()
 		enabled := (a.screen.Get() == screenDetail || (a.matchInteractive && stage != 0)) &&
+			a.predictiveBackEnabled(cx) &&
 			!a.metaOpen.Get() &&
 			!a.confirmDel.Get() &&
-			!cx.Env().ReduceMotion() &&
 			a.canRunHeroBack()
 		if enabled != a.matchLastHostPred {
 			a.matchLastHostPred = enabled
@@ -552,16 +554,27 @@ func (a *App) Render(cx *core.Scope) core.Node {
 			}
 		},
 		Children: []core.Node{
-			core.Show{When: func() bool { return a.screen.Get() == screenWelcome }, Then: a.welcome},
-			core.Show{When: func() bool { return a.screen.Get() == screenDevices }, Then: a.devicesPage},
-			core.Show{When: func() bool { return a.screen.Get() == screenConnect }, Then: a.connect},
 			core.Show{When: func() bool {
 				s := a.screen.Get()
-				return s == screenGallery || s == screenSearch || s == screenDetail
+				return s == screenWelcome || (s == screenSettings && a.settingsBackScreen == screenWelcome)
+			}, Then: a.welcomeStack},
+			core.Show{When: func() bool { return a.screen.Get() == screenDevices }, Then: a.devicesPage},
+			core.Show{When: func() bool {
+				s := a.screen.Get()
+				return s == screenConnect || (s == screenSettings && a.settingsBackScreen == screenConnect)
+			}, Then: a.connectStack},
+			core.Show{When: func() bool {
+				s := a.screen.Get()
+				return s == screenGallery || s == screenSearch || s == screenDetail || (s == screenSettings && a.settingsBackScreen == screenGallery)
 			}, Then: a.mainStack},
 			core.Show{When: func() bool { return a.screen.Get() == screenGallery }, Then: a.galleryDialogs},
 			core.Show{When: func() bool { return a.screen.Get() == screenInbox }, Then: a.inboxPage},
-			core.Show{When: func() bool { return a.screen.Get() == screenSettings }, Then: a.settingsPage},
+			core.Show{When: func() bool {
+				return a.screen.Get() == screenSettings &&
+					a.settingsBackScreen != screenGallery &&
+					a.settingsBackScreen != screenWelcome &&
+					a.settingsBackScreen != screenConnect
+			}, Then: a.settingsPage},
 			a.shareFolderPickerDialog(cx),
 			a.backGuard(cx),
 			a.previewMatchOverlay(cx),
@@ -620,10 +633,16 @@ func (a *App) mainStack(cx *core.Scope) core.Node {
 		func(cx *core.Scope, f func() *folderFrame, _ func() int) core.Node {
 			frame := f()
 			return core.Screen{
-				TestID:       "screen.folder." + frame.folderID,
-				HeaderHidden: true,
-				OnDismiss:    func() { a.removeFolderFrame(frame.key) },
-				Children:     []core.Node{a.galleryPageFor(cx, frame)},
+				TestID:          "screen.folder." + frame.folderID,
+				HeaderHidden:    true,
+				NoPopOnBackFunc: func() bool { return !a.predictiveBackEnabled(cx) },
+				OnBackPress: func() {
+					if !a.predictiveBackEnabled(cx) {
+						a.removeFolderFrame(frame.key)
+					}
+				},
+				OnDismiss: func() { a.removeFolderFrame(frame.key) },
+				Children:  []core.Node{a.galleryPageFor(cx, frame)},
 			}
 		},
 	)
@@ -634,7 +653,15 @@ func (a *App) mainStack(cx *core.Scope) core.Node {
 		},
 		Then: func(cx *core.Scope) core.Node {
 			return core.Screen{
-				TestID: "screen.search", HeaderHidden: true,
+				TestID:          "screen.search",
+				HeaderHidden:    true,
+				NoPopOnBackFunc: func() bool { return !a.predictiveBackEnabled(cx) },
+				OnBackPress: func() {
+					if !a.predictiveBackEnabled(cx) {
+						a.detailFrom = screenGallery
+						a.screen.Set(screenGallery)
+					}
+				},
 				OnDismiss: func() {
 					a.detailFrom = screenGallery
 					a.screen.Set(screenGallery)
@@ -647,25 +674,86 @@ func (a *App) mainStack(cx *core.Scope) core.Node {
 		When: func() bool { return a.screen.Get() == screenDetail },
 		Then: func(cx *core.Scope) core.Node {
 			return core.Screen{
-				TestID: "screen.detail", HeaderHidden: true,
+				TestID:       "screen.detail",
+				HeaderHidden: true,
 				// On Android, let the stack's predictive back gesture pop the page
-				// interactively while the header back button runs the hero shrink.
-				NoPopOnBack: core.Untracked(cx, cx.Env().OS) != core.OSAndroid,
-				OnBackPress: func() { a.backFromDetail() },
-				OnDismiss:   func() { a.dismissDetail() },
-				Children:    []core.Node{a.detailPage(cx)},
+				// interactively when predictive back is enabled, while the header
+				// back button (or disabled predictive back) runs backFromDetail.
+				NoPopOnBackFunc: func() bool { return !a.predictiveBackEnabled(cx) },
+				OnBackPress:     func() { a.backFromDetail() },
+				OnDismiss:       func() { a.dismissDetail() },
+				Children:        []core.Node{a.detailPage(cx)},
 			}
 		},
 	}
+	settings := core.Show{
+		When: func() bool { return a.screen.Get() == screenSettings && a.settingsBackScreen == screenGallery },
+		Then: a.settingsScreenNode,
+	}
 	return core.Stack{
 		Style:    core.Style{Width: core.Pct(100), Height: core.Pct(100)},
-		Children: []core.Node{gallery, folders, search, detail},
+		Children: []core.Node{gallery, folders, search, detail, settings},
+	}
+}
+
+func (a *App) predictiveBackEnabled(cx *core.Scope) bool {
+	return core.Untracked(cx, cx.Env().OS) == core.OSAndroid &&
+		a.settingsPredictiveBack.Get() &&
+		!cx.Env().ReduceMotion()
+}
+
+func (a *App) settingsScreenNode(cx *core.Scope) core.Node {
+	return core.Screen{
+		TestID:          "screen.settings",
+		HeaderHidden:    true,
+		NoPopOnBackFunc: func() bool { return !a.predictiveBackEnabled(cx) },
+		OnBackPress: func() {
+			if !a.predictiveBackEnabled(cx) {
+				a.closeSettings()
+			}
+		},
+		OnDismiss: func() { a.closeSettings() },
+		Children:  []core.Node{a.settingsPage(cx)},
+	}
+}
+
+func (a *App) welcomeStack(cx *core.Scope) core.Node {
+	return core.Stack{
+		Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+		Children: []core.Node{
+			core.Screen{
+				TestID:       "screen.welcome.host",
+				HeaderHidden: true,
+				Children:     []core.Node{a.welcome(cx)},
+			},
+			core.Show{
+				When: func() bool { return a.screen.Get() == screenSettings && a.settingsBackScreen == screenWelcome },
+				Then: a.settingsScreenNode,
+			},
+		},
+	}
+}
+
+func (a *App) connectStack(cx *core.Scope) core.Node {
+	return core.Stack{
+		Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+		Children: []core.Node{
+			core.Screen{
+				TestID:       "screen.connect.host",
+				HeaderHidden: true,
+				Children:     []core.Node{a.connect(cx)},
+			},
+			core.Show{
+				When: func() bool { return a.screen.Get() == screenSettings && a.settingsBackScreen == screenConnect },
+				Then: a.settingsScreenNode,
+			},
+		},
 	}
 }
 
 // backGuard takes back on the screens that do not pop a stack and whose
-// state is not a modal: the library drawer and multi-select, settings and
-// the inbox. It is absent on the folder/preview stack so Android's predictive
+// state is not a modal: the library drawer and multi-select, and the inbox.
+// It is absent on the folder/preview/settings stack so Android's predictive
 // back can run there.
 func (a *App) backGuard(cx *core.Scope) core.Node {
 	return core.Show{
@@ -673,7 +761,7 @@ func (a *App) backGuard(cx *core.Scope) core.Node {
 			switch a.screen.Get() {
 			case screenGallery:
 				return a.multiSelect.Get() || a.drawerOpen.Get()
-			case screenConnect, screenSettings, screenInbox:
+			case screenConnect, screenInbox:
 				return true
 			case screenWelcome:
 				return a.welcomeSheetMode.Get() != "" || a.entryScreen() == screenDevices

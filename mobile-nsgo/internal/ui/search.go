@@ -89,7 +89,14 @@ func (a *App) searchPage(cx *core.Scope) core.Node {
 			Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
 		}
 	}
-	return core.View{Style: core.Style{Width: core.Pct(100), Height: core.Pct(100)}, Children: []core.Node{
+	return core.View{
+		StyleFunc: func() core.Style {
+			return core.Style{
+				Width: core.Pct(100), Height: core.Pct(100),
+				Background: colors.Background(), Overflow: core.Hidden,
+			}
+		},
+		Children: []core.Node{
 		core.View{StyleFunc: func() core.Style {
 			safe := cx.Env().SafeArea()
 			pad := safeSideInset(safe)

@@ -275,8 +275,9 @@ func (a *App) savePreferences() {
 		SystemAccent:        a.settingsSystemAccent.Get(),
 		GridColumns:         a.gridCols.Get(),
 		GalleryLayout:       a.galleryLayout.Get(),
-		ShareMode:           a.shareMode.Get(),
-		ShareNotifyDisabled: !a.shareNotify.Get(),
+		ShareMode:              a.shareMode.Get(),
+		ShareNotifyDisabled:    !a.shareNotify.Get(),
+		PredictiveBackDisabled: !a.settingsPredictiveBack.Get(),
 	}
 	if err := a.local.SavePreferences(prefs); err != nil {
 		log.Printf("[Settings] saving preferences: %v", err)
@@ -305,6 +306,15 @@ func (a *App) setShareNotify(cx *core.Scope, enabled bool) {
 	if enabled && a.env.HasHost && cx.Env().OS() == core.OSAndroid {
 		cx.CallHost("notify.requestPermission", nil, nil)
 	}
+}
+
+func (a *App) setPredictiveBack(enabled bool) {
+	if a.settingsPredictiveBack.Get() == enabled {
+		return
+	}
+	a.settingsPredictiveBack.Set(enabled)
+	a.savePreferences()
+	a.bump()
 }
 
 func (a *App) setThemeMode(mode string) {
@@ -702,7 +712,12 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 	}
 
 	return core.View{
-		Style: core.Style{Width: core.Pct(100), Height: core.Pct(100), Gap: 10},
+		StyleFunc: func() core.Style {
+			return core.Style{
+				Width: core.Pct(100), Height: core.Pct(100), Gap: 10,
+				Background: colors.Background(), Overflow: core.Hidden,
+			}
+		},
 		Children: []core.Node{
 			core.Scroll{
 				Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
@@ -747,6 +762,16 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 									Disabled: func() bool { return a.effectiveGridCols() >= a.maxGridCols() },
 									OnPress:  func() { a.setGridColumns(cx, a.effectiveGridCols()+1) },
 								}),
+							}},
+							divider,
+							core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{
+								core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{
+									core.Text{Content: "预见式返回", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
+									core.Text{Content: "在 Android 上侧滑返回时预览上一页面。",
+										MaxLines: 2, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
+								}},
+								nsui.Switch{Checked: func() bool { return a.settingsPredictiveBack.Get() },
+									OnChange: a.setPredictiveBack, Label: "预见式返回", TestID: "settings.predictiveBack"},
 							}},
 						),
 						card("分享与通知",
