@@ -43,6 +43,13 @@ var deviceCardStyles = []struct {
 	{label: "创意画笔", data: cardStyle6PNG},
 }
 
+func deviceStyleKey(c storage.Connection) string {
+	if strings.TrimSpace(c.DeviceID) != "" {
+		return "device:" + strings.TrimSpace(c.DeviceID)
+	}
+	return c.BaseURL
+}
+
 func (a *App) cardStyleFor(baseURL string, fallbackIdx int) int {
 	if idx, ok := a.cardStyleIdx[baseURL]; ok && idx >= 0 && idx < len(deviceCardStyles) {
 		return idx
@@ -51,6 +58,15 @@ func (a *App) cardStyleFor(baseURL string, fallbackIdx int) int {
 		return 0
 	}
 	return fallbackIdx % len(deviceCardStyles)
+}
+
+func (a *App) cardStyleForConn(c storage.Connection, fallbackIdx int) int {
+	if key := deviceStyleKey(c); key != "" {
+		if idx, ok := a.cardStyleIdx[key]; ok && idx >= 0 && idx < len(deviceCardStyles) {
+			return idx
+		}
+	}
+	return a.cardStyleFor(c.BaseURL, fallbackIdx)
 }
 
 func (a *App) entryScreen() string {
@@ -92,17 +108,21 @@ func (a *App) onScannedConnected(cx *core.Scope, session *storage.Session) {
 	a.legacyNotice.Set("")
 
 	conn := storage.Connection{
+		DeviceID:        session.DeviceID,
 		Name:            "新建的电脑",
 		BaseURL:         session.BaseURL,
 		Token:           session.Token,
+		CandidateIPs:    session.CandidateIPs,
+		Port:            session.Port,
 		LibraryID:       session.LibraryID,
 		LibraryName:     session.LibraryName,
 		LastConnectedAt: time.Now().UnixMilli(),
 	}
-	// Preserve existing custom name if this IP was already saved.
+	// Preserve existing custom name if this device or IP was already saved.
 	if history, err := a.local.History(); err == nil {
 		for _, old := range history {
-			if sameOriginURL(old.BaseURL, session.BaseURL) && strings.TrimSpace(old.Name) != "" {
+			sameDev := conn.DeviceID != "" && old.DeviceID == conn.DeviceID
+			if (sameDev || sameOriginURL(old.BaseURL, session.BaseURL)) && strings.TrimSpace(old.Name) != "" {
 				conn.Name = old.Name
 				break
 			}
@@ -125,7 +145,7 @@ func (a *App) openNewDeviceDialog(c storage.Connection) {
 		name = "新建的电脑"
 	}
 	a.deviceEditName.Set(name)
-	a.deviceEditStyle.Set(a.cardStyleFor(c.BaseURL, 1)) // 默认文件夹/色卡形象
+	a.deviceEditStyle.Set(a.cardStyleForConn(c, 1)) // 默认文件夹/色卡形象
 	a.deviceEditIsNew.Set(true)
 	a.newDeviceOpen.Set(true)
 }
@@ -141,7 +161,7 @@ func (a *App) openDeviceEdit(c storage.Connection, fallbackIdx int, isNew bool) 
 		name = "新建的电脑"
 	}
 	a.deviceEditName.Set(name)
-	a.deviceEditStyle.Set(a.cardStyleFor(c.BaseURL, fallbackIdx))
+	a.deviceEditStyle.Set(a.cardStyleForConn(c, fallbackIdx))
 	a.deviceEditIsNew.Set(isNew)
 	a.bump()
 	a.deviceEditOpen.Set(true)
@@ -561,7 +581,7 @@ func (a *App) deviceCard(cx *core.Scope, c storage.Connection, idx int, cardSize
 					core.Image{
 						SourceFunc: func() core.ImageSource {
 							_ = a.cardStyleRev.Get()
-							sIdx := a.cardStyleFor(c.BaseURL, idx)
+							sIdx := a.cardStyleForConn(c, idx)
 							return core.ImageSource{Data: deviceCardStyles[sIdx].data}
 						},
 						ResizeMode:     core.Contain,
@@ -825,8 +845,13 @@ func (a *App) newDeviceDialog(cx *core.Scope) core.Node {
 													Children: []core.Node{
 														core.Icon{SVG: lucide.Monitor(), Style: core.Style{FontSize: 15, Color: colors.Muted()}},
 														core.Text{
-															Content:   "电脑地址：" + hostPort,
-															MaxLines:  1,
+															Content: func() string {
+																if len(c.CandidateIPs) > 1 {
+																	return "当前地址：" + hostPort + "（已绑定 " + itoa(len(c.CandidateIPs)) + " 个 IP）"
+																}
+																return "电脑地址：" + hostPort
+															}(),
+															MaxLines:  2,
 															Style:     nsui.TypeCaption,
 															StyleFunc: nsui.Colored(colors.Text),
 														},
@@ -882,7 +907,9 @@ func (a *App) newDeviceDialog(cx *core.Scope) core.Node {
 												if err := a.local.Remember(updated); err != nil {
 													a.showToast(err.Error())
 												}
-												a.cardStyleIdx[c.BaseURL] = a.deviceEditStyle.Get()
+												a.cardStyleIdx[deviceStyleKey(c)] = a.deviceEditStyle.Get()
+												a.cardStyleIdx[deviceStyleKey(c)] = a.deviceEditStyle.Get()
+										a.cardStyleIdx[c.BaseURL] = a.deviceEditStyle.Get()
 												a.cardStyleRev.Update(func(v int) int { return v + 1 })
 												a.newDeviceOpen.Set(false)
 												a.bump()
@@ -953,6 +980,7 @@ func (a *App) deviceEditSheet(cx *core.Scope) core.Node {
 							},
 							OnPress: func(core.PressEvent) {
 								a.deviceEditStyle.Set(idx)
+								a.cardStyleIdx[deviceStyleKey(c)] = idx
 								a.cardStyleIdx[c.BaseURL] = idx
 								a.cardStyleRev.Update(func(v int) int { return v + 1 })
 							},
@@ -985,7 +1013,7 @@ func (a *App) deviceEditSheet(cx *core.Scope) core.Node {
 							Style:     nsui.TypeLabel,
 							StyleFunc: nsui.Colored(colors.Muted),
 						},
-						// Connection IP address (only shown in this sheet)
+						// Connection IP address(es) (only shown in this sheet)
 						core.View{
 							StyleFunc: func() core.Style {
 								return core.Style{
@@ -1000,8 +1028,13 @@ func (a *App) deviceEditSheet(cx *core.Scope) core.Node {
 							Children: []core.Node{
 								core.Icon{SVG: lucide.Monitor(), Style: core.Style{FontSize: 16, Color: colors.Muted()}},
 								core.Text{
-									Content:   "IP 地址：" + hostPort,
-									MaxLines:  1,
+									Content: func() string {
+										if len(c.CandidateIPs) > 1 {
+											return "已绑定 " + itoa(len(c.CandidateIPs)) + " 个 IP：" + strings.Join(c.CandidateIPs, " · ")
+										}
+										return "IP 地址：" + hostPort
+									}(),
+									MaxLines:  2,
 									Style:     nsui.TypeCaption,
 									StyleFunc: nsui.Colored(colors.Text),
 								},
@@ -1061,6 +1094,7 @@ func (a *App) deviceEditSheet(cx *core.Scope) core.Node {
 										if err := a.local.Remember(updated); err != nil {
 											a.showToast(err.Error())
 										}
+										a.cardStyleIdx[deviceStyleKey(c)] = a.deviceEditStyle.Get()
 										a.cardStyleIdx[c.BaseURL] = a.deviceEditStyle.Get()
 										a.cardStyleRev.Update(func(v int) int { return v + 1 })
 										a.deviceEditOpen.Set(false)

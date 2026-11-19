@@ -133,6 +133,34 @@ func (c *Client) Status(ctx context.Context) (model.Status, error) {
 	return out, err
 }
 
+// StatusAt probes /api/v1/status against an explicit base URL without mutating
+// the client's active session, so multiple candidates can be tested in parallel.
+func (c *Client) StatusAt(ctx context.Context, baseURL string) (model.Status, error) {
+	var out model.Status
+	normalized, err := NormalizeBaseURL(baseURL)
+	if err != nil {
+		return out, &APIError{Kind: KindInvalid, Message: err.Error()}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, normalized+"/api/v1/status", nil)
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return out, networkError(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return out, decodeError(resp)
+	}
+	dec := json.NewDecoder(io.LimitReader(resp.Body, 4<<20))
+	if err := dec.Decode(&out); err != nil {
+		return out, &APIError{Status: resp.StatusCode, Kind: KindServer, Message: "invalid JSON reply", Err: err}
+	}
+	return out, nil
+}
+
 // Pair exchanges a one-time code for a token. It does not save the token.
 // The desktop wraps this reply in its standard {"status":"success","data":…}
 // envelope, while older builds returned the fields at the top level. Accept

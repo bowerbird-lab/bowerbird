@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/platform"
@@ -296,5 +297,83 @@ func TestGalleryWindowLimitClamps(t *testing.T) {
 	g.Apply(tok, model.ItemsPage{Total: 200, Items: items}, false, nil)
 	if g.WindowLimit() != 150 {
 		t.Fatalf("window = %d, want 150", g.WindowLimit())
+	}
+}
+
+func TestProbeCandidatesPicksFastestReachable(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(150 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(model.Status{Name: "Slow"})
+	}))
+	defer slow.Close()
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(model.Status{Name: "Fast"})
+	}))
+	defer fast.Close()
+
+	client := transport.New(transport.Config{})
+	base, status, err := ProbeCandidates(context.Background(), client, []string{slow.URL, fast.URL}, 17878)
+	if err != nil {
+		t.Fatalf("ProbeCandidates failed: %v", err)
+	}
+	if base != fast.URL || status.Name != "Fast" {
+		t.Fatalf("expected fastest %q, got %q (%s)", fast.URL, base, status.Name)
+	}
+}
+
+func TestConnectWithTokenSwitchesToFastestCandidateIP(t *testing.T) {
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/status":
+			_ = json.NewEncoder(w).Encode(model.Status{
+				Name:            "Studio",
+				PairingRequired: true,
+				DeviceID:        "desk-abc",
+				Addresses:       []string{"127.0.0.1"},
+				Port:            17878,
+			})
+		case "/api/v1/libraries":
+			if r.Header.Get("Authorization") != "Bearer tok-123" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(model.LibrariesResponse{
+				Libraries: []model.Library{{ID: "lib-1", Name: "Studio", IsActive: true}},
+			})
+		}
+	}))
+	defer fast.Close()
+
+	local := storage.NewLocal(t.TempDir())
+	sec := platform.NewMemorySecureStore()
+	mgr := NewSessionManager(transport.New(transport.Config{}), local, sec)
+	mgr.saveToken("http://192.0.2.1:17878", "desk-abc", "tok-123")
+
+	conn := storage.Connection{
+		DeviceID:     "desk-abc",
+		Name:         "My Mac",
+		BaseURL:      "http://192.0.2.1:17878", // unreachable primary
+		CandidateIPs: []string{"192.0.2.1", fast.URL},
+	}
+	if err := local.Remember(conn); err != nil {
+		t.Fatal(err)
+	}
+	var loadedTok string
+	mgr.LoadConnectionToken(conn, func(tok string) { loadedTok = tok })
+	if loadedTok != "tok-123" {
+		t.Fatalf("LoadConnectionToken = %q, want tok-123", loadedTok)
+	}
+	conn.Token = loadedTok
+
+	sess, err := mgr.ConnectWithToken(context.Background(), conn)
+	if err != nil {
+		t.Fatalf("ConnectWithToken failed: %v", err)
+	}
+	if sess.BaseURL != fast.URL {
+		t.Fatalf("expected switched BaseURL %q, got %q", fast.URL, sess.BaseURL)
+	}
+	history, _ := local.History()
+	if len(history) != 1 || history[0].Name != "My Mac" {
+		t.Fatalf("expected single merged device with preserved name, got %+v", history)
 	}
 }

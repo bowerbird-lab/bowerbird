@@ -52,7 +52,7 @@ func connTokenKey(baseURL string) string {
 	return secureConnPrefix + hex.EncodeToString(sum[:16])
 }
 
-func (m *SessionManager) saveToken(baseURL, token string) {
+func (m *SessionManager) saveToken(baseURL, deviceID, token string) {
 	if m.Secure == nil {
 		return
 	}
@@ -63,6 +63,9 @@ func (m *SessionManager) saveToken(baseURL, token string) {
 	m.Secure.Set(secureSessionTokenKey, token, func(error) {})
 	if baseURL != "" {
 		m.Secure.Set(connTokenKey(baseURL), token, func(error) {})
+	}
+	if deviceID != "" {
+		m.Secure.Set(connTokenKey("device:"+deviceID), token, func(error) {})
 	}
 }
 
@@ -75,7 +78,7 @@ func (m *SessionManager) Restore() (*storage.Session, error) {
 	}
 	if s.Token != "" && m.Secure != nil {
 		// Migrate legacy plaintext token out of session.json.
-		m.saveToken(s.BaseURL, s.Token)
+		m.saveToken(s.BaseURL, s.DeviceID, s.Token)
 		_ = m.Local.SaveSession(*s)
 	}
 	if s.Token == "" && m.Secure != nil {
@@ -106,7 +109,7 @@ func (m *SessionManager) RestoreAsync(done func(*storage.Session, error)) {
 	}
 	if s.Token != "" {
 		if m.Secure != nil {
-			m.saveToken(s.BaseURL, s.Token)
+			m.saveToken(s.BaseURL, s.DeviceID, s.Token)
 			_ = m.Local.SaveSession(*s)
 		}
 		m.Client.SetSession(s.BaseURL, s.Token)
@@ -146,11 +149,12 @@ func (m *SessionManager) RestoreAsync(done func(*storage.Session, error)) {
 	})
 }
 
-// LoadConnectionToken resolves the stored token for a historical connection.
+// LoadConnectionToken resolves the stored token for a historical connection,
+// checking device ID, active BaseURL, and any bound candidate IPs.
 func (m *SessionManager) LoadConnectionToken(c storage.Connection, done func(string)) {
 	if c.Token != "" {
 		if m.Secure != nil {
-			m.Secure.Set(connTokenKey(c.BaseURL), c.Token, func(error) {})
+			m.saveToken(c.BaseURL, c.DeviceID, c.Token)
 			_ = m.Local.Remember(c)
 		}
 		done(c.Token)
@@ -160,14 +164,57 @@ func (m *SessionManager) LoadConnectionToken(c storage.Connection, done func(str
 		done("")
 		return
 	}
-	m.Secure.Get(connTokenKey(c.BaseURL), func(val string, _ error) {
-		done(val)
-	})
+	var keys []string
+	seen := make(map[string]bool)
+	addKey := func(raw string) {
+		if raw == "" {
+			return
+		}
+		k := connTokenKey(raw)
+		if !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	if c.DeviceID != "" {
+		addKey("device:" + c.DeviceID)
+	}
+	addKey(c.BaseURL)
+	for _, u := range connectionCandidateURLs(c) {
+		addKey(u)
+	}
+	var tryNext func(idx int)
+	tryNext = func(idx int) {
+		if idx >= len(keys) {
+			done("")
+			return
+		}
+		m.Secure.Get(keys[idx], func(val string, _ error) {
+			if val != "" {
+				done(val)
+				return
+			}
+			tryNext(idx + 1)
+		})
+	}
+	tryNext(0)
 }
 
-// ForgetConnection removes a remembered desktop and its encrypted token.
+// ForgetConnection removes a remembered desktop and all its encrypted tokens.
 func (m *SessionManager) ForgetConnection(baseURL string) error {
 	if m.Secure != nil && baseURL != "" {
+		if history, err := m.Local.History(); err == nil {
+			for _, c := range history {
+				if strings.EqualFold(strings.TrimRight(c.BaseURL, "/"), strings.TrimRight(baseURL, "/")) || (c.DeviceID != "" && c.DeviceID == baseURL) {
+					if c.DeviceID != "" {
+						m.Secure.Delete(connTokenKey("device:"+c.DeviceID), func(error) {})
+					}
+					for _, u := range connectionCandidateURLs(c) {
+						m.Secure.Delete(connTokenKey(u), func(error) {})
+					}
+				}
+			}
+		}
 		m.Secure.Delete(connTokenKey(baseURL), func(error) {})
 	}
 	return m.Local.Forget(baseURL)
@@ -193,19 +240,41 @@ func (m *SessionManager) Status() model.Status {
 
 // Connect probes one address and, when needed, pairs with code. An empty code
 // against a desktop that requires pairing returns ErrPairingRequired without
-// saving anything. On success it saves the session and its history.
+// saving anything. On success it saves the session and its history, binding any
+// additional candidate IPs reported by the desktop.
 func (m *SessionManager) Connect(ctx context.Context, baseURL, code, deviceName string) (*storage.Session, error) {
-	normalized, err := transport.NormalizeBaseURL(baseURL)
-	if err != nil {
-		return nil, &transport.APIError{Kind: transport.KindInvalid, Message: "地址无效: " + err.Error()}
+	return m.ConnectWithCandidates(ctx, baseURL, nil, 0, code, deviceName)
+}
+
+// ConnectWithCandidates connects to baseURL (or probes hosts when baseURL is empty),
+// pairs with code if needed, and binds all candidate IPs to the single device session.
+func (m *SessionManager) ConnectWithCandidates(ctx context.Context, baseURL string, extraHosts []string, port int, code, deviceName string) (*storage.Session, error) {
+	var normalized string
+	var status model.Status
+	var err error
+
+	if strings.TrimSpace(baseURL) != "" {
+		normalized, err = transport.NormalizeBaseURL(baseURL)
+		if err != nil {
+			return nil, &transport.APIError{Kind: transport.KindInvalid, Message: "地址无效: " + err.Error()}
+		}
+		m.Client.SetSession(normalized, "")
+		probeCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		status, err = m.Client.Status(probeCtx)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		normalized, status, err = ProbeCandidates(probeCtx, m.Client, extraHosts, port)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		m.Client.SetSession(normalized, "")
 	}
-	m.Client.SetSession(normalized, "")
-	probeCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	status, err := m.Client.Status(probeCtx)
-	if err != nil {
-		return nil, err
-	}
+
 	m.mu.Lock()
 	m.status = status
 	m.mu.Unlock()
@@ -227,34 +296,57 @@ func (m *SessionManager) Connect(ctx context.Context, baseURL, code, deviceName 
 		token = paired.Token
 	}
 
+	activeHost, activePort := storage.HostPortFromURL(normalized)
+	if port <= 0 {
+		if status.Port > 0 {
+			port = status.Port
+		} else if activePort > 0 {
+			port = activePort
+		} else {
+			port = 17878
+		}
+	}
+	candidates := storage.MergeIPs([]string{activeHost}, extraHosts, status.Addresses)
+
 	session := storage.Session{
-		Version:     storage.SessionVersion,
-		BaseURL:     normalized,
-		Token:       token,
-		DeviceName:  deviceName,
-		LibraryName: status.Name,
-		ConnectedAt: time.Now().UnixMilli(),
+		Version:      storage.SessionVersion,
+		DeviceID:     status.DeviceID,
+		BaseURL:      normalized,
+		Token:        token,
+		CandidateIPs: candidates,
+		Port:         port,
+		DeviceName:   deviceName,
+		LibraryName:  status.Name,
+		ConnectedAt:  time.Now().UnixMilli(),
 	}
 	m.Client.SetSession(normalized, token)
 	if err := m.Local.SaveSession(session); err != nil {
 		return nil, err
 	}
-	m.saveToken(normalized, token)
+	m.saveToken(normalized, status.DeviceID, token)
 	m.mu.Lock()
 	m.session = &session
 	m.mu.Unlock()
 	return &session, nil
 }
 
-// ConnectWithToken reconnects a remembered desktop without a code.
+// ConnectWithToken reconnects a remembered desktop without a code. When the
+// device has multiple bound IPs, all candidates are tested in parallel and the
+// fastest reachable address is used automatically.
 func (m *SessionManager) ConnectWithToken(ctx context.Context, c storage.Connection) (*storage.Session, error) {
-	m.Client.SetSession(c.BaseURL, c.Token)
+	candidates := connectionCandidateURLs(c)
+	if len(candidates) == 0 {
+		return nil, &transport.APIError{Kind: transport.KindInvalid, Message: "地址无效: empty address"}
+	}
+
 	probeCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	status, err := m.Client.Status(probeCtx)
+	bestBase, status, err := ProbeCandidates(probeCtx, m.Client, candidates, c.Port)
+	cancel()
 	if err != nil {
 		return nil, err
 	}
+
+	m.Client.SetSession(bestBase, c.Token)
 	if status.PairingRequired && strings.TrimSpace(c.Token) == "" {
 		return nil, ErrPairingRequired
 	}
@@ -267,14 +359,31 @@ func (m *SessionManager) ConnectWithToken(ctx context.Context, c storage.Connect
 			return nil, verifyErr
 		}
 	}
+
+	deviceID := status.DeviceID
+	if deviceID == "" {
+		deviceID = c.DeviceID
+	}
+	port := c.Port
+	if status.Port > 0 {
+		port = status.Port
+	} else if _, p := storage.HostPortFromURL(bestBase); port <= 0 && p > 0 {
+		port = p
+	}
+	activeHost, _ := storage.HostPortFromURL(bestBase)
+	mergedIPs := storage.MergeIPs([]string{activeHost}, c.CandidateIPs, status.Addresses)
+
 	session := storage.Session{
-		Version:     storage.SessionVersion,
-		BaseURL:     c.BaseURL,
-		Token:       c.Token,
-		DeviceName:  c.Name,
-		LibraryID:   c.LibraryID,
-		LibraryName: c.LibraryName,
-		ConnectedAt: time.Now().UnixMilli(),
+		Version:      storage.SessionVersion,
+		DeviceID:     deviceID,
+		BaseURL:      bestBase,
+		Token:        c.Token,
+		CandidateIPs: mergedIPs,
+		Port:         port,
+		DeviceName:   c.Name,
+		LibraryID:    c.LibraryID,
+		LibraryName:  c.LibraryName,
+		ConnectedAt:  time.Now().UnixMilli(),
 	}
 	if session.LibraryName == "" {
 		session.LibraryName = status.Name
@@ -282,13 +391,30 @@ func (m *SessionManager) ConnectWithToken(ctx context.Context, c storage.Connect
 	if err := m.Local.SaveSession(session); err != nil {
 		return nil, err
 	}
-	m.saveToken(c.BaseURL, c.Token)
-	m.Client.SetSession(c.BaseURL, c.Token)
+	m.saveToken(bestBase, deviceID, c.Token)
+	m.Client.SetSession(bestBase, c.Token)
 	m.mu.Lock()
 	m.session = &session
 	m.status = status
 	m.mu.Unlock()
 	return &session, nil
+}
+
+func connectionCandidateURLs(c storage.Connection) []string {
+	port := c.Port
+	if port <= 0 {
+		if _, p := storage.HostPortFromURL(c.BaseURL); p > 0 {
+			port = p
+		} else {
+			port = 17878
+		}
+	}
+	hosts := make([]string, 0, 1+len(c.CandidateIPs))
+	if strings.TrimSpace(c.BaseURL) != "" {
+		hosts = append(hosts, c.BaseURL)
+	}
+	hosts = append(hosts, c.CandidateIPs...)
+	return candidateBaseURLs(hosts, port)
 }
 
 // Disconnect clears the active session and its session token while keeping history.
@@ -407,18 +533,19 @@ type ProbeProgress struct {
 	Total      int
 	Address    string
 	Responsive bool
+	Latency    time.Duration
 	Err        error
 }
 
-// ProbeCandidates tries each address in order with a short status request and
-// returns the first that answers. It is used by QR pairing and discovery.
+// ProbeCandidates tests all candidate addresses in parallel with a short status
+// request and returns the fastest reachable one. It is used by QR pairing,
+// discovery, and multi-IP reconnects.
 func ProbeCandidates(ctx context.Context, client *transport.Client, hosts []string, port int) (string, model.Status, error) {
 	return ProbeCandidatesWithProgress(ctx, client, hosts, port, nil)
 }
 
-// ProbeCandidatesWithProgress is ProbeCandidates with a callback for the
-// connect screen. QR payloads can carry several LAN/Tailscale addresses; each
-// one is checked in payload order and the first reachable desktop wins.
+// ProbeCandidatesWithProgress tests all candidate addresses concurrently and
+// picks the fastest reachable desktop, cancelling remaining probes immediately.
 func ProbeCandidatesWithProgress(ctx context.Context, client *transport.Client, hosts []string, port int, progress func(ProbeProgress)) (string, model.Status, error) {
 	if port <= 0 {
 		port = 17878
@@ -427,34 +554,71 @@ func ProbeCandidatesWithProgress(ctx context.Context, client *transport.Client, 
 	if len(candidates) == 0 {
 		return "", model.Status{}, errors.New("pairing payload has no usable addresses")
 	}
-	var lastErr error
-	for i, candidate := range candidates {
-		if progress != nil {
+
+	if progress != nil {
+		for i, candidate := range candidates {
 			progress(ProbeProgress{Index: i, Total: len(candidates), Address: candidate})
 		}
-		client.SetSession(candidate, "")
-		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		status, err := client.Status(probeCtx)
-		cancel()
-		if err == nil {
+	}
+
+	type probeResult struct {
+		index     int
+		candidate string
+		status    model.Status
+		latency   time.Duration
+		err       error
+	}
+
+	probeCtx, cancelAll := context.WithCancel(ctx)
+	defer cancelAll()
+
+	results := make(chan probeResult, len(candidates))
+	for i, candidate := range candidates {
+		go func(idx int, addr string) {
+			reqCtx, reqCancel := context.WithTimeout(probeCtx, 3*time.Second)
+			defer reqCancel()
+			start := time.Now()
+			status, err := client.StatusAt(reqCtx, addr)
+			results <- probeResult{
+				index:     idx,
+				candidate: addr,
+				status:    status,
+				latency:   time.Since(start),
+				err:       err,
+			}
+		}(i, candidate)
+	}
+
+	var lastErr error
+	for range candidates {
+		res := <-results
+		if res.err == nil {
+			cancelAll()
 			if progress != nil {
-				progress(ProbeProgress{Index: i, Total: len(candidates), Address: candidate, Responsive: true})
+				progress(ProbeProgress{
+					Index:      res.index,
+					Total:      len(candidates),
+					Address:    res.candidate,
+					Responsive: true,
+					Latency:    res.latency,
+				})
 			}
-			return candidate, status, nil
+			return res.candidate, res.status, nil
 		}
-		lastErr = err
+		lastErr = res.err
 		if progress != nil {
-			progress(ProbeProgress{Index: i, Total: len(candidates), Address: candidate, Err: err})
+			progress(ProbeProgress{
+				Index:   res.index,
+				Total:   len(candidates),
+				Address: res.candidate,
+				Latency: res.latency,
+				Err:     res.err,
+			})
 		}
-		if ctx.Err() != nil {
-			// A user/app cancellation should still stop immediately. A probe
-			// budget expiry, however, is reported as a candidate failure so the
-			// UI does not claim the user cancelled the scan.
-			if errors.Is(ctx.Err(), context.Canceled) {
-				return "", model.Status{}, ctx.Err()
-			}
-			break
-		}
+	}
+
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return "", model.Status{}, ctx.Err()
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no candidate address answered")

@@ -132,6 +132,9 @@ type MobileStatusResponse struct {
 	ItemCount       int64    `json:"itemCount"`
 	PairingRequired bool     `json:"pairingRequired"`
 	Capabilities    []string `json:"capabilities"`
+	DeviceID        string   `json:"deviceId,omitempty"`
+	Addresses       []string `json:"addresses,omitempty"`
+	Port            int      `json:"port,omitempty"`
 }
 
 // MobileDeviceInfo is a persisted token shown in desktop connection settings.
@@ -649,6 +652,12 @@ func (s *MobileServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	var itemCount int64
 	name := "Bowerbird"
 	pairingRequired := true
+	var deviceID string
+	var allowed []string
+
+	s.mu.RLock()
+	port := s.port
+	s.mu.RUnlock()
 
 	if s.manager != nil {
 		if active := s.manager.GetActiveLibrary(); active != nil {
@@ -658,7 +667,13 @@ func (s *MobileServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if s.manager.userData != nil {
-			pairingRequired = s.manager.userData.GetMobileSettings().PairingRequired
+			settings := s.manager.userData.GetMobileSettings()
+			pairingRequired = settings.PairingRequired
+			allowed = settings.AllowedNetworks
+			if port <= 0 && settings.Port > 0 {
+				port = settings.Port
+			}
+			deviceID = s.manager.userData.EnsureMobileDeviceID()
 		}
 	}
 
@@ -668,6 +683,9 @@ func (s *MobileServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ItemCount:       itemCount,
 		PairingRequired: pairingRequired,
 		Capabilities:    []string{"query"},
+		DeviceID:        deviceID,
+		Addresses:       GetFilteredLocalIPs(allowed),
+		Port:            port,
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

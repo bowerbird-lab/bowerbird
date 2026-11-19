@@ -2,9 +2,12 @@ package storage
 
 import (
 	"encoding/json"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,17 +21,21 @@ const (
 // Session is the active connection. Token is intentionally omitted from JSON
 // and persisted only through platform.SecureStore.
 type Session struct {
-	Version     int    `json:"version"`
-	BaseURL     string `json:"baseUrl"`
-	Token       string `json:"-"`
-	DeviceName  string `json:"deviceName"`
-	LibraryID   string `json:"libraryId,omitempty"`
-	LibraryName string `json:"libraryName,omitempty"`
-	ConnectedAt int64  `json:"connectedAt"`
+	Version      int      `json:"version"`
+	DeviceID     string   `json:"deviceId,omitempty"`
+	BaseURL      string   `json:"baseUrl"`
+	Token        string   `json:"-"`
+	CandidateIPs []string `json:"candidateIps,omitempty"`
+	Port         int      `json:"port,omitempty"`
+	DeviceName   string   `json:"deviceName"`
+	LibraryID    string   `json:"libraryId,omitempty"`
+	LibraryName  string   `json:"libraryName,omitempty"`
+	ConnectedAt  int64    `json:"connectedAt"`
 }
 
 // Connection is one remembered desktop. Token is stored in SecureStore.
 type Connection struct {
+	DeviceID        string   `json:"deviceId,omitempty"`
 	Name            string   `json:"name,omitempty"`
 	BaseURL         string   `json:"baseUrl"`
 	Token           string   `json:"-"`
@@ -141,13 +148,16 @@ func (l *Local) Store() *Store { return l.store }
 // can migrate it to SecureStore and re-save without it.
 func (l *Local) LoadSession() (*Session, error) {
 	var raw struct {
-		Version     int    `json:"version"`
-		BaseURL     string `json:"baseUrl"`
-		Token       string `json:"token"`
-		DeviceName  string `json:"deviceName"`
-		LibraryID   string `json:"libraryId"`
-		LibraryName string `json:"libraryName"`
-		ConnectedAt int64  `json:"connectedAt"`
+		Version      int      `json:"version"`
+		DeviceID     string   `json:"deviceId"`
+		BaseURL      string   `json:"baseUrl"`
+		Token        string   `json:"token"`
+		CandidateIPs []string `json:"candidateIps"`
+		Port         int      `json:"port"`
+		DeviceName   string   `json:"deviceName"`
+		LibraryID    string   `json:"libraryId"`
+		LibraryName  string   `json:"libraryName"`
+		ConnectedAt  int64    `json:"connectedAt"`
 	}
 	found, err := l.store.Load("session.json", &raw)
 	if !found || err != nil {
@@ -157,13 +167,16 @@ func (l *Local) LoadSession() (*Session, error) {
 		return nil, nil
 	}
 	return &Session{
-		Version:     raw.Version,
-		BaseURL:     raw.BaseURL,
-		Token:       raw.Token,
-		DeviceName:  raw.DeviceName,
-		LibraryID:   raw.LibraryID,
-		LibraryName: raw.LibraryName,
-		ConnectedAt: raw.ConnectedAt,
+		Version:      raw.Version,
+		DeviceID:     raw.DeviceID,
+		BaseURL:      raw.BaseURL,
+		Token:        raw.Token,
+		CandidateIPs: raw.CandidateIPs,
+		Port:         raw.Port,
+		DeviceName:   raw.DeviceName,
+		LibraryID:    raw.LibraryID,
+		LibraryName:  raw.LibraryName,
+		ConnectedAt:  raw.ConnectedAt,
 	}, nil
 }
 
@@ -180,8 +193,11 @@ func (l *Local) SaveSession(s Session) error {
 		return err
 	}
 	return l.Remember(Connection{
+		DeviceID:        s.DeviceID,
 		BaseURL:         s.BaseURL,
 		Token:           s.Token,
+		CandidateIPs:    s.CandidateIPs,
+		Port:            s.Port,
 		LibraryID:       s.LibraryID,
 		LibraryName:     s.LibraryName,
 		LastConnectedAt: s.ConnectedAt,
@@ -207,6 +223,7 @@ func (l *Local) History() ([]Connection, error) {
 	var raw struct {
 		Version int `json:"version"`
 		Items   []struct {
+			DeviceID        string   `json:"deviceId,omitempty"`
 			Name            string   `json:"name,omitempty"`
 			BaseURL         string   `json:"baseUrl"`
 			Token           string   `json:"token"`
@@ -223,6 +240,7 @@ func (l *Local) History() ([]Connection, error) {
 	items := make([]Connection, 0, len(raw.Items))
 	for _, item := range raw.Items {
 		items = append(items, Connection{
+			DeviceID:        item.DeviceID,
 			Name:            item.Name,
 			BaseURL:         item.BaseURL,
 			Token:           item.Token,
@@ -240,7 +258,8 @@ func (l *Local) History() ([]Connection, error) {
 	return items, nil
 }
 
-// Remember inserts or refreshes a connection, newest first, capped at 10.
+// Remember inserts or refreshes a connection, merging multiple IPs belonging
+// to the same desktop device into one entry, newest first, capped at 10.
 func (l *Local) Remember(c Connection) error {
 	if strings.TrimSpace(c.BaseURL) == "" {
 		return nil
@@ -248,36 +267,177 @@ func (l *Local) Remember(c Connection) error {
 	if c.LastConnectedAt == 0 {
 		c.LastConnectedAt = time.Now().UnixMilli()
 	}
+	if host, port := HostPortFromURL(c.BaseURL); host != "" {
+		if c.Port <= 0 && port > 0 {
+			c.Port = port
+		}
+		c.CandidateIPs = MergeIPs(c.CandidateIPs, []string{host})
+	} else {
+		c.CandidateIPs = MergeIPs(c.CandidateIPs)
+	}
+
 	existing, err := l.History()
 	if err != nil {
 		return err
 	}
-	out := []Connection{c}
+	var rest []Connection
 	for _, old := range existing {
-		if sameOrigin(old.BaseURL, c.BaseURL) {
+		if sameDevice(old, c) {
+			if strings.TrimSpace(c.Name) == "" {
+				c.Name = old.Name
+			}
+			if strings.TrimSpace(c.DeviceID) == "" {
+				c.DeviceID = old.DeviceID
+			}
+			if strings.TrimSpace(c.LibraryID) == "" {
+				c.LibraryID = old.LibraryID
+			}
+			if strings.TrimSpace(c.LibraryName) == "" {
+				c.LibraryName = old.LibraryName
+			}
+			if c.Port <= 0 {
+				c.Port = old.Port
+			}
+			c.CandidateIPs = MergeIPs(c.CandidateIPs, old.CandidateIPs)
+			if oldHost, _ := HostPortFromURL(old.BaseURL); oldHost != "" {
+				c.CandidateIPs = MergeIPs(c.CandidateIPs, []string{oldHost})
+			}
 			continue
 		}
-		out = append(out, old)
+		rest = append(rest, old)
 	}
+	out := append([]Connection{c}, rest...)
 	if len(out) > MaxConnections {
 		out = out[:MaxConnections]
 	}
 	return l.store.Save("connections.json", Connections{Version: ConnectionsVersion, Items: out}, privateFile)
 }
 
-// Forget removes one origin from history.
-func (l *Local) Forget(baseURL string) error {
+// Forget removes one device from history by its baseURL or deviceID.
+func (l *Local) Forget(key string) error {
 	existing, err := l.History()
 	if err != nil {
 		return err
 	}
 	out := make([]Connection, 0, len(existing))
 	for _, c := range existing {
-		if !sameOrigin(c.BaseURL, baseURL) {
-			out = append(out, c)
+		if matchesConnectionKey(c, key) {
+			continue
 		}
+		out = append(out, c)
 	}
 	return l.store.Save("connections.json", Connections{Version: ConnectionsVersion, Items: out}, privateFile)
+}
+
+func matchesConnectionKey(c Connection, key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	if c.DeviceID != "" && c.DeviceID == key {
+		return true
+	}
+	if sameOrigin(c.BaseURL, key) {
+		return true
+	}
+	return false
+}
+
+func sameDevice(a, b Connection) bool {
+	if a.DeviceID != "" && b.DeviceID != "" {
+		return a.DeviceID == b.DeviceID
+	}
+	if sameOrigin(a.BaseURL, b.BaseURL) {
+		return true
+	}
+	// If either side lacks DeviceID (e.g., legacy saved connection), match by overlapping host:port.
+	aEndpoints := connectionEndpointSet(a)
+	for ep := range connectionEndpointSet(b) {
+		if aEndpoints[ep] {
+			return true
+		}
+	}
+	return false
+}
+
+func connectionEndpointSet(c Connection) map[string]bool {
+	set := make(map[string]bool)
+	port := c.Port
+	if host, p := HostPortFromURL(c.BaseURL); host != "" {
+		if port <= 0 {
+			port = p
+		}
+		if p <= 0 {
+			p = port
+		}
+		set[strings.ToLower(net.JoinHostPort(host, strconv.Itoa(p)))] = true
+	}
+	if port <= 0 {
+		port = 17878
+	}
+	for _, raw := range c.CandidateIPs {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if h, p := HostPortFromURL(raw); h != "" {
+			if p <= 0 {
+				p = port
+			}
+			set[strings.ToLower(net.JoinHostPort(h, strconv.Itoa(p)))] = true
+			continue
+		}
+		set[strings.ToLower(net.JoinHostPort(strings.Trim(raw, "[]"), strconv.Itoa(port)))] = true
+	}
+	return set
+}
+
+// HostPortFromURL extracts the host and optional port from a URL or host:port string.
+func HostPortFromURL(raw string) (string, int) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", 0
+	}
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			return "", 0
+		}
+		h := u.Hostname()
+		p, _ := strconv.Atoi(u.Port())
+		return h, p
+	}
+	if h, pStr, err := net.SplitHostPort(raw); err == nil {
+		p, _ := strconv.Atoi(pStr)
+		return h, p
+	}
+	return "", 0
+}
+
+// MergeIPs normalizes and deduplicates IP/host slices while preserving order.
+func MergeIPs(groups ...[]string) []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, g := range groups {
+		for _, raw := range g {
+			ip := strings.TrimSpace(raw)
+			if ip == "" {
+				continue
+			}
+			if h, _ := HostPortFromURL(ip); h != "" {
+				ip = h
+			} else {
+				ip = strings.Trim(ip, "[]")
+			}
+			key := strings.ToLower(ip)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, ip)
+		}
+	}
+	return out
 }
 
 func sameOrigin(a, b string) bool {

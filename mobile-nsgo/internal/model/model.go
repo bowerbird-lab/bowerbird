@@ -17,6 +17,9 @@ type Status struct {
 	ItemCount       int64    `json:"itemCount"`
 	PairingRequired bool     `json:"pairingRequired"`
 	Capabilities    []string `json:"capabilities"`
+	DeviceID        string   `json:"deviceId,omitempty"`
+	Addresses       []string `json:"addresses,omitempty"`
+	Port            int      `json:"port,omitempty"`
 }
 
 // HasCapability reports whether the desktop advertised a capability.

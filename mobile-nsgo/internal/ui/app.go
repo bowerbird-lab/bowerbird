@@ -3,7 +3,6 @@ package ui
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/url"
 	"os"
@@ -1509,21 +1508,10 @@ func (a *App) handlePairURL(cx *core.Scope, raw string) {
 	}
 	a.busy.Set(true)
 	a.formErr.Set("")
-	a.connectStatus.Set(fmt.Sprintf("已识别 %d 个候选地址，正在检查可用性…", len(ips)))
+	a.connectStatus.Set("正在测速并连接…")
 	go func() {
-		// Checking candidates and pairing are separate phases: a slow or
-		// unreachable address must not consume the pairing timeout.
-		probeCtx, probeCancel := context.WithTimeout(a.rootCtx(), 30*time.Second)
-		base, status, probeErr := app.ProbeCandidatesWithProgress(probeCtx, a.client, ips, port, func(update app.ProbeProgress) {
-			address := strings.TrimPrefix(strings.TrimPrefix(update.Address, "https://"), "http://")
-			if update.Responsive {
-				a.post(func() { a.connectStatus.Set("已找到可用地址 " + address + "，正在连接…") })
-				return
-			}
-			a.post(func() {
-				a.connectStatus.Set(fmt.Sprintf("正在检查 %d/%d：%s", update.Index+1, update.Total, address))
-			})
-		})
+		probeCtx, probeCancel := context.WithTimeout(a.rootCtx(), 10*time.Second)
+		base, status, probeErr := app.ProbeCandidates(probeCtx, a.client, ips, port)
 		probeCancel()
 		if probeErr != nil {
 			a.post(func() {
@@ -1536,7 +1524,7 @@ func (a *App) handlePairURL(cx *core.Scope, raw string) {
 		}
 		a.post(func() { a.connectStatus.Set("已连接 " + status.Name + "，正在配对…") })
 		connectCtx, connectCancel := context.WithTimeout(a.rootCtx(), 25*time.Second)
-		session, connectErr := a.session.Connect(connectCtx, base, code, a.env.Device.Name)
+		session, connectErr := a.session.ConnectWithCandidates(connectCtx, base, ips, port, code, a.env.Device.Name)
 		connectCancel()
 		a.post(func() {
 			a.busy.Set(false)

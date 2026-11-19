@@ -178,8 +178,7 @@ func (a *App) serviceRow(cx *core.Scope, svc platform.Service) core.Node {
 				core.Text{Content: sub, MaxLines: 1, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 			}},
 			nsui.Button{Text: "使用", Variant: nsui.ButtonSecondary, OnPress: func() {
-				a.address.Set(address)
-				a.submitConnect(cx)
+				a.connectDiscoveredService(cx, svc)
 			}},
 		},
 	}
@@ -264,6 +263,47 @@ func (a *App) discover(cx *core.Scope) {
 	})
 }
 
+func (a *App) connectDiscoveredService(cx *core.Scope, svc platform.Service) {
+	if a.busy.Get() || len(svc.Hosts) == 0 {
+		return
+	}
+	a.busy.Set(true)
+	a.formErr.Set("")
+	a.connectStatus.Set("正在测速连接…")
+	code := strings.TrimSpace(a.code.Get())
+	device := a.env.Device.Name
+	if device == "" {
+		device = "Bowerbird Mobile"
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(a.rootCtx(), 25*time.Second)
+		defer cancel()
+		session, err := a.session.ConnectWithCandidates(ctx, "", svc.Hosts, svc.Port, code, device)
+		a.post(func() {
+			a.busy.Set(false)
+			a.connectStatus.Set("")
+			if err == nil {
+				a.onSessionConnected(cx, session)
+				return
+			}
+			host := strings.TrimSuffix(svc.Hosts[0], ":")
+			if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+				host = "[" + host + "]"
+			}
+			a.address.Set(host + ":" + itoa(svc.Port))
+			if err == app.ErrPairingRequired {
+				if a.screen.Get() == screenWelcome && a.welcomeSheetMode.Get() == "manual" {
+					a.welcomeManualPair.Set(true)
+				} else {
+					a.pairOpen.Set(true)
+				}
+				return
+			}
+			a.formErr.Set(transport.DescribeFailure(err))
+		})
+	}()
+}
+
 func (a *App) submitConnect(cx *core.Scope) {
 	if a.busy.Get() {
 		return
@@ -319,6 +359,7 @@ func (a *App) reconnect(cx *core.Scope, c storage.Connection) {
 	}
 	a.busy.Set(true)
 	a.formErr.Set("")
+	a.connectStatus.Set("正在测速连接…")
 	a.session.LoadConnectionToken(c, func(tok string) {
 		c.Token = tok
 		go func() {
@@ -327,6 +368,7 @@ func (a *App) reconnect(cx *core.Scope, c storage.Connection) {
 			session, err := a.session.ConnectWithToken(ctx, c)
 			a.post(func() {
 				a.busy.Set(false)
+				a.connectStatus.Set("")
 				if err != nil {
 					if err == app.ErrPairingRequired || transport.IsUnauthorized(err) {
 						a.address.Set(c.BaseURL)
