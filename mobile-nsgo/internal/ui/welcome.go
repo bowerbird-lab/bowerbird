@@ -204,7 +204,7 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 						},
 						Children: []core.Node{
 							core.View{
-								Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
+								Style: core.Style{Width: core.Pt(mobileIconButtonSize), Height: core.Pt(mobileIconButtonSize), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
 								Children: []core.Node{
 									core.Show{
 										When: func() bool {
@@ -216,11 +216,11 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 											return len(history) > 0
 										},
 										Then: func(cx *core.Scope) core.Node {
-											return nsui.IconButton{
-												Icon:     lucide.ChevronLeft,
-												Label:    "返回",
-												Size:     36,
-												IconSize: 20,
+											return mobileIconButton(cx, mobileIconBtnSpec{
+												TestID:  "welcome.back",
+												Label:   "返回",
+												Icon:    lucide.ChevronLeft,
+												Variant: mobileIconGhost,
 												OnPress: func() {
 													if a.welcomeSheetMode.Get() != "" {
 														a.setWelcomeSheetMode("")
@@ -230,8 +230,7 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 													a.connectStatus.Set("")
 													a.screen.Set(screenDevices)
 												},
-												TestID: "welcome.back",
-											}
+											})
 										},
 									},
 								},
@@ -282,33 +281,33 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 								},
 							},
 							core.View{
-								Style: core.Style{Width: core.Pt(36), Height: core.Pt(36), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
+								Style: core.Style{Width: core.Pt(mobileIconButtonSize), Height: core.Pt(mobileIconButtonSize), AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter},
 								Children: []core.Node{
 									core.Show{
 										When: func() bool { return a.welcomeSheetMode.Get() == "discover" },
 										Then: func(cx *core.Scope) core.Node {
-											return nsui.IconButton{
-												Icon:     lucide.RefreshCw,
+											return mobileIconButton(cx, mobileIconBtnSpec{
+												TestID:   "welcome.discover.refresh",
 												Label:    "刷新",
-												Size:     36,
+												Icon:     lucide.RefreshCw,
 												IconSize: 18,
+												Variant:  mobileIconGhost,
 												Disabled: func() bool { return a.discovering.Get() },
 												OnPress:  func() { a.discover(cx) },
-												TestID:   "welcome.discover.refresh",
-											}
+											})
 										},
 									},
 									core.Show{
 										When: func() bool { return a.welcomeSheetMode.Get() != "discover" },
 										Then: func(cx *core.Scope) core.Node {
-											return nsui.IconButton{
-												Icon:     lucide.Settings,
-												Label:    "设置",
-												Size:     36,
-												IconSize: 18,
-												OnPress:  func() { a.openSettings(screenWelcome) },
+											return mobileIconButton(cx, mobileIconBtnSpec{
 												TestID:   "welcome.settings",
-											}
+												Label:    "设置",
+												Icon:     lucide.Settings,
+												IconSize: 18,
+												Variant:  mobileIconGhost,
+												OnPress:  func() { a.openSettings(screenWelcome) },
+											})
 										},
 									},
 								},
@@ -434,7 +433,7 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 											}
 										},
 									},
-									welcomePillButton(welcomePillSpec{
+									welcomePillButton(cx, welcomePillSpec{
 										TestID:    "welcome.scan",
 										Text:      "扫码连接",
 										Icon:      lucide.ScanQrCode(),
@@ -452,7 +451,7 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 											a.scanQR(cx)
 										},
 									}),
-									welcomePillButton(welcomePillSpec{
+									welcomePillButton(cx, welcomePillSpec{
 										TestID:    "welcome.manual",
 										Text:      "手动输入",
 										Icon:      lucide.Keyboard(),
@@ -462,7 +461,7 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 										Disabled:  func() bool { return a.busy.Get() },
 										OnPress:   func() { a.setWelcomeSheetMode("manual") },
 									}),
-									welcomePillButton(welcomePillSpec{
+									welcomePillButton(cx, welcomePillSpec{
 										TestID:    "welcome.discover",
 										Text:      "发现电脑",
 										Icon:      lucide.Search(),
@@ -546,7 +545,7 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 										Style:     nsui.TypeCaption.Merge(core.Style{TextAlign: core.TextAlignCenter}),
 										StyleFunc: nsui.Colored(colors.Muted),
 									},
-									mobileActionButton(colors, mobileBtnSpec{
+									mobileActionButton(cx, colors, mobileBtnSpec{
 										TestID:  "welcome.scan.toManual",
 										Text:    "改用手动输入",
 										Icon:    lucide.Keyboard,
@@ -756,7 +755,7 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 														},
 													},
 													// Connect button
-													welcomePillButton(welcomePillSpec{
+													welcomePillButton(cx, welcomePillSpec{
 														TestID:    "welcome.connect",
 														Text:      "连接",
 														Icon:      lucide.ArrowRight(),
@@ -835,7 +834,7 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 														OnChange: a.code.Set,
 														OnSubmit: func(string) { a.submitConnect(cx) },
 													},
-													welcomePillButton(welcomePillSpec{
+													welcomePillButton(cx, welcomePillSpec{
 														TestID:    "welcome.pair",
 														Text:      "配对",
 														Icon:      lucide.Check(),
@@ -845,7 +844,7 @@ func (a *App) welcome(cx *core.Scope) core.Node {
 														Disabled:  func() bool { return a.busy.Get() },
 														OnPress:   func() { a.submitConnect(cx) },
 													}),
-													mobileActionButton(colors, mobileBtnSpec{
+													mobileActionButton(cx, colors, mobileBtnSpec{
 														TestID:  "welcome.pair.back",
 														Text:    "修改 IP 地址",
 														Icon:    lucide.ChevronLeft,
@@ -958,7 +957,7 @@ type welcomePillSpec struct {
 	OnPress   func()
 }
 
-func welcomePillButton(spec welcomePillSpec) core.Node {
+func welcomePillButton(cx *core.Scope, spec welcomePillSpec) core.Node {
 	return core.View{
 		TestID: spec.TestID,
 		Role:   core.RoleButton,
@@ -967,7 +966,7 @@ func welcomePillButton(spec welcomePillSpec) core.Node {
 			st := core.Style{
 				Width:          core.Pct(100),
 				Height:         core.Pt(50),
-				CornerRadius:   mobileButtonRadius,
+				CornerRadius:   themeButtonRadius(cx),
 				Direction:      core.Row,
 				AlignItems:     core.AlignCenter,
 				JustifyContent: core.JustifyCenter,

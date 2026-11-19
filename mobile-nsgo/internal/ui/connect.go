@@ -32,18 +32,28 @@ func (a *App) connect(cx *core.Scope) core.Node {
 				Style: core.Style{Width: core.Pct(100), Gap: 14, Padding: core.Edges{Top: 32, Bottom: 24}},
 				Children: []core.Node{
 					core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{
-						nsui.IconButton{Icon: lucide.ChevronLeft, Label: "返回", Size: 38, IconSize: 20,
+						mobileIconButton(cx, mobileIconBtnSpec{
+							TestID:  "connect.back",
+							Label:   "返回",
+							Icon:    lucide.ChevronLeft,
+							Variant: mobileIconGhost,
 							OnPress: func() {
 								a.formErr.Set("")
 								a.connectStatus.Set("")
 								a.screen.Set(a.entryScreen())
-							}, TestID: "connect.back"},
+							},
+						}),
 						core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 4}, Children: []core.Node{
 							core.Text{Content: "Bowerbird", Style: nsui.TypeHeading, StyleFunc: nsui.Colored(colors.Text)},
 							core.Text{Content: "连接电脑上的素材库", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Muted)},
 						}},
-						nsui.IconButton{Icon: lucide.Settings, Label: "设置", Size: 38, IconSize: 20,
-							OnPress: func() { a.openSettings(screenConnect) }, TestID: "connect.settings"},
+						mobileIconButton(cx, mobileIconBtnSpec{
+							TestID:  "connect.settings",
+							Label:   "设置",
+							Icon:    lucide.Settings,
+							Variant: mobileIconGhost,
+							OnPress: func() { a.openSettings(screenConnect) },
+						}),
 					}},
 					core.Show{When: func() bool { return a.legacyNotice.Get() != "" }, Then: func(cx *core.Scope) core.Node {
 						return core.View{
@@ -59,7 +69,7 @@ func (a *App) connect(cx *core.Scope) core.Node {
 						nsui.Input{Value: func() string { return a.address.Get() }, OnChange: a.address.Set,
 							Placeholder: "电脑地址，例如 192.168.1.8:17878", TestID: "connect.address"},
 						core.View{Style: core.Style{Direction: core.Row, Gap: 8}, Children: []core.Node{
-							mobileActionButton(colors, mobileBtnSpec{
+							mobileActionButton(cx, colors, mobileBtnSpec{
 								TestID:   "connect.submit",
 								Text:     "连接",
 								Variant:  nsui.ButtonPrimary,
@@ -67,14 +77,14 @@ func (a *App) connect(cx *core.Scope) core.Node {
 								Disabled: func() bool { return a.busy.Get() },
 								OnPress:  func() { a.submitConnect(cx) },
 							}),
-							mobileActionButton(colors, mobileBtnSpec{
+							mobileActionButton(cx, colors, mobileBtnSpec{
 								TestID:   "connect.discover",
 								Text:     "发现",
 								Variant:  nsui.ButtonSecondary,
 								Disabled: func() bool { return a.discovering.Get() },
 								OnPress:  func() { a.discover(cx) },
 							}),
-							mobileActionButton(colors, mobileBtnSpec{
+							mobileActionButton(cx, colors, mobileBtnSpec{
 								TestID:   "connect.scan",
 								Text:     "扫码",
 								Variant:  nsui.ButtonSecondary,
@@ -129,14 +139,14 @@ func (a *App) recentRow(cx *core.Scope, c storage.Connection) core.Node {
 				core.Text{Content: name, MaxLines: 1, Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
 				core.Text{Content: c.BaseURL, MaxLines: 1, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 			}},
-			mobileActionButton(colors, mobileBtnSpec{
+			mobileActionButton(cx, colors, mobileBtnSpec{
 				TestID:   "connect.reconnect",
 				Text:     "重连",
 				Variant:  nsui.ButtonSecondary,
 				Disabled: func() bool { return a.busy.Get() },
 				OnPress:  func() { a.reconnect(cx, c) },
 			}),
-			mobileActionButton(colors, mobileBtnSpec{
+			mobileActionButton(cx, colors, mobileBtnSpec{
 				Text:    "删除",
 				Variant: nsui.ButtonGhost,
 				OnPress: func() {
@@ -177,9 +187,10 @@ func (a *App) serviceRow(cx *core.Scope, svc platform.Service) core.Node {
 				core.Text{Content: svc.Name, MaxLines: 1, Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
 				core.Text{Content: sub, MaxLines: 1, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 			}},
-			nsui.Button{Text: "使用", Variant: nsui.ButtonSecondary, OnPress: func() {
-				a.connectDiscoveredService(cx, svc)
-			}},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "使用", Variant: nsui.ButtonSecondary,
+				OnPress: func() { a.connectDiscoveredService(cx, svc) },
+			}),
 		},
 	}
 }
@@ -204,12 +215,12 @@ func (a *App) pairDialog(cx *core.Scope) core.Node {
 			}},
 		},
 		Footer: []core.Node{
-			mobileActionButton(colors, mobileBtnSpec{
+			mobileActionButton(cx, colors, mobileBtnSpec{
 				Text:    "取消",
 				Variant: nsui.ButtonGhost,
 				OnPress: func() { a.pairOpen.Set(false) },
 			}),
-			mobileActionButton(colors, mobileBtnSpec{
+			mobileActionButton(cx, colors, mobileBtnSpec{
 				TestID:   "connect.pair",
 				Text:     "配对",
 				Variant:  nsui.ButtonPrimary,

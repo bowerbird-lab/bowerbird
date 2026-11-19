@@ -177,12 +177,12 @@ func drawerRowStyle(colors nsui.Colors) core.Style {
 // drawerChip is the shared pill used by the filter and batch drawers. An
 // unselected chip is transparent, as the rest of a drawer's items are; the
 // selected one keeps the accent fill, and a press shows feedback.
-func drawerChip(colors nsui.Colors, label string, selected func() bool, onPress func()) core.Node {
+func drawerChip(cx *core.Scope, colors nsui.Colors, label string, selected func() bool, onPress func()) core.Node {
 	isSelected := func() bool { return selected != nil && selected() }
 	return core.View{
 		StyleFunc: func() core.Style {
 			st := core.Style{
-				Padding: core.Symmetric(5, 11), CornerRadius: 999,
+				Padding: core.Symmetric(5, 11), CornerRadius: themeButtonRadius(cx),
 				BorderWidth: 1, BorderColor: colors.Border(),
 				Active: &core.Style{Background: colors.Hover()},
 			}
@@ -322,8 +322,10 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 					bg, pressed = colors.AccentFill(), colors.Now().AccentPressed
 				}
 				return core.Style{
-					Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10,
-					Padding: core.Symmetric(9, 12), CornerRadius: 10, Background: bg,
+					Width: core.Pct(100), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10,
+					MinHeight: core.Pt(mobileSidebarRowHeight),
+					Padding:   core.Edges{Top: 10, Bottom: 10, Left: 12, Right: 12},
+					CornerRadius: themeButtonRadius(cx), Background: bg,
 					Active: &core.Style{Background: pressed},
 				}
 			},
@@ -377,30 +379,38 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 				fg = colors.OnAccent()
 				muted = colors.OnAccent()
 			}
-			var expandBtn core.Node = core.View{Style: core.Style{Width: core.Pt(0)}}
+			var expandBtn core.Node = core.View{}
 			if hasChildren {
 				chev := lucide.ChevronRight
 				if expanded {
 					chev = lucide.ChevronDown
 				}
-				expandBtn = nsui.IconButton{
-					Icon:     chev,
-					Label:    "展开文件夹",
-					Size:     28,
-					IconSize: 16,
-					Tint:     func() core.Color { return muted },
-					OnPress: func() {
+				expandBtn = core.View{
+					Role:  core.RoleButton,
+					Label: "展开文件夹",
+					Style: core.Style{
+						Width:          core.Pt(24),
+						Height:         core.Pt(36),
+						AlignItems:     core.AlignEnd,
+						JustifyContent: core.JustifyCenter,
+						Pressed:        &core.Style{Opacity: core.Alpha(0.6)},
+					},
+					OnPress: func(core.PressEvent) {
 						a.expandedFolders[f.ID] = !expanded
 						a.bump()
 					},
+					Children: []core.Node{nsui.Icon(chev, 16, func() core.Color { return muted })},
 				}
 			}
 			folderNodes = append(folderNodes, core.View{
-				Style: core.Style{
-					Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
-					Margin:  core.Edges{Left: core.Points(depth * 14)},
-					Padding: core.Symmetric(8, 10), CornerRadius: 8, Background: bg,
-					Active: &core.Style{Background: pressed},
+				StyleFunc: func() core.Style {
+					return core.Style{
+						Width: core.Pct(100), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8,
+						MinHeight: core.Pt(mobileSidebarRowHeight),
+						Padding:   core.Edges{Top: 4, Bottom: 4, Left: 12 + core.Points(depth*14), Right: 12},
+						CornerRadius: themeButtonRadius(cx), Background: bg,
+						Active: &core.Style{Background: pressed},
+					}
 				},
 				OnPress: func(core.PressEvent) {
 					a.setDrawerOpen(cx, false)
@@ -415,11 +425,11 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 			})
 		}
 		return core.View{Style: core.Style{Gap: 4}, Children: []core.Node{
-			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Padding: core.Edges{Top: 12, Bottom: 2, Left: 4, Right: 4}}, Children: []core.Node{
+			core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Padding: core.Edges{Top: 12, Bottom: 2, Left: 12, Right: 12}}, Children: []core.Node{
 				core.Text{Content: "文件夹 (" + itoa(len(a.folders)) + ")", Style: nsui.TypeLabel.Merge(core.Style{Color: colors.Muted()})},
 			}},
 			core.Show{When: func() bool { return len(folderNodes) == 0 }, Then: func(cx *core.Scope) core.Node {
-				return core.Text{Content: "暂无文件夹", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Faint(), Padding: core.Symmetric(16, 4)})}
+				return core.Text{Content: "暂无文件夹", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Faint(), Padding: core.Edges{Top: 16, Bottom: 16, Left: 12, Right: 12}})}
 			}},
 			core.View{Style: core.Style{Gap: 2, Padding: core.Edges{Bottom: 20}}, Children: folderNodes},
 		}}
@@ -456,8 +466,15 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 				Children: []core.Node{
 					core.View{
 						TestID: "drawer.library",
-						Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6, Padding: core.Symmetric(8, 6), CornerRadius: 10,
-							Active: &core.Style{Background: colors.Hover()}},
+						StyleFunc: func() core.Style {
+							return core.Style{
+								FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0),
+								MinHeight: core.Pt(42),
+								Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6,
+								Padding: core.Symmetric(8, 12), CornerRadius: themeButtonRadius(cx),
+								Active: &core.Style{Background: colors.Hover()},
+							}
+						},
 						OnPress: func(core.PressEvent) { a.openLibraries(cx) },
 						Children: []core.Node{
 							core.Text{ContentFunc: func() string { a.rev.Get(); return a.libraryName() }, MaxLines: 1,
@@ -465,24 +482,39 @@ func (a *App) leftDrawerPanel(cx *core.Scope) core.Node {
 							core.Icon{SVG: lucide.ChevronDown(), Style: core.Style{FontSize: 16}, StyleFunc: nsui.Colored(colors.Muted)},
 						},
 					},
-					nsui.IconButton{Icon: lucide.Search, Label: "搜索", Size: 34, IconSize: 18, OnPress: func() {
-						a.setDrawerOpen(cx, false)
-						a.openSearchPage()
-					}},
+					core.View{
+						Role:  core.RoleButton,
+						Label: "搜索",
+						StyleFunc: func() core.Style {
+							return core.Style{
+								Width:          core.Pt(42),
+								Height:         core.Pt(42),
+								CornerRadius:   themeButtonRadius(cx),
+								AlignItems:     core.AlignCenter,
+								JustifyContent: core.JustifyCenter,
+								Active:         &core.Style{Background: colors.Hover()},
+								Pressed:        &core.Style{Opacity: core.Alpha(0.78)},
+							}
+						},
+						OnPress: func(core.PressEvent) {
+							a.setDrawerOpen(cx, false)
+							a.openSearchPage()
+						},
+						Children: []core.Node{nsui.Icon(lucide.Search, 18, colors.Text)},
+					},
 				},
 			},
 			core.Scroll{
 				TestID: "drawer.scroll",
 				Style:  core.Style{FlexGrow: 1, FlexShrink: 1, MinHeight: core.Pt(0)},
 				Behavior: core.ScrollBehavior{
-					NoBounces:        true,
-					DecelerationRate: core.DecelerationFast,
+					NoBounces: true,
 				},
 				Children: []core.Node{
 					core.View{StyleFunc: func() core.Style {
 						safe := cx.Env().SafeArea()
 						return core.Style{Gap: 2, Padding: core.Edges{
-							Top: safe.Top + 56, Bottom: safe.Bottom + 8, Left: safe.Left + 12, Right: 12,
+							Top: safe.Top + 62, Bottom: safe.Bottom + 8, Left: safe.Left + 4, Right: 4,
 						}}
 					}, Children: []core.Node{
 						collectionRow(lucide.Inbox, "全部素材", SidebarAll, func() string { a.rev.Get(); return statText(a.stats.Total) }, "drawer.all"),

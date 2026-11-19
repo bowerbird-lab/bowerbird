@@ -71,10 +71,16 @@ func (a *App) menuDialog(cx *core.Scope) core.Node {
 								core.Text{ContentFunc: func() string { return a.layoutSummaryLabel() + "（支持双指捏合）" },
 									Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Muted()})},
 							}},
-							nsui.Button{Text: "-", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.effectiveGridCols() <= 2 },
-								OnPress: func() { a.setGridColumns(cx, a.effectiveGridCols()-1) }},
-							nsui.Button{Text: "+", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.effectiveGridCols() >= a.maxGridCols() },
-								OnPress: func() { a.setGridColumns(cx, a.effectiveGridCols()+1) }},
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "-", Variant: nsui.ButtonSecondary, Compact: true,
+								Disabled: func() bool { return a.effectiveGridCols() <= 2 },
+								OnPress:  func() { a.setGridColumns(cx, a.effectiveGridCols()-1) },
+							}),
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "+", Variant: nsui.ButtonSecondary, Compact: true,
+								Disabled: func() bool { return a.effectiveGridCols() >= a.maxGridCols() },
+								OnPress:  func() { a.setGridColumns(cx, a.effectiveGridCols()+1) },
+							}),
 						}},
 					},
 				}
@@ -128,17 +134,24 @@ func (a *App) menuDialog(cx *core.Scope) core.Node {
 }
 
 func (a *App) disconnectDialog(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
 	return nsui.Dialog{
 		Open:         func() bool { return a.confirmDisc.Get() },
 		OnOpenChange: func(open bool, _ base.Reason) { a.confirmDisc.Set(open) },
 		Title:        "断开连接？",
 		Description:  "将返回连接页，保留连接记录与本地历史保存记录。",
 		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.confirmDisc.Set(false) }},
-			nsui.Button{Text: "断开", OnPress: func() {
-				a.confirmDisc.Set(false)
-				a.disconnect(cx)
-			}},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "取消", Variant: nsui.ButtonGhost,
+				OnPress: func() { a.confirmDisc.Set(false) },
+			}),
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "断开", Variant: nsui.ButtonPrimary,
+				OnPress: func() {
+					a.confirmDisc.Set(false)
+					a.disconnect(cx)
+				},
+			}),
 		},
 	}
 }
@@ -150,7 +163,10 @@ func (a *App) librariesDialog(cx *core.Scope) core.Node {
 		OnClose: func() { a.libsOpen.Set(false) },
 		Title:   "切换资源库",
 		Header: []core.Node{
-			nsui.Button{Text: "刷新", Variant: nsui.ButtonGhost, OnPress: func() { a.openLibraries(cx) }},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "刷新", Variant: nsui.ButtonGhost, Compact: true,
+				OnPress: func() { a.openLibraries(cx) },
+			}),
 		},
 		Children: []core.Node{
 			core.Text{

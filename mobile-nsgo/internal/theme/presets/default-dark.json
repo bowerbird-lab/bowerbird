@@ -28,6 +28,7 @@
   "material": {
     "sidebarOpacity": 0.55,
     "headerTint": "#000000cc",
-    "headerBlurRadius": 10
+    "headerBlurRadius": 10,
+    "buttonRadius": 999
   }
 }

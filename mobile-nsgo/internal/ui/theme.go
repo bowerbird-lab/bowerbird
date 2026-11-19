@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
@@ -148,7 +149,38 @@ func buildCoreTheme(light, dark *apptheme.Theme, accent core.Color) *core.Theme 
 	t := core.DefaultTheme()
 	t.Light = paletteForTheme(light, accent)
 	t.Dark = paletteForTheme(dark, accent)
+	t.Radius = core.Points(light.ButtonRadius())
+	if t.Tokens == nil {
+		t.Tokens = make(map[string]string, 2)
+	}
+	t.Tokens["buttonRadius.light"] = apptheme.FormatButtonRadius(light.ButtonRadius())
+	t.Tokens["buttonRadius.dark"] = apptheme.FormatButtonRadius(dark.ButtonRadius())
 	return t
+}
+
+// themeButtonRadius returns the configured button corner radius for the active
+// light/dark appearance, defaulting to full-round (999pt).
+func themeButtonRadius(cx *core.Scope) core.Points {
+	if cx == nil {
+		return core.Points(apptheme.DefaultButtonRadius)
+	}
+	t := cx.Theme()
+	if t == nil {
+		return core.Points(apptheme.DefaultButtonRadius)
+	}
+	key := "buttonRadius.light"
+	if cx.Env().Dark() {
+		key = "buttonRadius.dark"
+	}
+	if raw, ok := t.Tokens[key]; ok && raw != "" {
+		if v, err := strconv.ParseFloat(raw, 32); err == nil && v >= 0 {
+			return core.Points(v)
+		}
+	}
+	if t.Radius > 0 {
+		return t.Radius
+	}
+	return core.Points(apptheme.DefaultButtonRadius)
 }
 
 func paletteForTheme(t *apptheme.Theme, accent core.Color) core.Palette {
@@ -705,10 +737,16 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 									core.Text{ContentFunc: func() string { return a.layoutSummaryLabel() + " · 也支持双指捏合切换" },
 										Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
 								}},
-								nsui.Button{Text: "-", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.effectiveGridCols() <= 2 },
-									OnPress: func() { a.setGridColumns(cx, a.effectiveGridCols()-1) }, TestID: "settings.gridLess"},
-								nsui.Button{Text: "+", Variant: nsui.ButtonSecondary, Disabled: func() bool { return a.effectiveGridCols() >= a.maxGridCols() },
-									OnPress: func() { a.setGridColumns(cx, a.effectiveGridCols()+1) }, TestID: "settings.gridMore"},
+								mobileActionButton(cx, colors, mobileBtnSpec{
+									TestID: "settings.gridLess", Text: "-", Variant: nsui.ButtonSecondary, Compact: true,
+									Disabled: func() bool { return a.effectiveGridCols() <= 2 },
+									OnPress:  func() { a.setGridColumns(cx, a.effectiveGridCols()-1) },
+								}),
+								mobileActionButton(cx, colors, mobileBtnSpec{
+									TestID: "settings.gridMore", Text: "+", Variant: nsui.ButtonSecondary, Compact: true,
+									Disabled: func() bool { return a.effectiveGridCols() >= a.maxGridCols() },
+									OnPress:  func() { a.setGridColumns(cx, a.effectiveGridCols()+1) },
+								}),
 							}},
 						),
 						card("分享与通知",
@@ -774,12 +812,18 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 									Style: core.Style{FontSize: 11, LineHeight: 15, Color: colors.Faint()}}},
 							},
 							core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 8}, Children: []core.Node{
-								nsui.Button{Text: "导入主题", Variant: nsui.ButtonSecondary, OnPress: func() { a.importTheme(cx) },
-									TestID: "settings.themes.import"},
-								nsui.Button{Text: "重新读取", Variant: nsui.ButtonSecondary, OnPress: a.reloadThemes,
-									TestID: "settings.themes.reload"},
-								nsui.Button{Text: "恢复默认", Variant: nsui.ButtonGhost, OnPress: a.resetThemeSettings,
-									TestID: "settings.themes.reset"},
+								mobileActionButton(cx, colors, mobileBtnSpec{
+									TestID: "settings.themes.import", Text: "导入主题", Variant: nsui.ButtonSecondary,
+									OnPress: func() { a.importTheme(cx) },
+								}),
+								mobileActionButton(cx, colors, mobileBtnSpec{
+									TestID: "settings.themes.reload", Text: "重新读取", Variant: nsui.ButtonSecondary,
+									OnPress: a.reloadThemes,
+								}),
+								mobileActionButton(cx, colors, mobileBtnSpec{
+									TestID: "settings.themes.reset", Text: "恢复默认", Variant: nsui.ButtonGhost,
+									OnPress: a.resetThemeSettings,
+								}),
 							}},
 						),
 						a.pluginsSettingsCard(cx),
@@ -794,7 +838,7 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 				TestID:           "settings.header",
 				Children: []core.Node{
 					core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8}, Children: []core.Node{
-						appCircleButton(colors, "settings.back", lucide.ChevronLeft, func(core.PressEvent) { a.closeSettings() }),
+						appCircleButton(cx, "settings.back", lucide.ChevronLeft, func(core.PressEvent) { a.closeSettings() }),
 						core.Text{Content: "设置", Role: core.RoleHeader,
 							Style:     nsui.TypeTitle.Merge(core.Style{FlexGrow: 1, TextAlign: core.TextAlignCenter}),
 							StyleFunc: nsui.Colored(colors.Text)},
@@ -867,8 +911,10 @@ func (a *App) pluginsSettingsCard(cx *core.Scope) core.Node {
 		},
 		Children: append(children,
 			core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 8}, Children: []core.Node{
-				nsui.Button{Text: "立即同步插件", Variant: nsui.ButtonSecondary, OnPress: func() { a.syncPreviewPluginsNow() },
-					TestID: "settings.plugins.sync"},
+				mobileActionButton(cx, colors, mobileBtnSpec{
+					TestID: "settings.plugins.sync", Text: "立即同步插件", Variant: nsui.ButtonSecondary,
+					OnPress: func() { a.syncPreviewPluginsNow() },
+				}),
 			}},
 		),
 	}

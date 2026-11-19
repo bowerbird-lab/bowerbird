@@ -45,24 +45,36 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 						StyleFunc: func() core.Style {
 							return core.Style{
 								Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4,
-								Padding: core.Symmetric(4, 8), CornerRadius: 22,
+								Padding: core.Symmetric(4, 8), CornerRadius: themeButtonRadius(cx),
 								Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
 							}
 						},
 						Children: []core.Node{
-							nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.exitMultiSelect() }},
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "取消", Variant: nsui.ButtonGhost, Compact: true,
+								OnPress: func() { a.exitMultiSelect() },
+							}),
 							core.Text{ContentFunc: func() string { a.rev.Get(); return "已选 " + itoa(len(a.selectedIDs)) + " 项" },
 								Style: nsui.TypeBody.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Text)},
-							nsui.Button{Text: "全选", Variant: nsui.ButtonGhost, OnPress: func() { a.selectAllVisible() }},
-							nsui.Button{Text: "标签", Variant: nsui.ButtonGhost,
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "全选", Variant: nsui.ButtonGhost, Compact: true,
+								OnPress: func() { a.selectAllVisible() },
+							}),
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "标签", Variant: nsui.ButtonGhost, Compact: true,
 								Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
-								OnPress:  func() { a.batchTagOpen.Set(true) }},
-							nsui.Button{Text: "目录", Variant: nsui.ButtonGhost,
+								OnPress:  func() { a.batchTagOpen.Set(true) },
+							}),
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "目录", Variant: nsui.ButtonGhost, Compact: true,
 								Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
-								OnPress:  func() { a.batchFolderOpen.Set(true) }},
-							nsui.Button{Text: "删除", Variant: nsui.ButtonGhost,
+								OnPress:  func() { a.batchFolderOpen.Set(true) },
+							}),
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "删除", Variant: nsui.ButtonGhost, Compact: true,
 								Disabled: func() bool { a.rev.Get(); return len(a.selectedIDs) == 0 || a.batchBusy.Get() },
-								OnPress:  func() { a.batchDelOpen.Set(true) }},
+								OnPress:  func() { a.batchDelOpen.Set(true) },
+							}),
 						},
 					}
 				},
@@ -70,28 +82,26 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 					return core.View{
 						Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8},
 						Children: []core.Node{
-							core.View{
-								TestID: "gallery.drawer",
-								StyleFunc: func() core.Style {
-									return core.Style{
-										Width: core.Pt(42), Height: core.Pt(42), CornerRadius: 21,
-										AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
-										Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
-									}
-								},
-								OnPress: func(core.PressEvent) {
+							mobileIconButton(cx, mobileIconBtnSpec{
+								TestID:  "gallery.drawer",
+								Label:   "菜单",
+								Icon:    lucide.Menu,
+								Variant: mobileIconSurface,
+								OnPress: func() {
 									a.setDrawerOpen(cx, !a.drawerOpen.Get())
 								},
-								Children: []core.Node{nsui.Icon(lucide.Menu, 20, colors.Text)},
-							},
+							}),
 							core.Show{
 								When: func() bool { a.rev.Get(); return a.sidebarView != SidebarAll },
 								Then: func(cx *core.Scope) core.Node {
 									return core.View{
 										StyleFunc: func() core.Style {
 											return core.Style{
-												Padding: core.Symmetric(6, 12), CornerRadius: 16,
-												Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
+												Height:         core.Pt(mobileButtonHeight),
+												Padding:        core.Symmetric(0, 14),
+												CornerRadius:   themeButtonRadius(cx),
+												JustifyContent: core.JustifyCenter,
+												Background:     colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
 											}
 										},
 										OnPress: func(core.PressEvent) {
@@ -109,7 +119,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 								StyleFunc: func() core.Style {
 									return core.Style{
 										Direction: core.Row, AlignItems: core.AlignCenter,
-										Height: core.Pt(42), CornerRadius: 21, Overflow: core.Hidden,
+										Height: core.Pt(mobileIconButtonSize), CornerRadius: themeButtonRadius(cx), Overflow: core.Hidden,
 										Background: colors.Surface(), BorderWidth: 1, BorderColor: colors.Border(),
 									}
 								},
@@ -117,21 +127,21 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 									core.View{
 										TestID: "gallery.search",
 										Style: core.Style{
-											Width: core.Pt(44), Height: core.Pt(42),
+											Width: core.Pt(mobileIconButtonSize), Height: core.Pt(mobileIconButtonSize),
 											AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
 										},
 										OnPress:  func(core.PressEvent) { a.openSearchPage() },
-										Children: []core.Node{nsui.Icon(lucide.Search, 19, colors.Text)},
+										Children: []core.Node{nsui.Icon(lucide.Search, 20, colors.Text)},
 									},
 									core.View{
 										TestID: "gallery.more",
 										Style: core.Style{
-											Width: core.Pt(44), Height: core.Pt(42),
+											Width: core.Pt(mobileIconButtonSize), Height: core.Pt(mobileIconButtonSize),
 											AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
 										},
 										OnPress: func(core.PressEvent) { a.menuOpen.Set(true) },
 										Children: []core.Node{
-											nsui.Icon(lucide.Ellipsis, 19, colors.Text),
+											nsui.Icon(lucide.Ellipsis, 20, colors.Text),
 											core.Show{
 												When: func() bool {
 													a.rev.Get()
@@ -178,9 +188,11 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 						},
 						Children: []core.Node{
 							core.Text{Content: "废纸篓：点按素材可恢复", Style: nsui.TypeCaption.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Muted)},
-							nsui.Button{Text: "清空", Variant: nsui.ButtonGhost,
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "清空", Variant: nsui.ButtonGhost, Compact: true,
 								Disabled: func() bool { a.rev.Get(); return len(a.gallery.Snapshot().Items) == 0 },
-								OnPress:  func() { a.emptyTrashOpen.Set(true) }},
+								OnPress:  func() { a.emptyTrashOpen.Set(true) },
+							}),
 						},
 					}
 				},
@@ -195,7 +207,10 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 						},
 						Children: []core.Node{
 							core.Text{ContentFunc: a.uploadStatus.Get, Style: nsui.TypeCaption.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Text)},
-							nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.cancelActiveUpload() }},
+							mobileActionButton(cx, colors, mobileBtnSpec{
+								Text: "取消", Variant: nsui.ButtonGhost, Compact: true,
+								OnPress: func() { a.cancelActiveUpload() },
+							}),
 						},
 					}
 				},
@@ -253,7 +268,7 @@ func (a *App) galleryPage(cx *core.Scope) core.Node {
 					safe := cx.Env().SafeArea()
 					return core.Style{
 						Position: core.Absolute, Right: core.Pt(safeSideInset(safe)), Bottom: core.Pt(safe.Bottom + 18),
-						Width: core.Pt(52), Height: core.Pt(52), CornerRadius: 16,
+						Width: core.Pt(mobileFabSize), Height: core.Pt(mobileFabSize), CornerRadius: themeButtonRadius(cx),
 						AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
 						Background: colors.AccentFill(), ZIndex: 12,
 					}
@@ -1277,8 +1292,11 @@ func (a *App) batchTagDialog(cx *core.Scope) core.Node {
 		OnClose: func() { a.batchTagOpen.Set(false) },
 		Title:   "批量添加标签",
 		Header: []core.Node{
-			nsui.Button{Text: "添加", Disabled: func() bool { return a.batchBusy.Get() || strings.TrimSpace(a.batchTagInput.Get()) == "" },
-				OnPress: func() { a.runBatchAddTag(cx) }},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "添加", Variant: nsui.ButtonPrimary, Compact: true,
+				Disabled: func() bool { return a.batchBusy.Get() || strings.TrimSpace(a.batchTagInput.Get()) == "" },
+				OnPress:  func() { a.runBatchAddTag(cx) },
+			}),
 		},
 		Children: []core.Node{
 			nsui.Input{Value: func() string { return a.batchTagInput.Get() }, OnChange: a.batchTagInput.Set,
@@ -1293,7 +1311,7 @@ func (a *App) batchTagDialog(cx *core.Scope) core.Node {
 						break
 					}
 					tagName := t.Name
-					tagChips = append(tagChips, drawerChip(colors, tagName, nil,
+					tagChips = append(tagChips, drawerChip(cx, colors, tagName, nil,
 						func() { a.batchTagInput.Set(tagName) }))
 				}
 				if len(tagChips) == 0 {
@@ -1351,49 +1369,70 @@ func (a *App) batchFolderDialog(cx *core.Scope) core.Node {
 }
 
 func (a *App) batchDeleteDialog(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
 	return nsui.Dialog{
 		Open:         func() bool { return a.batchDelOpen.Get() },
 		OnOpenChange: func(open bool, _ base.Reason) { a.batchDelOpen.Set(open) },
 		Title:        "删除已选素材？",
 		Description:  "将把已选的 " + itoa(len(a.selectedIDs)) + " 项移到桌面端废纸篓。",
 		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.batchDelOpen.Set(false) }},
-			nsui.Button{Text: "移到废纸篓", OnPress: func() {
-				a.batchDelOpen.Set(false)
-				a.runBatchDelete(cx)
-			}},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "取消", Variant: nsui.ButtonGhost,
+				OnPress: func() { a.batchDelOpen.Set(false) },
+			}),
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "移到废纸篓", Variant: nsui.ButtonPrimary,
+				OnPress: func() {
+					a.batchDelOpen.Set(false)
+					a.runBatchDelete(cx)
+				},
+			}),
 		},
 	}
 }
 
 func (a *App) restoreDialog(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
 	return nsui.Dialog{
 		Open:         func() bool { return a.restoreOpen.Get() },
 		OnOpenChange: func(open bool, _ base.Reason) { a.restoreOpen.Set(open) },
 		Title:        "恢复素材？",
 		Description:  "将「" + a.restoreTarget.DisplayName() + "」从废纸篓恢复回原位置。",
 		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.restoreOpen.Set(false) }},
-			nsui.Button{Text: "恢复", OnPress: func() {
-				a.restoreOpen.Set(false)
-				a.restoreItem(cx, a.restoreTarget)
-			}},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "取消", Variant: nsui.ButtonGhost,
+				OnPress: func() { a.restoreOpen.Set(false) },
+			}),
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "恢复", Variant: nsui.ButtonPrimary,
+				OnPress: func() {
+					a.restoreOpen.Set(false)
+					a.restoreItem(cx, a.restoreTarget)
+				},
+			}),
 		},
 	}
 }
 
 func (a *App) emptyTrashDialog(cx *core.Scope) core.Node {
+	colors := nsui.ColorsOf(cx)
 	return nsui.Dialog{
 		Open:         func() bool { return a.emptyTrashOpen.Get() },
 		OnOpenChange: func(open bool, _ base.Reason) { a.emptyTrashOpen.Set(open) },
 		Title:        "清空废纸篓？",
 		Description:  "废纸篓中的素材将被永久删除，无法恢复！",
 		Footer: []core.Node{
-			nsui.Button{Text: "取消", Variant: nsui.ButtonGhost, OnPress: func() { a.emptyTrashOpen.Set(false) }},
-			nsui.Button{Text: "永久清空", OnPress: func() {
-				a.emptyTrashOpen.Set(false)
-				a.emptyTrash(cx)
-			}},
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "取消", Variant: nsui.ButtonGhost,
+				OnPress: func() { a.emptyTrashOpen.Set(false) },
+			}),
+			mobileActionButton(cx, colors, mobileBtnSpec{
+				Text: "永久清空", Variant: nsui.ButtonPrimary,
+				OnPress: func() {
+					a.emptyTrashOpen.Set(false)
+					a.emptyTrash(cx)
+				},
+			}),
 		},
 	}
 }
@@ -1423,7 +1462,10 @@ func (a *App) emptyState(cx *core.Scope) core.Node {
 		return core.View{Style: core.Style{FlexGrow: 1, AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter, Gap: 8, Padding: core.All(24)}, Children: []core.Node{
 			core.Text{Content: text, MaxLines: 3, Style: nsui.TypeBody.Merge(core.Style{Color: colors.Muted(), TextAlign: core.TextAlignCenter})},
 			core.Show{When: func() bool { return snap.Err != nil }, Then: func(cx *core.Scope) core.Node {
-				return nsui.Button{Text: "重试", Variant: nsui.ButtonSecondary, OnPress: func() { a.refreshGalleryView(cx, true) }}
+				return mobileActionButton(cx, colors, mobileBtnSpec{
+					Text: "重试", Variant: nsui.ButtonSecondary,
+					OnPress: func() { a.refreshGalleryView(cx, true) },
+				})
 			}},
 		}}
 	})
@@ -1444,7 +1486,10 @@ func (a *App) errorBanner(cx *core.Scope, errFn func() error) core.Node {
 					}
 					return ""
 				}, MaxLines: 3, Style: nsui.TypeCaption.Merge(core.Style{FlexGrow: 1}), StyleFunc: nsui.Colored(colors.Danger)},
-				nsui.Button{Text: "重试", Variant: nsui.ButtonGhost, OnPress: func() { a.refreshGalleryView(cx, true) }},
+				mobileActionButton(cx, colors, mobileBtnSpec{
+					Text: "重试", Variant: nsui.ButtonGhost, Compact: true,
+					OnPress: func() { a.refreshGalleryView(cx, true) },
+				}),
 			},
 		}
 	}}

@@ -375,7 +375,7 @@ func (a *App) devicesPage(cx *core.Scope) core.Node {
 										Gap:            8,
 										Height:         core.Pt(mobileButtonHeight),
 										Padding:        core.Symmetric(0, 24),
-										CornerRadius:   mobileButtonRadius,
+										CornerRadius:   themeButtonRadius(cx),
 										Background:     colors.Text(),
 										Pressed:        &core.Style{Opacity: core.Alpha(0.85)},
 										Shadows: []core.BoxShadow{
@@ -416,104 +416,6 @@ func (a *App) devicesPage(cx *core.Scope) core.Node {
 			a.pairDialog(cx),
 		},
 	}
-}
-
-const (
-	mobileButtonHeight = nsui.ButtonHeight * 1.5 // 42pt (1.5x default 28pt)
-	mobileButtonRadius = core.Points(999)        // 默认全圆角
-)
-
-type mobileBtnSpec struct {
-	TestID   string
-	Text     string
-	Icon     func() *core.SVG
-	Variant  nsui.ButtonVariant
-	Flex     float32
-	Disabled func() bool
-	OnPress  func()
-}
-
-func mobileActionButton(colors nsui.Colors, spec mobileBtnSpec) core.Node {
-	return core.View{
-		TestID: spec.TestID,
-		Role:   core.RoleButton,
-		Label:  spec.Text,
-		StyleFunc: func() core.Style {
-			bg := colors.Accent()
-			border := core.Color(0)
-			switch spec.Variant {
-			case nsui.ButtonSecondary:
-				bg = colors.Inset()
-				border = colors.Border()
-			case nsui.ButtonOutline:
-				bg = 0
-				border = colors.Border()
-			case nsui.ButtonGhost:
-				bg = 0
-			}
-			st := core.Style{
-				Height:         core.Pt(mobileButtonHeight),
-				Padding:        core.Symmetric(0, 18),
-				CornerRadius:   mobileButtonRadius,
-				Direction:      core.Row,
-				AlignItems:     core.AlignCenter,
-				JustifyContent: core.JustifyCenter,
-				Gap:            6,
-				Background:     bg,
-				Pressed:        &core.Style{Opacity: core.Alpha(0.78)},
-			}
-			if spec.Flex > 0 {
-				st.FlexGrow = spec.Flex
-				st.FlexShrink = 1
-			}
-			if border != 0 {
-				st.BorderWidth = 1
-				st.BorderColor = border
-			}
-			if spec.Disabled != nil && spec.Disabled() {
-				st.Opacity = core.Alpha(0.5)
-			}
-			return st
-		},
-		OnPress: func(core.PressEvent) {
-			if spec.Disabled != nil && spec.Disabled() {
-				return
-			}
-			if spec.OnPress != nil {
-				spec.OnPress()
-			}
-		},
-		Children: func() []core.Node {
-			fg := func() core.Color {
-				if spec.Variant == nsui.ButtonPrimary {
-					return colors.OnAccent()
-				}
-				return colors.Text()
-			}
-			var out []core.Node
-			if spec.Icon != nil {
-				out = append(out, core.Icon{
-					SVG:       spec.Icon(),
-					StyleFunc: func() core.Style { return core.Style{FontSize: 16, Color: fg()} },
-				})
-			}
-			out = append(out, core.Text{
-				Content:   spec.Text,
-				StyleFunc: func() core.Style { return core.Style{FontSize: 14, LineHeight: 18, FontWeight: 600, Color: fg()} },
-			})
-			return out
-		}(),
-	}
-}
-
-func headerActionPill(colors nsui.Colors, testID string, iconFn func() *core.SVG, label string, onPress func()) core.Node {
-	return mobileActionButton(colors, mobileBtnSpec{
-		TestID:  testID,
-		Text:    label,
-		Icon:    iconFn,
-		Variant: nsui.ButtonSecondary,
-		OnPress: onPress,
-	})
 }
 
 func (a *App) deviceCard(cx *core.Scope, c storage.Connection, idx int, cardSize core.Points) core.Node {
@@ -892,7 +794,7 @@ func (a *App) newDeviceDialog(cx *core.Scope) core.Node {
 											}, rows...),
 										},
 										// Confirm button
-										mobileActionButton(colors, mobileBtnSpec{
+										mobileActionButton(cx, colors, mobileBtnSpec{
 											TestID:  "devices.new.confirm",
 											Text:    "收入我的电脑",
 											Variant: nsui.ButtonPrimary,
@@ -1064,7 +966,7 @@ func (a *App) deviceEditSheet(cx *core.Scope) core.Node {
 						core.View{
 							Style: core.Style{Direction: core.Row, Gap: 10, Margin: core.Edges{Top: 4}},
 							Children: []core.Node{
-								mobileActionButton(colors, mobileBtnSpec{
+								mobileActionButton(cx, colors, mobileBtnSpec{
 									TestID:  "devices.edit.remove",
 									Text:    "移除电脑",
 									Variant: nsui.ButtonSecondary,
@@ -1079,7 +981,7 @@ func (a *App) deviceEditSheet(cx *core.Scope) core.Node {
 										a.bump()
 									},
 								}),
-								mobileActionButton(colors, mobileBtnSpec{
+								mobileActionButton(cx, colors, mobileBtnSpec{
 									TestID:  "devices.edit.save",
 									Text:    "保存",
 									Variant: nsui.ButtonPrimary,
