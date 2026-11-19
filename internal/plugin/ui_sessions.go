@@ -10,16 +10,21 @@ import (
 // Session identities must be created and revoked by the window owner.
 type UISessions struct {
 	mu    sync.RWMutex
-	pages map[any]http.Handler
+	pages map[any]uiSession
 }
 
-func (s *UISessions) Attach(page any, pluginDir string) {
+type uiSession struct {
+	handler http.Handler
+	allowed func() bool
+}
+
+func (s *UISessions) Attach(page any, pluginDir string, allowed func() bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.pages == nil {
-		s.pages = make(map[any]http.Handler)
+		s.pages = make(map[any]uiSession)
 	}
-	s.pages[page] = UIResourceHandler(pluginDir)
+	s.pages[page] = uiSession{handler: UIResourceHandler(pluginDir), allowed: allowed}
 }
 
 func (s *UISessions) Detach(page any) {
@@ -36,11 +41,11 @@ func (s *UISessions) ServePage(page any, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.mu.RLock()
-	h := s.pages[page]
+	session, ok := s.pages[page]
 	s.mu.RUnlock()
-	if h == nil {
+	if !ok || session.allowed == nil || !session.allowed() {
 		http.Error(w, "unknown plugin page", http.StatusForbidden)
 		return
 	}
-	h.ServeHTTP(w, r)
+	session.handler.ServeHTTP(w, r)
 }

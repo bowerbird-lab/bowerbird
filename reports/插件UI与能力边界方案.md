@@ -132,7 +132,7 @@ await bowerbird.windows.open("studio");
 
 ## WebView 实施记录
 
-当前工作分支已实现插件目录的静态资源处理器和页面会话隔离基础，但尚未将其注册到 WebView，也尚未开放插件 UI。资源处理器使用 Go `os.Root` 限定目录并拒绝目录遍历和越界符号链接；会话由宿主传入的页面身份绑定插件目录，不接受插件通过 URL 指定身份。测试覆盖隔离、撤销和路径逃逸。
+当前工作分支已将独立窗口接入非受信任 WebView，页面由 `bowerplugin` 协议按宿主提供的页面身份加载资源，并使用临时隔离会话。设置页对已启用且声明窗口的插件显示入口；禁用后后续资源请求被拒绝。插件目录使用 Go `os.Root` 限定并拒绝目录遍历和越界符号链接，测试覆盖隔离、撤销和路径逃逸。`examples/plugins/webview-demo` 是静态界面示例。此阶段尚无素材、设置、网络桥接，实际桌面加载及跨平台安全边界仍需验证。
 
 mygo v0.9.2 的 `PageOptions.Untrusted` 禁止绑定 Go 方法；`Protocol.Handle` 可通过 `CallerPage` 识别页面，可用于下一阶段设计桥接。`ContentRules` 文档明确指出 Windows 上 WebSocket 不受该机制拦截，不能把 content rules 当成完整网络隔离；启用前必须结合 CSP 和平台实测，任何不能可靠约束网络的路径都不开放。
 

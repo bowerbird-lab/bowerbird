@@ -747,6 +747,9 @@ func main() {
 	// and open the SQLite database during code generation.
 	coreService := core.NewService(nil)
 	host := newAppHost(coreService)
+	if err := host.views.RegisterPluginUIProtocol(); err != nil {
+		log.Fatalf("register plugin UI protocol: %v", err)
+	}
 	core.AttachHost(coreService, host)
 
 	var (

@@ -1,0 +1,7 @@
+:root { color-scheme: light dark; font: 16px system-ui, sans-serif; }
+body { margin: 0; background: #171923; color: #eef0f7; }
+main { max-width: 600px; margin: 10vh auto; padding: 32px; }
+.eyebrow { color: #aaa0f7; font-weight: 700; letter-spacing: .1em; font-size: 12px; }
+h1 { font-size: 36px; }
+button { border: 0; border-radius: 10px; padding: 12px 20px; background: #a499ff; color: #171923; font-weight: 700; cursor: pointer; }
+.note { color: #a3a7bc; margin-top: 40px; }

@@ -903,6 +903,22 @@ func (a *App) settingsPlugins(c *ui.Context) {
 				}
 			}
 			ui.Row(c).Gap(8).Children(func() {
+				if a.pluginHost != nil {
+					if hosted, ok := a.pluginHost.Get(pl.ID); ok && hosted.Enabled {
+						for _, window := range hosted.Manifest.UI.Windows {
+							window := window
+							label := window.Title
+							if label == "" {
+								label = a.t("settings.plugins.openPluginWindow")
+							}
+							if ui.Button(c.Key("plugin-window-"+pl.ID+"-"+window.ID), label).Clicked() {
+								if err := a.openPluginUI(pl.ID, window); err != nil {
+									a.showToast(err.Error())
+								}
+							}
+						}
+					}
+				}
 				if ui.Button(c, a.t("settings.plugins.openStore")).Clicked() {
 					a.openPluginStore(pl.ID)
 				}

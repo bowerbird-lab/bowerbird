@@ -555,6 +555,7 @@
       }
     },
     "plugins": {
+      "openPluginWindow": "打开插件窗口",
       "showSecret": "显示密钥",
       "hideSecret": "隐藏密钥",
       "alwaysEnabled": "内置 · 常驻开启",
