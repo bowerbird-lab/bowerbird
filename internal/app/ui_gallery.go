@@ -201,6 +201,8 @@ func (a *App) viewGallery(c *ui.Context) {
 		return false
 	})
 
+	a.galleryDragEdgeScroll(c, container, top)
+
 	container.Children(func() {
 		a.visibleThumbCount = 0
 		list := ui.List(c.Key("gallery"), &a.galleryList, len(a.rows), func(row int) {
@@ -250,6 +252,51 @@ func (a *App) viewGallery(c *ui.Context) {
 		pt.Fill(boxRect, p.accent.Alpha(0.18), 3)
 		pt.Stroke(boxRect, p.accent.Alpha(0.85), 3, 1)
 	})
+}
+
+func (a *App) galleryDragEdgeScroll(c *ui.Context, container ui.Element, top float32) {
+	if !a.itemDragging && !a.rootDataDragOver {
+		return
+	}
+	r := a.galleryBoxRect
+	if r.W <= 0 || r.H <= 0 {
+		return
+	}
+	px, py, _ := container.PointerPosition()
+	if px < 0 || px > r.W || py < 0 || py > r.H {
+		return
+	}
+	const scrollZone float32 = 48
+	const maxStep float32 = 14
+	topZoneEnd := top + scrollZone
+	var dy float32
+	if py < topZoneEnd && a.galleryScroll.Y > 0 {
+		// The floating header covers [0, mainHeaderHeight), so mygo's built-in
+		// dragScroll never sees the gallery's visible top edge. Scroll up
+		// whenever the pointer enters the top zone or the header above it.
+		t := (topZoneEnd - py) / (topZoneEnd - mainHeaderHeight)
+		if t > 1 {
+			t = 1
+		}
+		dy = -maxStep * t
+	} else if r.H > 120 && py > r.H-scrollZone && py <= r.H-32 && a.galleryScroll.Y < a.galleryScroll.MaxY {
+		// Smooth lead-in before mygo's built-in 32px bottom dragScroll kicks in.
+		dy = maxStep * (py - (r.H - scrollZone)) / scrollZone
+	}
+	if dy == 0 {
+		return
+	}
+	nextY := a.galleryScroll.Y + dy
+	if nextY < 0 {
+		nextY = 0
+	}
+	if a.galleryScroll.MaxY > 0 && nextY > a.galleryScroll.MaxY {
+		nextY = a.galleryScroll.MaxY
+	}
+	if nextY != a.galleryScroll.Y {
+		a.galleryScroll.Y = nextY
+		c.Invalidate()
+	}
 }
 
 func (a *App) galleryRowTopOffset(targetRow int) float32 {
@@ -941,6 +988,7 @@ func (a *App) moveItemsToFolder(ids []string, targetFolderID string) {
 // inspector hero. Dragging a member of a multi-selection carries the whole
 // selection; dragging any other item carries just that item.
 func (a *App) itemDragData(item core.Item) transfer.Data {
+	a.itemDragging = true
 	ids := a.itemDragIDs(item)
 	if a.svc != nil && len(ids) > 0 {
 		copied := append([]string(nil), ids...)

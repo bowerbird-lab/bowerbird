@@ -24,9 +24,7 @@ func (a *App) attachURLDropTarget(el ui.Element) {
 		Formats:    []transfer.Format{transfer.FileList, transfer.URIList, transfer.Text, transfer.HTML},
 		Operations: transfer.Copy,
 	}
-	if _, over := ui.DataDragOver(el, opts); over {
-		// Keep the drop target unobtrusive; the toast reports the result.
-	}
+	_, a.rootDataDragOver = ui.DataDragOver(el, opts)
 	if drop, ok := ui.DropData(el, opts); ok {
 		folder := a.takeDropFolder()
 		a.handleDropDataToFolder(drop.Data, folder)

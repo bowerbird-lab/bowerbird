@@ -66,11 +66,16 @@ func (a *App) dragOptions(e ui.Element, item core.Item) transfer.DragOptions {
 	if !e.Hovered() && !e.Pressed() {
 		return transfer.DragOptions{}
 	}
-	p := a.dragPreviewFor(item)
-	if p == nil {
-		return transfer.DragOptions{}
+	opts := transfer.DragOptions{
+		Done: func(transfer.Result) {
+			a.itemDragging = false
+		},
 	}
-	return transfer.DragOptions{Preview: p.img, Hotspot: p.hotspot}
+	if p := a.dragPreviewFor(item); p != nil {
+		opts.Preview = p.img
+		opts.Hotspot = p.hotspot
+	}
+	return opts
 }
 
 // dragPreviewFor returns the cached preview for the drag starting at item. The

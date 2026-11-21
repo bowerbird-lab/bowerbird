@@ -256,6 +256,10 @@ type App struct {
 	marqueeCurY          float32
 	marqueeBase          map[string]bool
 	marqueeAdditive      bool
+
+	// Active drag state for gallery edge auto-scrolling.
+	itemDragging     bool
+	rootDataDragOver bool
 	// Inputs and popover state.
 	searchBox   ui.Handle
 	galleryBox  ui.Handle

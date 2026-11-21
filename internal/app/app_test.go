@@ -2690,6 +2690,70 @@ func TestClearHistoryOnLibrarySwitch(t *testing.T) {
 	}
 }
 
+func TestGalleryDragEdgeScroll(t *testing.T) {
+	a := seededApp(t)
+	var items []core.Item
+	for i := 0; i < 60; i++ {
+		items = append(items, core.Item{
+			ID:     fmt.Sprintf("item-%d", i),
+			Name:   fmt.Sprintf("Item %d", i),
+			Width:  400,
+			Height: 300,
+		})
+	}
+	a.setWorkspaceItems(items, len(items), 0)
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.Frame()
+	if a.galleryScroll.MaxY <= 0 {
+		t.Fatalf("expected scrollable gallery, got MaxY=%v", a.galleryScroll.MaxY)
+	}
+
+	a.galleryScroll.Y = 300
+	tester.Frame()
+	if a.galleryScroll.Y < 290 {
+		t.Fatalf("expected galleryScroll.Y near 300, got %v", a.galleryScroll.Y)
+	}
+
+	// Dragging near the top edge below the floating header scrolls up.
+	a.itemDragging = true
+	gx := a.galleryBoxRect.X + 100
+	before := a.galleryScroll.Y
+	tester.Move(gx, mainHeaderHeight+10)
+	if a.galleryScroll.Y >= before {
+		t.Fatalf("expected scroll up near top edge, before=%v after=%v", before, a.galleryScroll.Y)
+	}
+
+	// Dragging over the floating header above the gallery also scrolls up.
+	a.itemDragging = false
+	a.galleryScroll.Y = 300
+	tester.Frame()
+	a.itemDragging = true
+	before = a.galleryScroll.Y
+	tester.Move(gx, 20)
+	if a.galleryScroll.Y >= before {
+		t.Fatalf("expected scroll up over floating header, before=%v after=%v", before, a.galleryScroll.Y)
+	}
+
+	// Dragging over the sidebar must not scroll the gallery.
+	a.itemDragging = false
+	a.galleryScroll.Y = 300
+	tester.Frame()
+	a.itemDragging = true
+	before = a.galleryScroll.Y
+	tester.Move(10, 20)
+	if a.galleryScroll.Y != before {
+		t.Fatalf("expected no gallery scroll when pointer is in sidebar, before=%v after=%v", before, a.galleryScroll.Y)
+	}
+
+	// Dragging near the bottom edge scrolls down.
+	before = a.galleryScroll.Y
+	tester.Move(gx, a.galleryBoxRect.Y+a.galleryBoxRect.H-40)
+	if a.galleryScroll.Y <= before {
+		t.Fatalf("expected scroll down near bottom edge, before=%v after=%v", before, a.galleryScroll.Y)
+	}
+}
+
+
 
 
 
