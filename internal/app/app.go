@@ -368,6 +368,7 @@ type App struct {
 	languageValue   string
 	vibrancyValue   bool
 	importModeValue string
+	dropZone        core.DropZoneSettings
 	network         core.NetworkSettings
 	shortcuts       core.ShortcutSettings
 	shortcutPairs   map[string]uiShortcut
@@ -402,6 +403,15 @@ type App struct {
 	logsFilterQuery string
 	logsFilterLevel string
 	logsFilterValid bool
+
+	// Top drop-zone state.
+	dropZoneWins         map[int64]*mygo.Window
+	dropZoneFeedback     map[int64]*dropZoneFeedbackState
+	dropZoneDragOver     map[int64]bool
+	dropZoneHovered      map[int64]bool
+	displaysProvider     func() []mygo.Display
+	dropZoneOpenApp      func()
+	dropZoneOpenSettings func()
 
 	// Plugins.
 	plugins             []installedPluginRow
@@ -871,16 +881,23 @@ func (a *App) runMemoryIdleCleanup(seq uint64) {
 func (a *App) HandleEvent(name string, payload any) {
 	switch name {
 	case core.LibraryOpenedEvent, core.LibraryClosedEvent:
-		a.post(func() { a.refreshAll() })
+		a.post(func() { a.refreshAll(); a.invalidateDropZones() })
 	case core.ThemeChangedEvent:
 		if s, ok := payload.(string); ok {
-			a.post(func() { a.trans.SetLanguage(a.currentLanguage()); _ = s; a.refreshAll() })
+			a.post(func() { a.trans.SetLanguage(a.currentLanguage()); _ = s; a.refreshAll(); a.invalidateDropZones() })
 		}
 	case core.LanguageChangedEvent:
 		// Apply the dictionary synchronously: the host rebuilds the native menu
 		// and tray immediately after dispatching this event.
 		a.trans.SetLanguage(a.currentLanguage())
-		a.post(func() { a.refreshAll() })
+		a.post(func() { a.refreshAll(); a.invalidateDropZones() })
+	case core.DropZoneSettingsChangedEvent:
+		a.postSettings(func() {
+			if a.svc != nil {
+				a.dropZone = a.svc.GetDropZoneSettings()
+			}
+		})
+		a.invalidateDropZones()
 	case core.VibrancyChangedEvent, core.LightweightModeChangedEvent:
 		a.post(func() { a.refreshAll() })
 	case core.NetworkSettingsChangedEvent:
@@ -892,7 +909,7 @@ func (a *App) HandleEvent(name string, payload any) {
 		// background work finishes, so refresh once the pipeline reports the
 		// committed items. Without this the gallery only updates after the
 		// library is reopened.
-		a.post(func() { a.refreshAll() })
+		a.post(func() { a.refreshAll(); a.invalidateDropZones() })
 	case core.LibraryIndexProgressEvent:
 		if prog, ok := payload.(core.LibraryIndexProgress); ok {
 			a.post(func() {

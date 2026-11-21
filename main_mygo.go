@@ -41,6 +41,12 @@ var appIconRounded []byte
 //go:embed assets/branding/tray-icon.png
 var trayIconTemplate []byte
 
+type dropZoneWindowEntry struct {
+	win      *mygo.Window
+	hasNotch bool
+	bounds   mygo.Rectangle
+}
+
 // appHost is the mygo implementation of core.Host. It owns the native shell:
 // windows, events, dialogs, clipboard and the main-thread hop.
 type appHost struct {
@@ -49,9 +55,11 @@ type appHost struct {
 	main    *mygo.Window
 	// openingMain is set while a main window is being created, so a second
 	// OpenMainWindow waits for the first instead of building another one.
-	openingMain chan struct{}
-	events      map[string]*mygo.Event[any]
-	tray        *mygo.Tray
+	openingMain     chan struct{}
+	events          map[string]*mygo.Event[any]
+	tray            *mygo.Tray
+	dropZones       map[int64]dropZoneWindowEntry
+	dropZoneSyncSeq atomic.Uint64
 
 	svc      *core.Service
 	views    *app.App
@@ -66,10 +74,11 @@ const lightweightIdleDelay = time.Minute
 
 func newAppHost(svc *core.Service) *appHost {
 	return &appHost{
-		windows: map[string]*mygo.Window{},
-		events:  map[string]*mygo.Event[any]{},
-		svc:     svc,
-		views:   app.New(svc),
+		windows:   map[string]*mygo.Window{},
+		events:    map[string]*mygo.Event[any]{},
+		dropZones: map[int64]dropZoneWindowEntry{},
+		svc:       svc,
+		views:     app.New(svc),
 	}
 }
 
@@ -104,6 +113,9 @@ func (h *appHost) Emit(name string, payload any) {
 	}
 	if name == core.ShortcutsChangedEvent {
 		h.registerGlobalShortcuts()
+	}
+	if name == core.DropZoneSettingsChangedEvent {
+		h.syncDropZones()
 	}
 	_ = h.event(name).Broadcast(payload)
 }
@@ -569,6 +581,99 @@ func (h *appHost) attachDrop(w *mygo.Window) {
 	})
 }
 
+func (h *appHost) syncDropZones() {
+	if h.svc == nil || h.views == nil {
+		return
+	}
+	seq := h.dropZoneSyncSeq.Add(1)
+	h.RunOnMain(func() {
+		if h.dropZoneSyncSeq.Load() != seq || h.quitting.Load() {
+			return
+		}
+		settings := h.svc.GetDropZoneSettings()
+		targets := app.ResolveDropZoneDisplays(mygo.Screen.Displays(), settings)
+		wanted := make(map[int64]mygo.Display, len(targets))
+		for _, d := range targets {
+			wanted[d.ID] = d
+		}
+
+		// Close windows for displays that are no longer selected or connected.
+		for id, entry := range h.dropZones {
+			if _, ok := wanted[id]; !ok {
+				h.views.UnregisterDropZoneWindow(id)
+				if entry.win != nil {
+					entry.win.Close()
+				}
+				delete(h.dropZones, id)
+			}
+		}
+
+		for _, d := range targets {
+			d := d
+			bounds := app.DropZoneWindowBounds(d, settings.Style)
+			hasNotch := app.HasHardwareNotch(d)
+			aboveMenuBar := settings.Style != core.DropZoneStyleCapsule
+			if entry, ok := h.dropZones[d.ID]; ok && entry.win != nil && entry.hasNotch == hasNotch {
+				if entry.bounds != bounds {
+					entry.win.SetBounds(bounds)
+					entry.bounds = bounds
+					h.dropZones[d.ID] = entry
+				}
+				entry.win.ShowInactive()
+				pinDropZoneWindow(entry.win, bounds, aboveMenuBar)
+				entry.win.Update(func() {})
+				continue
+			}
+			if old, ok := h.dropZones[d.ID]; ok {
+				h.views.UnregisterDropZoneWindow(d.ID)
+				if old.win != nil {
+					old.win.Close()
+				}
+				delete(h.dropZones, d.ID)
+			}
+
+			x, y := bounds.X, bounds.Y
+			w := mygo.NewWindow(mygo.WindowOptions{
+				Title:             "Bowerbird Drop Zone",
+				Width:             bounds.Width,
+				Height:            bounds.Height,
+				X:                 x,
+				Y:                 y,
+				Hidden:            true,
+				Frameless:         true,
+				Transparent:       true,
+				Panel:             true,
+				SkipTaskbar:       true,
+				DisableResize:     true,
+				DisableMove:       true,
+				DisableMinimize:   true,
+				DisableMaximize:   true,
+				DisableClose:      true,
+				DisableFullScreen: true,
+				DisableShadow:     true,
+				BackgroundColor:   "#00000000",
+				Content:           h.views.DropZoneContent(d.ID, hasNotch),
+			})
+			pinDropZoneWindow(w, bounds, aboveMenuBar)
+			w.ShowInactive()
+			pinDropZoneWindow(w, bounds, aboveMenuBar)
+			log.Printf("[DropZone] created display=%d bounds=%+v aboveMenuBar=%v", d.ID, bounds, aboveMenuBar)
+			displayID := d.ID
+			w.OnFileDrop(func(e *mygo.FileDropEvent) {
+				paths := append([]string(nil), e.Paths...)
+				log.Printf("[DropZone] window.OnFileDrop display=%d paths=%v", displayID, paths)
+				h.views.HandleDropZoneDrop(displayID, paths)
+			})
+			h.views.RegisterDropZoneWindow(displayID, w)
+			h.dropZones[displayID] = dropZoneWindowEntry{
+				win:      w,
+				hasNotch: hasNotch,
+				bounds:   bounds,
+			}
+		}
+	})
+}
+
 // rebuildTrayMenu refreshes the tray menu after a language change.
 func (h *appHost) rebuildTrayMenu() {
 	h.mu.RLock()
@@ -888,6 +993,14 @@ func main() {
 		}
 
 		host.registerGlobalShortcuts()
+		host.views.SetDropZoneCallbacks(
+			func() { host.OpenMainWindow() },
+			func() { _ = core.OpenSettingsWindowWithHost(host) },
+		)
+		mygo.Screen.OnDisplaysChanged(func() {
+			host.syncDropZones()
+		})
+		host.syncDropZones()
 
 		pendingMu.Lock()
 		urls := append([]string(nil), pendingURL...)

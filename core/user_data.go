@@ -32,6 +32,7 @@ type UserData struct {
 	Mobile          *MobileSettings     `json:"mobile,omitempty"`
 	Shortcuts       *ShortcutSettings   `json:"shortcuts,omitempty"`
 	Screenshot      *ScreenshotSettings `json:"screenshot,omitempty"`
+	DropZone        *DropZoneSettings   `json:"dropZone,omitempty"`
 	UpdatedAt       int64               `json:"updatedAt"`
 }
 
@@ -539,6 +540,24 @@ func (s *UserDataStore) SetScreenshotSettings(settings ScreenshotSettings) error
 	defer s.mu.Unlock()
 	norm := NormalizeScreenshotSettings(settings)
 	s.data.Screenshot = &norm
+	s.data.UpdatedAt = time.Now().Unix()
+	return s.saveLocked()
+}
+
+func (s *UserDataStore) GetDropZoneSettings() DropZoneSettings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.data.DropZone == nil {
+		return DefaultDropZoneSettings()
+	}
+	return NormalizeDropZoneSettings(*s.data.DropZone)
+}
+
+func (s *UserDataStore) SetDropZoneSettings(settings DropZoneSettings) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	norm := NormalizeDropZoneSettings(settings)
+	s.data.DropZone = &norm
 	s.data.UpdatedAt = time.Now().Unix()
 	return s.saveLocked()
 }

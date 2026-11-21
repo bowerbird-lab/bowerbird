@@ -702,6 +702,23 @@
       "title": "Record source URL",
       "description": "After downloading a media URL, save the resolved page/source URL into the item metadata. This is an application setting and is not controlled by plugins."
     },
+    "dropZone": {
+      "card": "Top Drop Zone",
+      "enabled": "Show top drop zone",
+      "enabledHelp": "Display a floating drop zone at the top of the screen to drop files directly into the active library.",
+      "style": "Appearance style",
+      "styleHelp": "Switch between a top-edge notch or a floating capsule.",
+      "styleNotch": "Notch",
+      "styleCapsule": "Capsule",
+      "screens": "Display on screens",
+      "screensHelp": "Choose which connected monitors show the top drop zone.",
+      "screensPrimary": "Primary display only",
+      "screensAll": "All displays",
+      "screensCustom": "Selected displays",
+      "screensEmpty": "Select at least one display below to show the drop zone.",
+      "primaryBadge": "Primary",
+      "builtinBadge": "Built-in"
+    },
     "performance": "Performance",
     "perfProfile": {
       "title": "Performance preset",
@@ -1221,5 +1238,18 @@
     "primaryUpdated": "Cover updated",
     "unlinked": "Removed from group",
     "togglePanel": "Toggle pages panel"
+  },
+  "dropZone": {
+    "idle": "Drop to Library",
+    "dragOver": "Release to Save",
+    "importing": "Saving {{count}}...",
+    "saved": "Saved {{count}}",
+    "skipped": "Already in library",
+    "noLibrary": "No active library",
+    "switchToCapsule": "Switch to Capsule",
+    "switchToNotch": "Switch to Notch",
+    "openApp": "Open Bowerbird",
+    "openSettings": "Drop Zone Settings...",
+    "hide": "Hide Drop Zone"
   }
 }

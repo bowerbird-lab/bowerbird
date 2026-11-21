@@ -38,6 +38,7 @@ func (a *App) refreshSettings() {
 	if a.importModeValue == "" {
 		a.importModeValue = core.ImportModeCopy
 	}
+	a.dropZone = a.svc.GetDropZoneSettings()
 	a.network = a.svc.GetNetworkSettings()
 	a.shortcuts = a.svc.GetShortcutSettings()
 	a.rebuildShortcutPairs()
@@ -311,6 +312,7 @@ func (a *App) settingsGeneral(c *ui.Context) {
 			}
 		})
 	})
+	a.settingsDropZoneCard(c)
 	a.settingsCard(c, a.t("settings.performance"), func() {
 		p := a.palette(c)
 		profile := a.detectPerfProfile()

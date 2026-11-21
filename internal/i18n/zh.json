@@ -702,6 +702,23 @@
       "title": "记录来源 URL",
       "description": "从链接下载素材后，把解析后的页面/来源 URL 自动写入素材元数据。这是应用级设置，不受插件控制。"
     },
+    "dropZone": {
+      "card": "顶部投放区",
+      "enabled": "启用顶部投放区",
+      "enabledHelp": "在屏幕顶部显示悬浮投放区，可将文件直接拖入并保存到当前素材库。",
+      "style": "显示样式",
+      "styleHelp": "在紧贴顶部的刘海样式和悬浮胶囊样式之间切换。",
+      "styleNotch": "刘海",
+      "styleCapsule": "胶囊",
+      "screens": "显示屏幕",
+      "screensHelp": "配置在哪些已连接的显示器上显示顶部投放区。",
+      "screensPrimary": "仅主屏幕",
+      "screensAll": "所有屏幕",
+      "screensCustom": "指定屏幕",
+      "screensEmpty": "请在下方至少选择一个显示器。",
+      "primaryBadge": "主屏幕",
+      "builtinBadge": "内置"
+    },
     "performance": "性能",
     "perfProfile": {
       "title": "性能预设",
@@ -1221,5 +1238,18 @@
     "primaryUpdated": "已更新封面",
     "unlinked": "已移出页面组",
     "togglePanel": "显示/隐藏页面列表"
+  },
+  "dropZone": {
+    "idle": "拖入当前库",
+    "dragOver": "松开存入当前库",
+    "importing": "正在存入 {{count}} 项...",
+    "saved": "已存入 {{count}} 项",
+    "skipped": "已在当前库中",
+    "noLibrary": "未打开素材库",
+    "switchToCapsule": "切换为胶囊样式",
+    "switchToNotch": "切换为刘海样式",
+    "openApp": "打开 Bowerbird",
+    "openSettings": "投放区设置...",
+    "hide": "隐藏顶部投放区"
   }
 }
