@@ -65,6 +65,9 @@ func (a *App) canGenerateThumbnail(item core.Item) bool {
 	if (ext == "psd" || ext == "psb") && a.nativeFeature("official.psd-preview") {
 		return true
 	}
+	if ext == "hsj" && a.nativeFeature("official.hsj-preview") {
+		return true
+	}
 	if categoryOf(item) == "video" && a.nativeFeature("builtin.video") {
 		return true
 	}
@@ -289,6 +292,22 @@ func (a *App) generateThumbnail(item core.Item, force bool) (*core.Item, error) 
 		}
 		// Fall through to a plugin-provided generator when the native decoder
 		// cannot handle this PSD (CMYK/16-bit/etc.).
+		if err != nil && (a.pluginHost == nil || !a.pluginHost.CanGenerateThumbnail(item.Extension, item.MimeType)) {
+			return nil, err
+		}
+	}
+
+	// HSJ: extract embedded preview image from Huashijie archive.
+	if ext == "hsj" && a.nativeFeature("official.hsj-preview") {
+		img, width, height, err := core.ReadHSJ(item.FilePath)
+		if err == nil && img != nil {
+			updated, saveErr := a.svc.SaveItemThumbnailImage(item.ID, img, width, height)
+			if saveErr == nil {
+				a.logThumbnailSuccess(item, "hsj", start)
+				return updated, nil
+			}
+			err = saveErr
+		}
 		if err != nil && (a.pluginHost == nil || !a.pluginHost.CanGenerateThumbnail(item.Extension, item.MimeType)) {
 			return nil, err
 		}
