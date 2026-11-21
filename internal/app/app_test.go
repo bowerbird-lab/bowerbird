@@ -2587,5 +2587,21 @@ func TestSpaceTogglePreviewDoesNotScrollGallery(t *testing.T) {
 	}
 }
 
+func TestClearHistoryOnLibrarySwitch(t *testing.T) {
+	a := seededApp(t)
+	a.recordHistory()
+	a.navigate(NavFolder, "f1")
+	a.navigate(NavFolder, "f2")
+	if !a.canGoBack() {
+		t.Fatal("expected history to allow back before library switch")
+	}
+
+	a.clearHistory()
+	if len(a.history) != 0 || a.historyAt != -1 || a.canGoBack() || a.canGoForward() {
+		t.Fatalf("history not cleared: len=%d at=%d back=%v forward=%v", len(a.history), a.historyAt, a.canGoBack(), a.canGoForward())
+	}
+}
+
+
 
 

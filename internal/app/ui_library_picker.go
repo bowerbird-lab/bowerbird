@@ -250,6 +250,7 @@ func (a *App) viewLibraryPicker(c *ui.Context) {
 				a.nav = NavAll
 				a.folderID = ""
 				a.clearWorkspaceSelection()
+				a.clearHistory()
 				a.refreshAll()
 			})
 		}()
@@ -360,6 +361,7 @@ func (a *App) openLibraryRef(ref core.LibraryRef) {
 			a.nav = NavAll
 			a.folderID = ""
 			a.clearWorkspaceSelection()
+			a.clearHistory()
 			a.refreshAll()
 		})
 	}()

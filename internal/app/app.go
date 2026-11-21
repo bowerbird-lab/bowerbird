@@ -852,6 +852,7 @@ func (a *App) refreshAll() {
 				(a.library != nil && lib != nil && a.library.ID != lib.ID)
 			if libChanged {
 				a.clearWorkspaceSelection()
+				a.clearHistory()
 				a.thumbs.clear()
 				a.thumbJobs = newThumbJobQueue()
 				a.libIconPickerOpen = false
@@ -1048,8 +1049,7 @@ func (a *App) ReleaseLightweightMemory() {
 	a.folders = nil
 	a.folderPreviews = nil
 	a.tags = nil
-	a.history = nil
-	a.historyAt = -1
+	a.clearHistory()
 	a.previewOpen = false
 	a.loading = false
 }
@@ -1069,6 +1069,12 @@ func (a *App) navigate(nav Nav, folderID string) {
 	a.closePreview()
 	a.recordHistory()
 	a.refreshAll()
+}
+
+func (a *App) clearHistory() {
+	a.history = nil
+	a.historyAt = -1
+	a.restoringHistory = false
 }
 
 func (a *App) recordHistory() {
