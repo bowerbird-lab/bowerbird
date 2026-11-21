@@ -1736,6 +1736,94 @@ func TestPreviewArrowKeysStepThroughItems(t *testing.T) {
 	})
 }
 
+func TestPreviewUpDownKeysStepThroughPages(t *testing.T) {
+	setupMultiPageApp := func(t *testing.T) *App {
+		t.Helper()
+		a := seededApp(t)
+		p1 := a.items[0]
+		p1.Variants = []string{"v1", "v2"}
+		a.items[0] = p1
+		a.activeItem = &a.items[0]
+		a.variantGroupCacheID = p1.ID
+		a.variantGroupPrimary = &p1
+		a.variantGroupItems = []core.Item{
+			{ID: "v1", Name: "Page 2", VariantOf: p1.ID, Extension: "png"},
+			{ID: "v2", Name: "Page 3", VariantOf: p1.ID, Extension: "png"},
+		}
+		return a
+	}
+
+	t.Run("full", func(t *testing.T) {
+		a := setupMultiPageApp(t)
+		tester := ui.NewTester(a.viewMain, 1280, 800)
+		tester.Frame()
+
+		tester.Key(0, ui.KeySpace)
+		tester.Frame()
+
+		tester.Key(0, ui.KeyDown)
+		tester.Frame()
+		if a.activeItemID != "v1" || a.previewVariantID != "v1" {
+			t.Fatalf("Down moved to (active=%s, variant=%s), want v1", a.activeItemID, a.previewVariantID)
+		}
+
+		tester.Key(0, ui.KeyDown)
+		tester.Frame()
+		if a.activeItemID != "v2" || a.previewVariantID != "v2" {
+			t.Fatalf("second Down moved to (active=%s, variant=%s), want v2", a.activeItemID, a.previewVariantID)
+		}
+
+		// Down from the last page wraps to the primary page.
+		tester.Key(0, ui.KeyDown)
+		tester.Frame()
+		if a.activeItemID != "a" || a.previewVariantID != "a" {
+			t.Fatalf("wrap Down moved to (active=%s, variant=%s), want a", a.activeItemID, a.previewVariantID)
+		}
+
+		// Up from the primary page wraps to the last page.
+		tester.Key(0, ui.KeyUp)
+		tester.Frame()
+		if a.activeItemID != "v2" || a.previewVariantID != "v2" {
+			t.Fatalf("Up from primary moved to (active=%s, variant=%s), want v2", a.activeItemID, a.previewVariantID)
+		}
+
+		// Left/Right still moves across workspace items and clears variant selection.
+		tester.Key(0, ui.KeyRight)
+		tester.Frame()
+		if a.previewIndex != 1 || a.activeItemID != "b" || a.previewVariantID != "" {
+			t.Fatalf("Right moved to (index=%d, active=%s, variant=%s), want (1, b, '')", a.previewIndex, a.activeItemID, a.previewVariantID)
+		}
+
+		// Up/Down on a single-page item is a no-op.
+		tester.Key(0, ui.KeyDown)
+		tester.Frame()
+		if a.previewIndex != 1 || a.activeItemID != "b" || a.previewVariantID != "" {
+			t.Fatalf("Down on single-page item changed state to (index=%d, active=%s, variant=%s)", a.previewIndex, a.activeItemID, a.previewVariantID)
+		}
+	})
+
+	t.Run("inline", func(t *testing.T) {
+		a := setupMultiPageApp(t)
+		tester := ui.NewTester(a.viewMain, 1280, 800)
+		tester.Frame()
+
+		a.openPreview("a", "inline")
+		tester.Frame()
+
+		tester.Key(0, ui.KeyDown)
+		tester.Frame()
+		if a.activeItemID != "v1" || a.previewVariantID != "v1" {
+			t.Fatalf("inline Down moved to (active=%s, variant=%s), want v1", a.activeItemID, a.previewVariantID)
+		}
+
+		tester.Key(0, ui.KeyUp)
+		tester.Frame()
+		if a.activeItemID != "a" || a.previewVariantID != "a" {
+			t.Fatalf("inline Up moved to (active=%s, variant=%s), want a", a.activeItemID, a.previewVariantID)
+		}
+	})
+}
+
 func TestStripFitCountAdaptsToWidth(t *testing.T) {
 	cases := []struct {
 		width float32

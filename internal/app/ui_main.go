@@ -158,6 +158,12 @@ func (a *App) handlePreviewContainerInput(container ui.Element) {
 			a.movePreview(1)
 			return true
 		}
+		if matchKey(ev, core.ShortcutMoveUp) {
+			return a.movePreviewPage(-1)
+		}
+		if matchKey(ev, core.ShortcutMoveDown) {
+			return a.movePreviewPage(1)
+		}
 		if matchKey(ev, core.ShortcutZoomIn) {
 			a.previewZoom = minF(a.previewZoom*1.2, previewMaxZoom)
 			return true
@@ -200,6 +206,8 @@ func (a *App) registerPreviewOverlayShortcuts(overlay ui.Element) {
 	})
 	bind(core.ShortcutMoveLeft, func() { a.movePreview(-1) })
 	bind(core.ShortcutMoveRight, func() { a.movePreview(1) })
+	bind(core.ShortcutMoveUp, func() { a.movePreviewPage(-1) })
+	bind(core.ShortcutMoveDown, func() { a.movePreviewPage(1) })
 	bind(core.ShortcutZoomIn, func() {
 		a.previewZoom = minF(a.previewZoom*1.2, previewMaxZoom)
 	})
@@ -304,6 +312,12 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 		}
 		if matched(core.ShortcutMoveRight) {
 			a.movePreview(1)
+		}
+		if matched(core.ShortcutMoveUp) {
+			a.movePreviewPage(-1)
+		}
+		if matched(core.ShortcutMoveDown) {
+			a.movePreviewPage(1)
 		}
 		if matched(core.ShortcutZoomIn) {
 			a.previewZoom = minF(a.previewZoom*1.2, previewMaxZoom)

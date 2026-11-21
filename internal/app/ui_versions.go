@@ -126,19 +126,27 @@ func (a *App) invalidateVariantGroupCache() {
 	a.variantGroupPending = ""
 }
 
+func (a *App) cachedVariantGroup(itemID string) (*core.Item, []core.Item) {
+	if itemID == "" || a.variantGroupPrimary == nil {
+		return nil, nil
+	}
+	if a.variantGroupCacheID == itemID || a.variantGroupPrimary.ID == itemID {
+		return a.variantGroupPrimary, a.variantGroupItems
+	}
+	for _, v := range a.variantGroupItems {
+		if v.ID == itemID {
+			return a.variantGroupPrimary, a.variantGroupItems
+		}
+	}
+	return nil, nil
+}
+
 func (a *App) ensureVariantGroupLoaded(itemID string) (*core.Item, []core.Item) {
 	if a.svc == nil || itemID == "" {
 		return nil, nil
 	}
-	if a.variantGroupPrimary != nil {
-		if a.variantGroupCacheID == itemID || a.variantGroupPrimary.ID == itemID {
-			return a.variantGroupPrimary, a.variantGroupItems
-		}
-		for _, v := range a.variantGroupItems {
-			if v.ID == itemID {
-				return a.variantGroupPrimary, a.variantGroupItems
-			}
-		}
+	if primary, variants := a.cachedVariantGroup(itemID); primary != nil {
+		return primary, variants
 	}
 	if a.variantGroupPending == itemID {
 		return a.variantGroupPrimary, a.variantGroupItems
@@ -367,6 +375,59 @@ func (a *App) selectOrPreviewVariant(v core.Item) {
 			return
 		}
 	}
+}
+
+// previewPagesForItem returns the ordered pages (primary followed by variants)
+// for a multi-page preview item, or nil if the item is single-page or unloaded.
+func (a *App) previewPagesForItem(item core.Item) []core.Item {
+	if len(item.Variants) == 0 && item.VariantOf == "" {
+		return nil
+	}
+	primary, variants := a.cachedVariantGroup(item.ID)
+	if primary == nil && a.svc != nil {
+		if p, vs, err := a.svc.GetVariantGroup(item.ID); err == nil && p != nil {
+			a.variantGroupCacheID = item.ID
+			a.variantGroupPrimary = p
+			a.variantGroupItems = vs
+			primary, variants = p, vs
+		}
+	}
+	if primary == nil {
+		return nil
+	}
+	all := make([]core.Item, 0, 1+len(variants))
+	all = append(all, *primary)
+	all = append(all, variants...)
+	if len(all) <= 1 {
+		return nil
+	}
+	return all
+}
+
+// movePreviewPage switches to the previous or next page of a multi-page item
+// while preview is open, returning true when a page switch occurred.
+func (a *App) movePreviewPage(delta int) bool {
+	if !a.previewOpen || len(a.items) == 0 {
+		return false
+	}
+	item := a.currentPreviewItem()
+	pages := a.previewPagesForItem(item)
+	if len(pages) <= 1 {
+		return false
+	}
+	curIdx := 0
+	for i := range pages {
+		if pages[i].ID == item.ID {
+			curIdx = i
+			break
+		}
+	}
+	next := (curIdx + delta) % len(pages)
+	if next < 0 {
+		next += len(pages)
+	}
+	a.selectOrPreviewVariant(pages[next])
+	return true
 }
 
 func (a *App) variantItemThumb(c *ui.Context, v core.Item, size float32) {
