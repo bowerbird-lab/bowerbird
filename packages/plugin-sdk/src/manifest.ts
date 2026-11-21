@@ -55,8 +55,10 @@ export function validatePluginManifest(manifest: unknown): ManifestValidationRes
   if (m.main !== undefined && (typeof m.main !== "string" || !m.main.trim())) {
     errors.push("If specified, 'main' must be a non-empty string");
   }
-  if (m.main === undefined && native === undefined) {
-    errors.push("A plugin must declare either 'main' (JS hooks) or 'native' (host renderer)");
+  const ui = m.ui as { panels?: unknown[]; windows?: unknown[] } | undefined;
+  const hasUI = Boolean(ui && ((Array.isArray(ui.panels) && ui.panels.length > 0) || (Array.isArray(ui.windows) && ui.windows.length > 0)));
+  if (m.main === undefined && native === undefined && !hasUI) {
+    errors.push("A plugin must declare 'main' (JS hooks), 'native'/'preview.renderer' (host/webview renderer), or 'ui' (WebView panels/windows)");
   }
 
   if (m.extensions !== undefined && !isStringArray(m.extensions)) {

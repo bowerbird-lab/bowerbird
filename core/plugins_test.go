@@ -627,3 +627,104 @@ func TestAPIServer_PluginScanEndpoint(t *testing.T) {
 		t.Fatalf("expected HTTP 200, got %d", w.Result().StatusCode)
 	}
 }
+
+func TestPluginManager_InstallNativeAndWebviewPluginsWithoutIndexJS(t *testing.T) {
+	tempDir := t.TempDir()
+	pm := NewPluginManagerWithDir(tempDir)
+
+	buildZip := func(files map[string]string) []byte {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		for name, content := range files {
+			w, err := zw.Create(name)
+			if err != nil {
+				t.Fatalf("zip create %s: %v", name, err)
+			}
+			if _, err := w.Write([]byte(content)); err != nil {
+				t.Fatalf("zip write %s: %v", name, err)
+			}
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatalf("zip close: %v", err)
+		}
+		return buf.Bytes()
+	}
+
+	psdZip := buildZip(map[string]string{
+		"plugin.json": `{
+			"id": "official.psd-preview",
+			"name": "PSD Preview",
+			"version": "1.1.0",
+			"kind": "preview",
+			"native": "psd",
+			"author": "Bowerbird Team",
+			"extensions": ["psd", "psb"],
+			"preview": { "renderer": "webview", "entry": "view.html" }
+		}`,
+		"view.html": "<html><body>PSD</body></html>",
+	})
+	promptZip := buildZip(map[string]string{
+		"plugin.json": `{
+			"id": "official.prompt-metadata",
+			"name": "AI Prompt Metadata",
+			"version": "1.1.0",
+			"kind": "metadata",
+			"native": "prompt",
+			"author": "Bowerbird Team"
+		}`,
+	})
+	uiZip := buildZip(map[string]string{
+		"plugin.json": `{
+			"id": "official.ui-only",
+			"name": "UI Only",
+			"version": "1.0.0",
+			"kind": "action",
+			"author": "Bowerbird Team",
+			"ui": { "windows": [{ "id": "main", "entry": "ui/index.html" }] }
+		}`,
+		"ui/index.html": "<html><body>UI</body></html>",
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		switch r.URL.Path {
+		case "/psd.zip":
+			_, _ = w.Write(psdZip)
+		case "/prompt.zip":
+			_, _ = w.Write(promptZip)
+		case "/ui.zip":
+			_, _ = w.Write(uiZip)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	for _, tc := range []struct {
+		path string
+		id   string
+	}{
+		{"/psd.zip", "official.psd-preview"},
+		{"/prompt.zip", "official.prompt-metadata"},
+		{"/ui.zip", "official.ui-only"},
+	} {
+		installed, err := pm.InstallPluginFromURL(srv.URL + tc.path)
+		if err != nil {
+			t.Fatalf("InstallPluginFromURL(%s) failed: %v", tc.path, err)
+		}
+		if installed.ID != tc.id {
+			t.Fatalf("expected id %s, got %s", tc.id, installed.ID)
+		}
+		if installed.Main != "" {
+			t.Fatalf("expected empty Main for non-JS plugin %s, got %q", tc.id, installed.Main)
+		}
+	}
+
+	scanned, err := pm.ScanLocalPlugins()
+	if err != nil {
+		t.Fatalf("ScanLocalPlugins() failed: %v", err)
+	}
+	if len(scanned) != 3 {
+		t.Fatalf("expected 3 scanned plugins, got %d", len(scanned))
+	}
+}

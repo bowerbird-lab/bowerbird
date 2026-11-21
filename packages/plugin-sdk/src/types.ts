@@ -58,8 +58,10 @@ export interface PluginSetting {
 
 /** Fields contributed by a preview plugin. */
 export interface PreviewContribution {
-  /** Native renderer used by the host, e.g. "markdown" or "audio". */
-  renderer: NativeRenderer;
+  /** Renderer used by the host ("webview" or a native renderer id). */
+  renderer: NativeRenderer | "webview";
+  /** Entry HTML file relative to the plugin folder when renderer is "webview". */
+  entry?: string;
   /** Lowercase extensions without a leading dot. */
   extensions?: string[];
   /** MIME prefixes/types, e.g. "text/markdown" or "audio/". */
@@ -68,6 +70,8 @@ export interface PreviewContribution {
   supportsZoom?: boolean;
   /** Higher priority wins when several plugins match the same item. */
   priority?: number;
+  /** Supported platforms (e.g. "desktop", "mobile"). */
+  platforms?: ("desktop" | "mobile" | (string & {}))[];
 }
 
 /** A packaged HTML view contributed by a plugin. */
