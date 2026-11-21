@@ -147,15 +147,7 @@ func (h *appHost) newWindow(spec core.WindowSpec) *mygo.Window {
 }
 
 func (h *appHost) OpenWindow(spec core.WindowSpec) error {
-	if h.liteActive.Swap(false) {
-		debug.SetGCPercent(100)
-		if h.views != nil {
-			h.views.ApplyMemoryPrefs()
-		} else {
-			debug.SetMemoryLimit(math.MaxInt64)
-		}
-		mygo.App.Dock.Show()
-	}
+	h.exitLightweightMode()
 	h.mu.Lock()
 	if existing, ok := h.windows[spec.Name]; ok {
 		h.mu.Unlock()
@@ -208,15 +200,7 @@ func (h *appHost) CloseWindow(name string) {
 }
 
 func (h *appHost) FocusMainWindow() {
-	if h.liteActive.Swap(false) {
-		debug.SetGCPercent(100)
-		if h.views != nil {
-			h.views.ApplyMemoryPrefs()
-		} else {
-			debug.SetMemoryLimit(math.MaxInt64)
-		}
-		mygo.App.Dock.Show()
-	}
+	h.exitLightweightMode()
 	h.CancelLightweightIdle()
 	w := h.mainWindow()
 	if w == nil {
@@ -265,7 +249,7 @@ func (h *appHost) CloseMainWindow() {
 // already open.
 func (h *appHost) OpenMainWindow() {
 	h.CancelLightweightIdle()
-	h.liteActive.Store(false)
+	h.exitLightweightMode()
 	h.views.Notify(true)
 	h.mu.Lock()
 	if h.main != nil {
@@ -292,6 +276,7 @@ func (h *appHost) OpenMainWindow() {
 	h.openingMain = nil
 	close(done)
 	h.mu.Unlock()
+	mygo.App.Focus()
 }
 
 // createMainWindow builds the main window with the same options used at
@@ -342,6 +327,19 @@ func (h *appHost) CancelLightweightIdle() {
 		h.idleTimer.Stop()
 		h.idleTimer = nil
 	}
+}
+
+func (h *appHost) exitLightweightMode() {
+	if !h.liteActive.Swap(false) {
+		return
+	}
+	debug.SetGCPercent(100)
+	if h.views != nil {
+		h.views.ApplyMemoryPrefs()
+	} else {
+		debug.SetMemoryLimit(math.MaxInt64)
+	}
+	mygo.App.Dock.Show()
 }
 
 func (h *appHost) EnterLightweightMode() {
