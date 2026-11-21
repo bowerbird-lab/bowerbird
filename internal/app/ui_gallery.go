@@ -818,21 +818,21 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 
 			if len(item.Variants) > 0 {
 				backLayers := min(len(item.Variants), 3)
-				rightPad := float32(backLayers * 5)
-				topPad := float32(backLayers * 2)
-				bottomPad := float32(3)
+				rightPad := float32(backLayers*3 + 2)
+				topPad := float32(backLayers + 1)
+				bottomPad := float32(2)
 				ui.Box(c).FillWidth().Height(imgH).Children(func() {
 					for layer := backLayers; layer >= 1; layer-- {
-						shiftX := float32(layer * 4)
-						shiftY := float32(layer)
+						shiftX := float32(layer) * 2.5
+						shiftY := float32(layer) * 0.5
 						ui.Box(c).Absolute().
 							Left(shiftX).Top(topPad - shiftY).Right(rightPad - shiftX).Bottom(bottomPad + shiftY).
 							Radius(7).Background(p.surface2).Border(1, p.hairline).
-							TransformOrigin(0.18, 0.88).Rotate(float32(layer) * 3.8).
-							Shadow(0, 2, 5, 0, ui.RGBA(0, 0, 0, 0.16))
+							TransformOrigin(0.2, 0.85).Rotate(float32(layer) * 1.8).
+							Shadow(0, 1.5, 4, 0, ui.RGBA(0, 0, 0, 0.13))
 					}
 					buildThumb(ui.Box(c).Absolute().Left(0).Top(topPad).Right(rightPad).Bottom(bottomPad).
-						Radius(7).Clip().Shadow(0, 3, 8, 0, ui.RGBA(0, 0, 0, 0.22)))
+						Radius(7).Clip().Shadow(0, 2, 6, 0, ui.RGBA(0, 0, 0, 0.18)))
 				})
 			} else {
 				buildThumb(ui.Box(c).FillWidth().Height(imgH).Radius(7).Clip())

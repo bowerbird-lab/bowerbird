@@ -401,6 +401,21 @@ func (a *App) variantItemThumb(c *ui.Context, v core.Item, size float32) {
 	})
 }
 
+func (a *App) pageItemContextMenu(m *ui.Menu, primaryID string, v core.Item, isPrimary bool) {
+	if !isPrimary {
+		if m.Item(a.t("variants.setPrimary")).Chosen() {
+			a.setPrimaryVariant(primaryID, v.ID)
+		}
+		if m.Item(a.t("variants.unlink")).Chosen() {
+			a.unlinkVariant(primaryID, v.ID)
+		}
+		m.Separator()
+	}
+	if m.Item(a.t("variants.addFile")).Chosen() {
+		a.pickAndAddVariantFile(primaryID)
+	}
+}
+
 func (a *App) viewInspectorVariants(c *ui.Context, item core.Item) {
 	if len(item.Variants) == 0 && item.VariantOf == "" {
 		return
@@ -424,7 +439,7 @@ func (a *App) viewInspectorVariants(c *ui.Context, item core.Item) {
 	all = append(all, *primary)
 	all = append(all, variants...)
 
-	// Horizontal scrollable strip of all versions in the group.
+	// Horizontal scrollable strip of all pages in the group.
 	ui.ScrollHorizontal(c.Key("inspector-variants-scroll")).FillWidth().Height(92).Children(func() {
 		ui.Row(c).Gap(8).Padding(2, 0).AlignItems(ui.Start).Children(func() {
 			for idx, v := range all {
@@ -461,20 +476,12 @@ func (a *App) viewInspectorVariants(c *ui.Context, item core.Item) {
 				if tile.Clicked() {
 					a.selectOrPreviewVariant(v)
 				}
+				tile.ContextMenu(func(m *ui.Menu) {
+					a.pageItemContextMenu(m, primary.ID, v, isPrimary)
+				})
 			}
 		})
 	})
-
-	if item.ID != primary.ID {
-		ui.Row(c).FillWidth().Gap(6).Padding(4, 0).Children(func() {
-			if ui.Button(c.Key("insp-var-set-primary"), a.t("variants.setPrimary")).Grow(1).Clicked() {
-				a.setPrimaryVariant(primary.ID, item.ID)
-			}
-			if ui.Button(c.Key("insp-var-unlink"), a.t("variants.unlink")).Clicked() {
-				a.unlinkVariant(primary.ID, item.ID)
-			}
-		})
-	}
 }
 
 func (a *App) viewPreviewVariantSidebar(c *ui.Context, item core.Item, bottomPad float32) {
@@ -562,21 +569,12 @@ func (a *App) viewPreviewVariantSidebar(c *ui.Context, item core.Item, bottomPad
 						if pick.Clicked() {
 							a.selectOrPreviewVariant(v)
 						}
-
-						// Name + actions
-						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(6).Children(func() {
-							ui.Text(c, v.Name).FontSize(11).FontWeight(600).TextColor(p.text).Grow(1).Shrink(1).MinWidth(0).SingleLine()
-							if !isPrimary {
-								ui.Row(c).Gap(2).Shrink(0).Children(func() {
-									a.iconButton(c, "pvs-pri-"+v.ID, iconStar, false, a.t("variants.setPrimary"), func() {
-										a.setPrimaryVariant(primary.ID, v.ID)
-									})
-									a.iconButton(c, "pvs-un-"+v.ID, iconClose, false, a.t("variants.unlink"), func() {
-										a.unlinkVariant(primary.ID, v.ID)
-									})
-								})
-							}
+						pick.ContextMenu(func(m *ui.Menu) {
+							a.pageItemContextMenu(m, primary.ID, v, isPrimary)
 						})
+
+						// Name only
+						ui.Text(c, v.Name).FontSize(11).FontWeight(600).TextColor(p.text).FillWidth().SingleLine()
 					})
 				}
 			})

@@ -240,6 +240,8 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 			})
 		}
 
+		a.viewInspectorVariants(c, item)
+
 		// The link and the note come next: they are what the item is for, and
 		// the facts below them only describe it.
 		a.inspectorDivider(c)
@@ -316,7 +318,6 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 			a.metaRow(c, a.t("inspector.layers"), a.t("inspector.psdLayersHint"))
 		}
 
-		a.viewInspectorVariants(c, item)
 		a.viewInspectorVersions(c, item)
 
 		a.inspectorDivider(c)
