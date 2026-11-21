@@ -638,6 +638,35 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 	}
 	card.DragDataFrom(func() transfer.Data { return a.itemDragData(item) }, a.dragOptions(card, item))
 
+	var dropVariantOver bool
+	var fileDropOpts transfer.DropOptions
+	if a.nav != NavTrash {
+		fileDropOpts = transfer.DropOptions{
+			Formats:    []transfer.Format{transfer.FileList, transfer.URIList},
+			Operations: transfer.Copy | transfer.Move,
+		}
+		_, dataOver := ui.DataDragOver(card, fileDropOpts)
+		nativeOver := dataOver || card.FileDragOver()
+		if nativeOver {
+			a.dropItemID = item.ID
+			a.dropFolderID = ""
+		}
+		if dragged, over := ui.DragOver[sidebarDrag](card); over && len(dragged.ItemIDs) > 0 {
+			for _, id := range dragged.ItemIDs {
+				if id != "" && id != item.ID {
+					dropVariantOver = true
+					break
+				}
+			}
+		}
+		if nativeOver {
+			dropVariantOver = true
+		}
+		if dropVariantOver && isList {
+			card.Background(p.press)
+		}
+	}
+
 	// Resolve thumbnail or system file icon
 	path := ""
 	if item.HasThumbnail && item.ItemPath != "" {
@@ -680,6 +709,17 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 			// Name
 			ui.Text(c, item.Name).FontSize(12).TextColor(p.text).Grow(1).Shrink(1).MinWidth(0).SingleLine()
 
+			if len(item.Variants) > 0 {
+				ui.Row(c).AlignItems(ui.Center).Gap(3).Padding(2, 6).Radius(4).Background(p.accent).Children(func() {
+					ui.Icon(c, iconLayers).Size(10, 10).TextColor(p.onAccent)
+					ui.Textf(c, "%d", len(item.Variants)+1).FontSize(9.5).FontWeight(650).TextColor(p.onAccent)
+				})
+			} else if item.VariantOf != "" {
+				ui.Row(c).AlignItems(ui.Center).Gap(3).Padding(2, 6).Radius(4).Background(p.surface2).Children(func() {
+					ui.Icon(c, iconLayers).Size(10, 10).TextColor(p.muted)
+				})
+			}
+
 			// Rating
 			if item.Rating > 0 {
 				ui.Row(c).AlignItems(ui.Center).Gap(2).Children(func() {
@@ -718,49 +758,85 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 				imgH = h - 8
 				nameH = 0
 			}
-			thumbBox := ui.Box(c).FillWidth().Height(imgH).Radius(7).Clip()
-			if bmp == nil {
-				thumbBox.Background(p.surface2)
-			}
-			if selected {
-				thumbBox.Border(2, p.accent)
+			buildThumb := func(thumbBox ui.Element) {
+				if bmp == nil {
+					thumbBox.Background(p.surface2)
+				}
+
+				thumbBox.Children(func() {
+					fadeTarget := float32(0)
+					if bmp != nil || sysIconBmp != nil {
+						fadeTarget = 1
+					}
+					op := card.AnimateTo("fade-"+item.ID, fadeTarget, ui.Animation{Duration: 320 * time.Millisecond, Ease: ui.EaseOut})
+					if bmp != nil {
+						ui.Image(c, bmp).Fill().Fit(ui.Cover).Opacity(maxF(op, 0.01))
+					} else if sysIconBmp != nil {
+						ui.Column(c).Fill().Center().Children(func() {
+							iconSize := minF(imgH*0.65, 64)
+							ui.Image(c, sysIconBmp).Size(iconSize, iconSize).Fit(ui.Contain).Opacity(maxF(op, 0.01))
+						})
+					} else {
+						ui.Column(c).Fill().Center().Gap(4).Children(func() {
+							ui.Icon(c, categoryIcon(item)).Size(24, 24).TextColor(p.faint)
+							if !item.HasThumbnail && categoryOf(item) != "image" {
+								ui.Text(c, strings.ToUpper(item.Extension)).FontSize(9).FontWeight(650).TextColor(p.faint)
+							}
+						})
+					}
+					// Variant stack / child badge at top-left.
+					if len(item.Variants) > 0 {
+						ui.Row(c).Absolute().Top(6).Left(6).Padding(2, 6).Radius(4).Background(p.accent).Gap(3).AlignItems(ui.Center).Children(func() {
+							ui.Icon(c, iconLayers).Size(9, 9).TextColor(p.onAccent)
+							ui.Textf(c, "%d", len(item.Variants)+1).FontSize(9).FontWeight(700).TextColor(p.onAccent)
+						})
+					} else if item.VariantOf != "" {
+						ui.Row(c).Absolute().Top(6).Left(6).Padding(2, 5).Radius(4).Background(p.badge).Gap(2).AlignItems(ui.Center).Children(func() {
+							ui.Icon(c, iconLayers).Size(9, 9).TextColor(p.onBadge)
+						})
+					}
+					// Format / duration badge.
+					if a.prefs.ShowExt && item.Extension != "" {
+						badge := strings.ToUpper(item.Extension)
+						ui.Box(c).Absolute().Bottom(6).Right(6).Padding(2, 6).Radius(4).Background(p.badge).Children(func() {
+							ui.Text(c, badge).FontSize(9).FontWeight(650).TextColor(p.onBadge)
+						})
+					}
+					if item.Rating > 0 {
+						ui.Row(c).Absolute().Top(6).Right(6).Padding(2, 6).Radius(4).Background(p.badge).Gap(2).Children(func() {
+							ui.Icon(c, iconStarFill).Size(9, 9).TextColor(p.star)
+							ui.Textf(c, "%d", item.Rating).FontSize(9).FontWeight(650).TextColor(p.onBadge)
+						})
+					}
+					if dropVariantOver {
+						ui.Box(c).Absolute().Fill().Radius(7).Background(p.accent.Alpha(0.16)).Border(2, p.accent)
+					} else if selected {
+						ui.Box(c).Absolute().Fill().Radius(7).Border(2, p.accent)
+					}
+				})
 			}
 
-			thumbBox.Children(func() {
-				fadeTarget := float32(0)
-				if bmp != nil || sysIconBmp != nil {
-					fadeTarget = 1
-				}
-				op := card.AnimateTo("fade-"+item.ID, fadeTarget, ui.Animation{Duration: 320 * time.Millisecond, Ease: ui.EaseOut})
-				if bmp != nil {
-					ui.Image(c, bmp).Fill().Fit(ui.Cover).Opacity(maxF(op, 0.01))
-				} else if sysIconBmp != nil {
-					ui.Column(c).Fill().Center().Children(func() {
-						iconSize := minF(imgH*0.65, 64)
-						ui.Image(c, sysIconBmp).Size(iconSize, iconSize).Fit(ui.Contain).Opacity(maxF(op, 0.01))
-					})
-				} else {
-					ui.Column(c).Fill().Center().Gap(4).Children(func() {
-						ui.Icon(c, categoryIcon(item)).Size(24, 24).TextColor(p.faint)
-						if !item.HasThumbnail && categoryOf(item) != "image" {
-							ui.Text(c, strings.ToUpper(item.Extension)).FontSize(9).FontWeight(650).TextColor(p.faint)
-						}
-					})
-				}
-				// Format / duration badge.
-				if a.prefs.ShowExt && item.Extension != "" {
-					badge := strings.ToUpper(item.Extension)
-					ui.Box(c).Absolute().Bottom(6).Right(6).Padding(2, 6).Radius(4).Background(p.badge).Children(func() {
-						ui.Text(c, badge).FontSize(9).FontWeight(650).TextColor(p.onBadge)
-					})
-				}
-				if item.Rating > 0 {
-					ui.Row(c).Absolute().Top(6).Right(6).Padding(2, 6).Radius(4).Background(p.badge).Gap(2).Children(func() {
-						ui.Icon(c, iconStarFill).Size(9, 9).TextColor(p.star)
-						ui.Textf(c, "%d", item.Rating).FontSize(9).FontWeight(650).TextColor(p.onBadge)
-					})
-				}
-			})
+			if len(item.Variants) > 0 {
+				backLayers := min(len(item.Variants), 3)
+				rightPad := float32(backLayers * 5)
+				topPad := float32(backLayers * 2)
+				bottomPad := float32(3)
+				ui.Box(c).FillWidth().Height(imgH).Children(func() {
+					for layer := backLayers; layer >= 1; layer-- {
+						shiftX := float32(layer * 4)
+						shiftY := float32(layer)
+						ui.Box(c).Absolute().
+							Left(shiftX).Top(topPad - shiftY).Right(rightPad - shiftX).Bottom(bottomPad + shiftY).
+							Radius(7).Background(p.surface2).Border(1, p.hairline).
+							TransformOrigin(0.18, 0.88).Rotate(float32(layer) * 3.8).
+							Shadow(0, 2, 5, 0, ui.RGBA(0, 0, 0, 0.16))
+					}
+					buildThumb(ui.Box(c).Absolute().Left(0).Top(topPad).Right(rightPad).Bottom(bottomPad).
+						Radius(7).Clip().Shadow(0, 3, 8, 0, ui.RGBA(0, 0, 0, 0.22)))
+				})
+			} else {
+				buildThumb(ui.Box(c).FillWidth().Height(imgH).Radius(7).Clip())
+			}
 			if nameH > 0 {
 				ui.Row(c).FillWidth().Height(nameH).PaddingX(2).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 					nameBox := ui.Box(c).PaddingX(6).PaddingY(2).Radius(4).AlignItems(ui.Center).Justify(ui.Center)
@@ -802,6 +878,16 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 		}
 		a.itemContextMenu(m, item)
 	})
+	if a.nav != NavTrash {
+		if dropped, ok := ui.Drop[sidebarDrag](card); ok && len(dropped.ItemIDs) > 0 {
+			a.linkItemsAsVariants(item.ID, dropped.ItemIDs)
+		}
+		if drop, ok := ui.DropData(card, fileDropOpts); ok {
+			if files, err := drop.Data.Files(); err == nil && len(files) > 0 {
+				a.addVariantFiles(item.ID, files)
+			}
+		}
+	}
 }
 
 // sidebarDrag is the in-app payload shared by gallery cards and folder rows.
@@ -1418,6 +1504,33 @@ func (a *App) itemContextMenu(m *ui.Menu, item core.Item) {
 			ids = []string{item.ID}
 		}
 		a.regenerateThumbnails(ids)
+	}
+	m.Separator()
+	selectedIDs := a.selectedIDs()
+	if len(selectedIDs) >= 2 {
+		if m.Item(a.t("variants.groupSelected")).Chosen() {
+			a.groupSelectedAsVariants(item.ID)
+		}
+	}
+	if len(item.Variants) > 0 {
+		label := a.t("variants.expand")
+		if a.expandedVariantGroups[item.ID] {
+			label = a.t("variants.collapse")
+		}
+		if m.Item(label).Chosen() {
+			a.toggleVariantGroupExpanded(item.ID)
+		}
+	}
+	if m.Item(a.t("variants.addFile")).Chosen() {
+		a.pickAndAddVariantFile(item.ID)
+	}
+	if item.VariantOf != "" {
+		if m.Item(a.t("variants.setPrimary")).Chosen() {
+			a.setPrimaryVariant(item.VariantOf, item.ID)
+		}
+		if m.Item(a.t("variants.unlink")).Chosen() {
+			a.unlinkVariant(item.VariantOf, item.ID)
+		}
 	}
 	m.Separator()
 	if m.Item(a.t("contextMenu.addToFavorites")).Chosen() {

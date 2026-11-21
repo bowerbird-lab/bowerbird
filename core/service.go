@@ -726,6 +726,54 @@ func (s *Service) DeleteItemVersion(itemID string, versionID string) (*Item, err
 	return s.mgr.DeleteItemVersion(itemID, versionID)
 }
 
+// LinkVariants attaches one or more existing library items as variants of parentID.
+func (s *Service) LinkVariants(parentID string, variantIDs []string) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.LinkVariants(parentID, variantIDs)
+}
+
+// UnlinkVariant detaches variantID from parentID.
+func (s *Service) UnlinkVariant(parentID string, variantID string) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.UnlinkVariant(parentID, variantID)
+}
+
+// SetPrimaryVariant promotes newPrimaryID to be the primary item of the variant group.
+func (s *Service) SetPrimaryVariant(parentID string, newPrimaryID string) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.SetPrimaryVariant(parentID, newPrimaryID)
+}
+
+// GetVariantGroup returns the primary item and active variant items for itemID.
+func (s *Service) GetVariantGroup(itemID string) (*Item, []Item, error) {
+	if s.mgr == nil {
+		return nil, nil, ErrCoreNotInitialized
+	}
+	return s.mgr.GetVariantGroup(itemID)
+}
+
+// AddVariantFromFile imports any file on disk and links it as a variant of parentID.
+func (s *Service) AddVariantFromFile(parentID string, sourcePath string) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.AddVariantFromFile(parentID, sourcePath)
+}
+
+// SaveVariantFromBytes imports arbitrary bytes and links them as a variant of parentID.
+func (s *Service) SaveVariantFromBytes(parentID string, data []byte, filename string, opts ImportItemOptions) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.SaveVariantFromBytes(parentID, data, filename, opts)
+}
+
 func (s *Service) OpenExternalURL(rawURL string) error {
 	return OpenExternalURL(rawURL)
 }

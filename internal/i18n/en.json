@@ -364,7 +364,11 @@
       "dark": "Dark",
       "darkDescription": "Always use the dark theme",
       "auto": "Auto",
-      "autoDescription": "Follow the system"
+      "autoDescription": "Follow the system",
+      "variantDisplay": "Variant display",
+      "variantDisplayDescription": "Choose whether multi-version variants are stacked under the primary item or shown flat.",
+      "variantStacked": "Stacked (collapse into primary)",
+      "variantFlat": "Flat (show all versions)"
     },
     "vibrancy": {
       "title": "Material settings",
@@ -1168,5 +1172,20 @@
     "delete": "Delete historical version",
     "restored": "Restored historical version (current version backed up)",
     "deleted": "Deleted historical version"
+  },
+  "variants": {
+    "titleCount": "Variants ({{count}})",
+    "primaryBadge": "Primary",
+    "groupSelected": "Group as Variants",
+    "expand": "Expand Variants",
+    "collapse": "Collapse Variants",
+    "addFile": "Add Variant File...",
+    "setPrimary": "Set as Primary",
+    "unlink": "Unlink Variant",
+    "grouped": "Grouped selected files as variants",
+    "added": "Variant file added",
+    "primaryUpdated": "Primary variant updated",
+    "unlinked": "Variant unlinked",
+    "togglePanel": "Toggle variants panel"
   }
 }

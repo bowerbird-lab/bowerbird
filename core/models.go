@@ -92,6 +92,8 @@ type Item struct {
 	Tags          []string      `json:"tags"`
 	Folders       []string      `json:"folders"`
 	Versions      []ItemVersion `json:"versions,omitempty"`
+	Variants      []string      `json:"variants,omitempty"`
+	VariantOf     string        `json:"variantOf,omitempty"`
 	InTrash       bool          `json:"inTrash"`
 	TrashedAt     int64         `json:"trashedAt"`
 	CreatedAt     int64         `json:"createdAt"`
@@ -128,6 +130,7 @@ type ItemMetadata struct {
 	Tags           []string      `json:"tags"`
 	Folders        []string      `json:"folders"`
 	Versions       []ItemVersion `json:"versions,omitempty"`
+	Variants       []string      `json:"variants,omitempty"`
 	InTrash        bool          `json:"inTrash,omitempty"`
 	TrashedAt      int64         `json:"trashedAt,omitempty"`
 	TrashedFolders []string      `json:"trashedFolders,omitempty"`

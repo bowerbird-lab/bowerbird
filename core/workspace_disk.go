@@ -12,17 +12,19 @@ const storedItemColumns = `i.id, COALESCE(i.hex,''), i.name, i.extension, i.file
 	COALESCE(i.rating,0), COALESCE(i.prompt,''), COALESCE(i.in_trash,0),
 	COALESCE(i.trashed_at,0), COALESCE(i.dominant_color,''), COALESCE(i.palette,''),
 	COALESCE(i.meta_json,''), CASE WHEN i.in_trash=1 THEN COALESCE(NULLIF(i.trashed_folders,''),'[]')
-	ELSE (SELECT json_group_array(folder_id) FROM item_folders WHERE item_id=i.id) END`
+	ELSE (SELECT json_group_array(folder_id) FROM item_folders WHERE item_id=i.id) END,
+	COALESCE(i.variants_json,''), COALESCE(i.variant_of,'')`
 
 func scanStoredItem(row interface{ Scan(...any) error }) (Item, error) {
 	item := Item{Tags: []string{}, Palette: []string{}, Folders: []string{}}
-	var tags, palette, metadata, folders string
+	var tags, palette, metadata, folders, variantsJSON string
 	var thumbnail, trash int
 	err := row.Scan(
 		&item.ID, &item.Hex, &item.Name, &item.Extension, &item.Filename, &item.Size,
 		&item.MimeType, &item.Width, &item.Height, &thumbnail, &tags, &item.CreatedAt,
 		&item.ImportedAt, &item.UpdatedAt, &item.Note, &item.URL, &item.Rating,
 		&item.Prompt, &trash, &item.TrashedAt, &item.DominantColor, &palette, &metadata, &folders,
+		&variantsJSON, &item.VariantOf,
 	)
 	if err != nil {
 		return item, err
@@ -42,6 +44,9 @@ func scanStoredItem(row interface{ Scan(...any) error }) (Item, error) {
 		_ = json.Unmarshal([]byte(metadata), &item.Meta)
 	}
 	_ = json.Unmarshal([]byte(folders), &item.Folders)
+	if variantsJSON != "" {
+		_ = json.Unmarshal([]byte(variantsJSON), &item.Variants)
+	}
 	return item, nil
 }
 
@@ -97,7 +102,7 @@ func (m *LibraryManager) diskQueryContext(ctx context.Context, spec QuerySpec, s
 	simple := simpleWorkspaceQuery(spec)
 	columns := storedItemColumns
 	if compact && simple {
-		columns = "i.id, i.name, i.extension, i.size, i.mime_type, i.width, i.height, i.has_thumbnail, COALESCE(i.rating,0)"
+		columns = "i.id, i.name, i.extension, i.size, i.mime_type, i.width, i.height, i.has_thumbnail, COALESCE(i.rating,0), COALESCE(i.variants_json,''), COALESCE(i.variant_of,'')"
 	}
 	rows, err := m.db.QueryContext(ctx, "SELECT "+columns+" FROM items i WHERE "+where+" ORDER BY "+diskItemOrder(sortOrder, trash), args...)
 	if err != nil {
@@ -108,9 +113,13 @@ func (m *LibraryManager) diskQueryContext(ctx context.Context, spec QuerySpec, s
 		var item Item
 		if compact && simple {
 			var thumbnail int
-			err = rows.Scan(&item.ID, &item.Name, &item.Extension, &item.Size, &item.MimeType, &item.Width, &item.Height, &thumbnail, &item.Rating)
+			var variantsJSON string
+			err = rows.Scan(&item.ID, &item.Name, &item.Extension, &item.Size, &item.MimeType, &item.Width, &item.Height, &thumbnail, &item.Rating, &variantsJSON, &item.VariantOf)
 			item.HasThumbnail = thumbnail != 0
 			item.InTrash = trash
+			if variantsJSON != "" {
+				_ = json.Unmarshal([]byte(variantsJSON), &item.Variants)
+			}
 		} else {
 			item, err = scanStoredItem(rows)
 		}
@@ -135,6 +144,7 @@ func compactWorkspaceItem(item Item) Item {
 		ID: item.ID, Name: item.Name, Extension: item.Extension, MimeType: item.MimeType,
 		Width: item.Width, Height: item.Height, Size: item.Size, Rating: item.Rating,
 		HasThumbnail: item.HasThumbnail, InTrash: item.InTrash,
+		Variants: item.Variants, VariantOf: item.VariantOf,
 	}
 }
 
@@ -190,7 +200,8 @@ func (m *LibraryManager) workspaceItems(ids []string, cards bool) ([]Item, error
 			i.mime_type, i.width, i.height, i.has_thumbnail, '', i.created_at,
 			i.imported_at, COALESCE(i.updated_at,0), '', '', COALESCE(i.rating,0),
 			'', COALESCE(i.in_trash,0), COALESCE(i.trashed_at,0),
-			COALESCE(i.dominant_color,''), '', '', '[]'`
+			COALESCE(i.dominant_color,''), '', '', '[]',
+			COALESCE(i.variants_json,''), COALESCE(i.variant_of,'')`
 	}
 	rows, err := m.db.Query("SELECT "+columns+" FROM items i WHERE i.id IN ("+strings.Join(placeholders, ",")+")", args...)
 	if err != nil {

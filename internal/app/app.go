@@ -72,10 +72,11 @@ type Prefs struct {
 	SidebarOpen     bool     `json:"sidebarOpen"`
 	SidebarWidth    float64  `json:"sidebarWidth"`
 	InspectorWidth  float64  `json:"inspectorWidth"`
-	ShowNames       bool     `json:"showNames"`
-	ShowExt         bool     `json:"showExt"`
-	LayoutMode      string   `json:"layoutMode"`
-	SortOrder       string   `json:"sortOrder"`
+	ShowNames          bool     `json:"showNames"`
+	ShowExt            bool     `json:"showExt"`
+	LayoutMode         string   `json:"layoutMode"`
+	VariantDisplayMode string   `json:"variantDisplayMode"`
+	SortOrder          string   `json:"sortOrder"`
 	RowHeight       float64  `json:"rowHeight"`
 	IncludeSubs     bool     `json:"includeSubfolders"`
 	PinnedFilters   []string `json:"pinnedFilters"`
@@ -94,10 +95,11 @@ func defaultPrefs() Prefs {
 		SidebarOpen:     true,
 		SidebarWidth:    float64(defaultSidebarWidth),
 		InspectorWidth:  float64(defaultInspectorWidth),
-		ShowNames:       true,
-		ShowExt:         true,
-		LayoutMode:      "justified",
-		SortOrder:       "desc",
+		ShowNames:          true,
+		ShowExt:            true,
+		LayoutMode:         "justified",
+		VariantDisplayMode: "stacked",
+		SortOrder:          "desc",
 		RowHeight:       190,
 		PinnedFilters:   append([]string(nil), defaultPinnedFilterCriteria...),
 		RecordImportURL: true,
@@ -168,6 +170,13 @@ type App struct {
 	itemPagePending     map[int]bool
 	itemPageActive      int
 	stackCards          map[string]core.Item
+	expandedVariantGroups map[string]bool
+	variantGroupCacheID   string
+	variantGroupPrimary   *core.Item
+	variantGroupItems     []core.Item
+	variantGroupPending      string
+	previewVariantID         string
+	previewVariantsCollapsed bool
 	stackCardsPending   bool
 	total               int
 	totalSize           int64
@@ -418,6 +427,7 @@ type App struct {
 	// Drop target. The host reports where a native drop landed; the sidebar
 	// sets this while the pointer is over a folder row.
 	dropFolderID string
+	dropItemID   string
 
 	saveMu sync.Mutex
 	start  time.Time
@@ -813,6 +823,7 @@ func (a *App) refreshAll() {
 		context: loadContext,
 		query:   a.queryString(), scope: a.folderScope(), sort: a.sortOrder,
 		unrated: a.filters.Unrated, trash: a.nav == NavTrash, recent: a.nav == NavRecent, activeID: a.activeItemID,
+		expanded: a.snapshotExpandedVariants(), variantMode: a.prefs.VariantDisplayMode,
 	}
 	go func() {
 		lib, _ := a.svc.GetActiveLibrary()
@@ -1419,7 +1430,13 @@ func (a *App) HandleDrop(paths []string) {
 		return
 	}
 	urls, files := splitDroppedPaths(paths)
+	targetItem := a.dropItemID
+	a.dropItemID = ""
 	folder := a.takeDropFolder()
+	if targetItem != "" && len(files) > 0 && a.nav != NavTrash {
+		a.addVariantFiles(targetItem, files)
+		return
+	}
 	if len(urls) > 0 {
 		a.handleURLDropsToFolder(urls, "", folder)
 	}

@@ -220,6 +220,7 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 		var dominantColor string
 		var palette []string
 		var imgMeta *ImageMeta
+		var variants []string
 		var trashedAt int64
 		var inTrash bool
 
@@ -252,6 +253,7 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 					dominantColor = meta.DominantColor
 					palette = meta.Palette
 					imgMeta = meta.Meta
+					variants = meta.Variants
 				}
 			}
 		}
@@ -322,6 +324,7 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 			DominantColor: dominantColor,
 			Palette:       palette,
 			Meta:          imgMeta,
+			Variants:      variants,
 			Tags:          []string{},
 			Folders:       []string{},
 			InTrash:       inTrash,
@@ -360,8 +363,8 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin rescan transaction: %w", err)
 	}
-	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO items (id, hex, name, extension, filename, size, mime_type, width, height, has_thumbnail, dominant_color, palette, meta_json, tags, in_trash, trashed_at, created_at, imported_at, updated_at)
-	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO items (id, hex, name, extension, filename, size, mime_type, width, height, has_thumbnail, dominant_color, palette, meta_json, tags, in_trash, trashed_at, created_at, imported_at, updated_at, variants_json)
+	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, fmt.Errorf("failed to prepare rescan insert: %w", err)
@@ -373,9 +376,15 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 		if d.item.InTrash {
 			inTrashInt = 1
 		}
+		variantsJSON := ""
+		if len(d.item.Variants) > 0 {
+			if vb, vErr := json.Marshal(d.item.Variants); vErr == nil {
+				variantsJSON = string(vb)
+			}
+		}
 		res, execErr := stmt.Exec(
 			d.item.ID, d.item.Hex, d.item.Name, d.item.Extension, d.item.Filename, d.item.Size, d.item.MimeType,
-			d.item.Width, d.item.Height, d.hasThumb, d.item.DominantColor, d.paletteStr, d.metaJSON, "", inTrashInt, d.item.TrashedAt, d.item.CreatedAt, d.item.ImportedAt, d.item.UpdatedAt,
+			d.item.Width, d.item.Height, d.hasThumb, d.item.DominantColor, d.paletteStr, d.metaJSON, "", inTrashInt, d.item.TrashedAt, d.item.CreatedAt, d.item.ImportedAt, d.item.UpdatedAt, variantsJSON,
 		)
 		if execErr != nil {
 			continue
@@ -385,6 +394,14 @@ func (m *LibraryManager) RescanLibrary() (int, error) {
 		}
 	}
 	_ = stmt.Close()
+
+	for _, d := range discovered {
+		for _, vid := range d.item.Variants {
+			if vid != "" && vid != d.item.ID {
+				_, _ = tx.Exec("UPDATE items SET variant_of = ? WHERE id = ?", d.item.ID, vid)
+			}
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("failed to commit rescan transaction: %w", err)

@@ -33,7 +33,7 @@ func (a *App) viewMain(c *ui.Context) {
 	root.Children(func() {
 		if a.isImmersiveFullscreen() && len(a.items) > 0 && a.previewIndex >= 0 && a.previewIndex < len(a.items) {
 			ui.Box(c).Fill().Background(ui.RGB(0, 0, 0)).Children(func() {
-				a.viewPreviewBody(c, a.workspaceItem(a.previewIndex))
+				a.viewPreviewBody(c, a.currentPreviewItem())
 			})
 			return
 		}
@@ -48,7 +48,7 @@ func (a *App) viewMain(c *ui.Context) {
 					ui.Box(c).FillWidth().Height(1).Background(p.hairline)
 					a.mainBodySurface(c, 0, func() {
 						if len(a.items) > 0 && a.previewIndex >= 0 && a.previewIndex < len(a.items) {
-							a.viewPreviewBody(c, a.workspaceItem(a.previewIndex))
+							a.viewPreviewBody(c, a.currentPreviewItem())
 						}
 					})
 				} else {
@@ -731,6 +731,7 @@ func (a *App) closePreview() {
 	a.psdInfo = nil
 	a.closeVideo()
 	a.previewOpen = false
+	a.previewVariantID = ""
 	a.previewText = ""
 	a.previewError = ""
 	if a.player != nil {
@@ -744,6 +745,7 @@ func (a *App) openPreview(id string, mode string) {
 		mode = "inline"
 	}
 	a.activeItemID = id
+	a.previewVariantID = ""
 	a.previewIndex = a.indexFor(id)
 	a.previewOpen = true
 	a.previewMode = mode
@@ -772,6 +774,7 @@ func (a *App) movePreview(delta int) {
 	if n >= len(a.items) {
 		n = 0
 	}
+	a.previewVariantID = ""
 	a.previewIndex = n
 	a.activeItemID = a.items[n].ID
 	a.activeItem = &a.items[n]

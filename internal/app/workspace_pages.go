@@ -11,14 +11,16 @@ const workspacePageSize = 96
 const workspacePageLimit = 8
 
 type workspaceRequest struct {
-	context  context.Context
-	query    string
-	sort     string
-	scope    []string
-	unrated  bool
-	trash    bool
-	recent   bool
-	activeID string
+	context     context.Context
+	query       string
+	sort        string
+	scope       []string
+	unrated     bool
+	trash       bool
+	recent      bool
+	activeID    string
+	expanded    map[string]bool
+	variantMode string
 }
 
 func workspaceSummary(item core.Item) core.Item {
@@ -26,6 +28,7 @@ func workspaceSummary(item core.Item) core.Item {
 		ID: item.ID, Name: item.Name, Extension: item.Extension, MimeType: item.MimeType,
 		Width: item.Width, Height: item.Height, Size: item.Size, Rating: item.Rating,
 		HasThumbnail: item.HasThumbnail, InTrash: item.InTrash,
+		Variants: item.Variants, VariantOf: item.VariantOf,
 	}
 }
 
@@ -48,6 +51,7 @@ func (a *App) refreshWorkspace() {
 	request := workspaceRequest{
 		context: loadContext, query: a.queryString(), scope: a.folderScope(), sort: a.sortOrder,
 		unrated: a.filters.Unrated, trash: a.nav == NavTrash, activeID: a.activeItemID,
+		expanded: a.snapshotExpandedVariants(), variantMode: a.prefs.VariantDisplayMode,
 	}
 	index := a.folderIndex()
 	nav, folderID := a.nav, a.folderID
@@ -144,9 +148,16 @@ func (a *App) fetchWorkspace(request workspaceRequest) ([]core.Item, int, int64,
 	if err != nil || page == nil {
 		return nil, 0, 0, nil, err
 	}
-	ids := make([]string, min(workspacePageSize, len(page.Items)))
+	itemsToGroup := page.Items
+	total := page.Total
+	totalSize := page.TotalSize
+	if !request.trash {
+		itemsToGroup, totalSize = applyVariantGrouping(itemsToGroup, request.expanded, request.variantMode)
+		total = len(itemsToGroup)
+	}
+	ids := make([]string, min(workspacePageSize, len(itemsToGroup)))
 	for index := range ids {
-		ids[index] = page.Items[index].ID
+		ids[index] = itemsToGroup[index].ID
 	}
 	items, err := a.svc.GetWorkspaceCards(ids)
 	if err != nil {
@@ -158,14 +169,64 @@ func (a *App) fetchWorkspace(request workspaceRequest) ([]core.Item, int, int64,
 	}
 	for index := range ids {
 		if item, ok := byID[ids[index]]; ok {
-			page.Items[index] = item
+			itemsToGroup[index] = item
 		}
 	}
 	var active *core.Item
 	if request.activeID != "" {
 		active, _ = a.svc.GetItem(request.activeID)
 	}
-	return page.Items, page.Total, page.TotalSize, active, nil
+	return itemsToGroup, total, totalSize, active, nil
+}
+
+func (a *App) snapshotExpandedVariants() map[string]bool {
+	if len(a.expandedVariantGroups) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(a.expandedVariantGroups))
+	for k, v := range a.expandedVariantGroups {
+		if v {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+func applyVariantGrouping(items []core.Item, expanded map[string]bool, variantMode string) ([]core.Item, int64) {
+	if len(items) == 0 {
+		return items, 0
+	}
+	if variantMode == "flat" {
+		var totalSize int64
+		for _, it := range items {
+			totalSize += it.Size
+		}
+		return items, totalSize
+	}
+	present := make(map[string]core.Item, len(items))
+	for _, it := range items {
+		present[it.ID] = it
+	}
+	out := make([]core.Item, 0, len(items))
+	var totalSize int64
+	for _, it := range items {
+		if it.VariantOf != "" {
+			if _, hasParent := present[it.VariantOf]; hasParent {
+				continue
+			}
+		}
+		out = append(out, it)
+		totalSize += it.Size
+		if expanded[it.ID] && len(it.Variants) > 0 {
+			for _, vid := range it.Variants {
+				if vIt, ok := present[vid]; ok {
+					out = append(out, vIt)
+					totalSize += vIt.Size
+				}
+			}
+		}
+	}
+	return out, totalSize
 }
 
 func (a *App) workspaceItem(index int) core.Item {

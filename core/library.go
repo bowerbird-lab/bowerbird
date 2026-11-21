@@ -651,7 +651,7 @@ func (m *LibraryManager) ensureCacheLoaded() error {
 		fRows.Close()
 	}
 
-	rows, err := db.Query("SELECT id, COALESCE(hex, ''), name, extension, filename, size, mime_type, width, height, has_thumbnail, tags, created_at, imported_at, COALESCE(updated_at, 0), COALESCE(note, ''), COALESCE(url, ''), COALESCE(rating, 0), COALESCE(prompt, ''), COALESCE(in_trash, 0), COALESCE(trashed_at, 0), COALESCE(trashed_folders, ''), COALESCE(dominant_color, ''), COALESCE(palette, ''), COALESCE(meta_json, '') FROM items ORDER BY imported_at DESC")
+	rows, err := db.Query("SELECT id, COALESCE(hex, ''), name, extension, filename, size, mime_type, width, height, has_thumbnail, tags, created_at, imported_at, COALESCE(updated_at, 0), COALESCE(note, ''), COALESCE(url, ''), COALESCE(rating, 0), COALESCE(prompt, ''), COALESCE(in_trash, 0), COALESCE(trashed_at, 0), COALESCE(trashed_folders, ''), COALESCE(dominant_color, ''), COALESCE(palette, ''), COALESCE(meta_json, ''), COALESCE(variants_json, ''), COALESCE(variant_of, '') FROM items ORDER BY imported_at DESC")
 	if err != nil {
 		RecordLog("error", "core", "Failed to load item cache", err.Error(), time.Since(start).Milliseconds())
 		return fmt.Errorf("failed to query items: %w", err)
@@ -672,6 +672,7 @@ func (m *LibraryManager) ensureCacheLoaded() error {
 		var trashedFoldersStr string
 		var paletteStr string
 		var metaJSONStr string
+		var variantsJSONStr string
 		if err := rows.Scan(
 			&item.ID,
 			&item.Hex,
@@ -697,8 +698,13 @@ func (m *LibraryManager) ensureCacheLoaded() error {
 			&item.DominantColor,
 			&paletteStr,
 			&metaJSONStr,
+			&variantsJSONStr,
+			&item.VariantOf,
 		); err != nil {
 			continue
+		}
+		if variantsJSONStr != "" {
+			_ = json.Unmarshal([]byte(variantsJSONStr), &item.Variants)
 		}
 		if item.UpdatedAt <= 0 {
 			item.UpdatedAt = item.ImportedAt
@@ -975,8 +981,11 @@ func (m *LibraryManager) initSchema(db *sql.DB) error {
 	_, _ = db.Exec("ALTER TABLE items ADD COLUMN rating INTEGER DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE items ADD COLUMN prompt TEXT DEFAULT ''")
 	_, _ = db.Exec("ALTER TABLE items ADD COLUMN updated_at INTEGER DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE items ADD COLUMN variants_json TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE items ADD COLUMN variant_of TEXT DEFAULT ''")
 	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_items_in_trash ON items(in_trash)")
 	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_items_dominant_color ON items(dominant_color)")
+	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_items_variant_of ON items(variant_of)")
 	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS tags (
 		name TEXT PRIMARY KEY,
 		created_at INTEGER NOT NULL,
@@ -1074,7 +1083,7 @@ func (m *LibraryManager) GetItem(id string) (*Item, error) {
 	}
 	m.cacheMu.RUnlock()
 
-	row := db.QueryRow("SELECT id, COALESCE(hex, ''), name, extension, filename, size, mime_type, width, height, has_thumbnail, tags, created_at, imported_at, COALESCE(updated_at, 0), COALESCE(note, ''), COALESCE(url, ''), COALESCE(rating, 0), COALESCE(prompt, ''), COALESCE(in_trash, 0), COALESCE(trashed_at, 0), COALESCE(dominant_color, ''), COALESCE(palette, ''), COALESCE(meta_json, '') FROM items WHERE id = ?", id)
+	row := db.QueryRow("SELECT id, COALESCE(hex, ''), name, extension, filename, size, mime_type, width, height, has_thumbnail, tags, created_at, imported_at, COALESCE(updated_at, 0), COALESCE(note, ''), COALESCE(url, ''), COALESCE(rating, 0), COALESCE(prompt, ''), COALESCE(in_trash, 0), COALESCE(trashed_at, 0), COALESCE(dominant_color, ''), COALESCE(palette, ''), COALESCE(meta_json, ''), COALESCE(variants_json, ''), COALESCE(variant_of, '') FROM items WHERE id = ?", id)
 	var item Item
 	var tagsStr string
 	var hasThumbInt int
@@ -1082,6 +1091,7 @@ func (m *LibraryManager) GetItem(id string) (*Item, error) {
 	var trashedAtInt int64
 	var paletteStr string
 	var metaJSONStr string
+	var variantsJSONStr string
 	if err := row.Scan(
 		&item.ID,
 		&item.Hex,
@@ -1106,8 +1116,13 @@ func (m *LibraryManager) GetItem(id string) (*Item, error) {
 		&item.DominantColor,
 		&paletteStr,
 		&metaJSONStr,
+		&variantsJSONStr,
+		&item.VariantOf,
 	); err != nil {
 		return nil, err
+	}
+	if variantsJSONStr != "" {
+		_ = json.Unmarshal([]byte(variantsJSONStr), &item.Variants)
 	}
 	if item.UpdatedAt <= 0 {
 		item.UpdatedAt = item.ImportedAt
@@ -3019,6 +3034,8 @@ func (m *LibraryManager) DeleteItem(id string) error {
 	if active == nil || db == nil {
 		return errors.New("no active library")
 	}
+
+	m.cleanupItemVariantLinks(id)
 
 	itemDir := filepath.Join(active.Path, "items", id)
 	_ = os.RemoveAll(itemDir)

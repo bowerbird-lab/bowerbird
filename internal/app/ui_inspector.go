@@ -316,6 +316,7 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 			a.metaRow(c, a.t("inspector.layers"), a.t("inspector.psdLayersHint"))
 		}
 
+		a.viewInspectorVariants(c, item)
 		a.viewInspectorVersions(c, item)
 
 		a.inspectorDivider(c)
@@ -605,6 +606,15 @@ func (a *App) viewMultiInspector(c *ui.Context) {
 		})
 		a.inspectorFolders(c, items, sharedFolders(items), a.t("multiInspector.folders"))
 		a.inspectorDivider(c)
+		if len(items) >= 2 && a.nav != NavTrash {
+			primaryID := items[0].ID
+			if a.activeItem != nil && a.selected[a.activeItem.ID] {
+				primaryID = a.activeItem.ID
+			}
+			if ui.Button(c.Key("multi-group-variants"), a.t("variants.groupSelected")).FillWidth().Clicked() {
+				a.groupSelectedAsVariants(primaryID)
+			}
+		}
 		ui.Row(c).Gap(8).Children(func() {
 			if ui.Button(c, a.deleteActionLabel()).Clicked() {
 				a.deleteSelection()

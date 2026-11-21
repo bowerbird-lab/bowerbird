@@ -436,6 +436,22 @@ func (a *App) settingsAppearance(c *ui.Context) {
 				a.savePrefs()
 			}
 		})
+		a.settingsRowInfo(c, a.t("settings.appearance.variantDisplay"), a.t("settings.appearance.variantDisplayDescription"), func() {
+			current := a.prefs.VariantDisplayMode
+			if current == "" {
+				current = "stacked"
+			}
+			variantOptions := []SelectOption{
+				{Value: "stacked", Label: a.t("settings.appearance.variantStacked")},
+				{Value: "flat", Label: a.t("settings.appearance.variantFlat")},
+			}
+			mode, changed := a.dropdown(c, "variant-display-mode", current, variantOptions)
+			if changed && mode != current {
+				a.prefs.VariantDisplayMode = mode
+				a.savePrefs()
+				a.refreshAll()
+			}
+		})
 	})
 }
 

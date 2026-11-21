@@ -103,6 +103,12 @@ func (a *App) pluginWindowAPI(id string, selected *core.Item) http.Handler {
 				return
 			}
 			item, err = a.svc.ReplaceItemWithBackup(selected.ID, data, core.ReplaceItemOptions{Prompt: input.Prompt})
+		case "variant":
+			if selected == nil {
+				http.Error(w, "no selected asset", 404)
+				return
+			}
+			item, err = a.svc.SaveVariantFromBytes(selected.ID, data, filepath.Base(input.Filename), core.ImportItemOptions{Prompt: input.Prompt})
 		default:
 			http.Error(w, "invalid save mode", 400)
 			return

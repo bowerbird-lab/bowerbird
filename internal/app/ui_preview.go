@@ -33,6 +33,13 @@ func previewZoomFromTrack(track float64) float32 {
 	return float32(float64(previewMinZoom) * math.Pow(float64(previewMaxZoom/previewMinZoom), track/100))
 }
 
+func (a *App) currentPreviewItem() core.Item {
+	if a.previewVariantID != "" && a.activeItem != nil && a.activeItem.ID == a.previewVariantID {
+		return *a.activeItem
+	}
+	return a.workspaceItem(a.previewIndex)
+}
+
 // viewPreview is the full-content Quick Look layer. Images render as GPU
 // textures with pinch/scroll zoom and pointer panning; Markdown uses the native
 // rich text view; audio uses the Go playback kernel; unsupported formats show
@@ -46,7 +53,7 @@ func (a *App) viewPreview(c *ui.Context) {
 	if a.previewIndex < 0 || a.previewIndex >= len(a.items) {
 		a.previewIndex = 0
 	}
-	item := a.workspaceItem(a.previewIndex)
+	item := a.currentPreviewItem()
 	a.activeItem = &item
 	ui.Column(c).Fill().Background(ui.RGBA(0, 0, 0, 0.0)).Children(func() {
 		a.viewPreviewToolbar(c)
@@ -62,9 +69,18 @@ func (a *App) viewPreviewToolbar(c *ui.Context) {
 	if a.previewIndex < 0 || a.previewIndex >= len(a.items) {
 		return
 	}
-	item := a.workspaceItem(a.previewIndex)
+	item := a.currentPreviewItem()
 
 	full := a.previewMode == "full"
+	hasVariants := len(item.Variants) > 0 || item.VariantOf != ""
+	variantsToggle := func() {
+		if !hasVariants {
+			return
+		}
+		a.iconButton(c, "preview-variants-toggle", iconLayers, !a.previewVariantsCollapsed, a.t("variants.togglePanel"), func() {
+			a.previewVariantsCollapsed = !a.previewVariantsCollapsed
+		})
+	}
 	closeButton := func() {
 		a.iconButton(c, "preview-close", iconClose, false, a.t("common.close"), a.closePreview)
 	}
@@ -81,6 +97,7 @@ func (a *App) viewPreviewToolbar(c *ui.Context) {
 	}, func() {
 		if full {
 			ui.Box(c).Grow(1)
+			variantsToggle()
 			closeButton()
 			return
 		}
@@ -108,6 +125,7 @@ func (a *App) viewPreviewToolbar(c *ui.Context) {
 			_ = a.svc.OpenWithDefaultApp(item.ID)
 		})
 		ui.Box(c).Width(1).Height(18).Background(p.hairline)
+		variantsToggle()
 		// Closing is the last action on the row, so it never moves when the
 		// zoom and navigation controls change width.
 		closeButton()
@@ -116,8 +134,11 @@ func (a *App) viewPreviewToolbar(c *ui.Context) {
 
 func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 	p := a.palette(c)
-	ui.Column(c).Grow(1).Shrink(1).FillWidth().Children(func() {
-		ext := strings.ToLower(item.Extension)
+	hasVariants := len(item.Variants) > 0 || item.VariantOf != ""
+	hasFilmstrip := len(a.items) > 1 && !a.isImmersiveFullscreen()
+	renderMain := func() {
+		ui.Column(c).Fill().Children(func() {
+			ext := strings.ToLower(item.Extension)
 		switch {
 		case ext == "psd" || ext == "psb":
 			if a.nativeFeature("official.psd-preview") {
@@ -213,6 +234,17 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 				}
 				a.recordFilmstripLoad(c, ready, waiting, failed, missing)
 			})
+		}
+	})
+	}
+	ui.Box(c).Grow(1).Shrink(1).FillWidth().Clip().Children(func() {
+		renderMain()
+		if hasVariants {
+			bottomPad := float32(12)
+			if hasFilmstrip {
+				bottomPad = 76
+			}
+			a.viewPreviewVariantSidebar(c, item, bottomPad)
 		}
 	})
 }
@@ -620,6 +652,9 @@ func (a *App) loadPreviewContent() {
 		return
 	}
 	item := a.items[a.previewIndex]
+	if a.previewVariantID != "" && a.activeItem != nil && a.activeItem.ID == a.previewVariantID {
+		item = *a.activeItem
+	}
 	trace := &previewLoadTrace{
 		sequence: a.previewSeq, itemID: item.ID, path: item.FilePath,
 		index: a.previewIndex, mode: a.previewMode, started: time.Now(),
