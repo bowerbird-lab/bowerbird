@@ -68,6 +68,9 @@ func (a *App) canGenerateThumbnail(item core.Item) bool {
 	if ext == "hsj" && a.nativeFeature("official.hsj-preview") {
 		return true
 	}
+	if ext == "ipv" && a.nativeFeature("official.ipv-preview") {
+		return true
+	}
 	if categoryOf(item) == "video" && a.nativeFeature("builtin.video") {
 		return true
 	}
@@ -304,6 +307,22 @@ func (a *App) generateThumbnail(item core.Item, force bool) (*core.Item, error) 
 			updated, saveErr := a.svc.SaveItemThumbnailImage(item.ID, img, width, height)
 			if saveErr == nil {
 				a.logThumbnailSuccess(item, "hsj", start)
+				return updated, nil
+			}
+			err = saveErr
+		}
+		if err != nil && (a.pluginHost == nil || !a.pluginHost.CanGenerateThumbnail(item.Extension, item.MimeType)) {
+			return nil, err
+		}
+	}
+
+	// IPV: extract embedded composite PNG from ibisPaint project.
+	if ext == "ipv" && a.nativeFeature("official.ipv-preview") {
+		img, width, height, err := core.ReadIPV(item.FilePath)
+		if err == nil && img != nil {
+			updated, saveErr := a.svc.SaveItemThumbnailImage(item.ID, img, width, height)
+			if saveErr == nil {
+				a.logThumbnailSuccess(item, "ipv", start)
 				return updated, nil
 			}
 			err = saveErr

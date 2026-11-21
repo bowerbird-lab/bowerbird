@@ -131,6 +131,12 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 			} else {
 				a.previewDocument(c, item)
 			}
+		case ext == "ipv":
+			if a.nativeFeature("official.ipv-preview") {
+				a.previewPSD(c, item)
+			} else {
+				a.previewDocument(c, item)
+			}
 		case categoryOf(item) == "image":
 			a.previewImage(c, item)
 		case categoryOf(item) == "audio":
@@ -708,6 +714,26 @@ func (a *App) loadPreviewContent() {
 		seq := a.previewSeq
 		go func() {
 			img, _, _, err := core.ReadHSJ(path)
+			a.post(func() {
+				if seq != a.previewSeq {
+					return
+				}
+				if err != nil {
+					a.previewError = err.Error()
+					return
+				}
+				if img != nil {
+					a.previewBitmap = ui.NewBitmap(img)
+				}
+			})
+		}()
+	} else if ext == "ipv" {
+		a.previewBitmap = nil
+		path := item.FilePath
+		a.previewSeq++
+		seq := a.previewSeq
+		go func() {
+			img, _, _, err := core.ReadIPV(path)
 			a.post(func() {
 				if seq != a.previewSeq {
 					return
