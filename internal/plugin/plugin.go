@@ -85,10 +85,12 @@ type PluginInspectorAction struct {
 }
 
 type PluginUIEntry struct {
-	ID       string `json:"id"`
-	Title    string `json:"title,omitempty"`
-	Location string `json:"location,omitempty"`
-	Entry    string `json:"entry"`
+	ID                 string `json:"id"`
+	Title              string `json:"title,omitempty"`
+	Location           string `json:"location,omitempty"`
+	Entry              string `json:"entry,omitempty"`
+	URL                string `json:"url,omitempty"`
+	InterceptDownloads bool   `json:"interceptDownloads,omitempty"`
 }
 
 // Permissions declares the capabilities a plugin may use.
@@ -395,13 +397,27 @@ func validateManifest(m *Manifest) error {
 	if m.Main != "" && (strings.Contains(m.Main, "..") || filepath.IsAbs(m.Main)) {
 		return errors.New("plugin main must stay inside its directory")
 	}
-	for _, entries := range [][]PluginUIEntry{m.UI.Panels, m.UI.Windows} {
+	for idx, entries := range [][]PluginUIEntry{m.UI.Panels, m.UI.Windows} {
+		isWindow := idx == 1
 		seen := map[string]bool{}
 		for _, entry := range entries {
 			if entry.ID == "" || strings.ContainsAny(entry.ID, "/\\") || seen[entry.ID] {
 				return fmt.Errorf("invalid or duplicate plugin UI id %q", entry.ID)
 			}
 			seen[entry.ID] = true
+			if entry.URL != "" {
+				if !isWindow {
+					return fmt.Errorf("plugin UI panel %q cannot use an external url", entry.ID)
+				}
+				if entry.Entry != "" {
+					return fmt.Errorf("plugin UI window %q cannot specify both entry and url", entry.ID)
+				}
+				parsed, err := url.Parse(entry.URL)
+				if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
+					return fmt.Errorf("plugin UI window url must be a valid https URL: %q", entry.URL)
+				}
+				continue
+			}
 			clean := filepath.ToSlash(filepath.Clean(entry.Entry))
 			if entry.Entry == "" || filepath.IsAbs(entry.Entry) || strings.Contains(entry.Entry, "\\") || clean == ".." || strings.HasPrefix(clean, "../") {
 				return fmt.Errorf("plugin UI entry must stay inside its directory: %q", entry.Entry)

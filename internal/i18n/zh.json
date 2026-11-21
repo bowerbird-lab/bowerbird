@@ -564,6 +564,8 @@
       "allowAssetWrite": "允许新建和替换素材",
       "refresh": "刷新插件",
       "openPluginWindow": "打开插件窗口",
+      "downloadSaved": "已保存到资源库：{{name}}",
+      "downloadFailed": "下载导入失败：{{error}}",
       "showSecret": "显示密钥",
       "hideSecret": "隐藏密钥",
       "alwaysEnabled": "内置 · 常驻开启",

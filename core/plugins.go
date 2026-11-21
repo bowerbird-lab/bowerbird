@@ -32,8 +32,10 @@ type PluginPreviewManifest struct {
 
 // PluginUIEntryManifest describes an HTML panel or window entry.
 type PluginUIEntryManifest struct {
-	ID    string `json:"id"`
-	Entry string `json:"entry"`
+	ID                 string `json:"id"`
+	Entry              string `json:"entry,omitempty"`
+	URL                string `json:"url,omitempty"`
+	InterceptDownloads bool   `json:"interceptDownloads,omitempty"`
 }
 
 // PluginUIManifest describes HTML pages packaged with the plugin.
@@ -345,6 +347,12 @@ func ValidateManifest(m *PluginManifest) error {
 			}
 		}
 		for i := range m.UI.Windows {
+			if m.UI.Windows[i].URL != "" {
+				parsed, err := url.Parse(m.UI.Windows[i].URL)
+				if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
+					return fmt.Errorf("invalid UI window url %q: must be a valid https URL", m.UI.Windows[i].URL)
+				}
+			}
 			if m.UI.Windows[i].Entry != "" {
 				cleanEntry, err := cleanRelativePluginPath(m.UI.Windows[i].Entry)
 				if err != nil {

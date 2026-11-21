@@ -51,6 +51,10 @@ func TestPluginUIEntriesValidation(t *testing.T) {
 		valid   bool
 	}{
 		{"valid", []PluginUIEntry{{ID: "studio", Entry: "ui/studio.html"}}, true},
+		{"valid external url", []PluginUIEntry{{ID: "flow", URL: "https://flow.google.com/", InterceptDownloads: true}}, true},
+		{"http external url rejected", []PluginUIEntry{{ID: "flow", URL: "http://flow.google.com/"}}, false},
+		{"file external url rejected", []PluginUIEntry{{ID: "flow", URL: "file:///etc/passwd"}}, false},
+		{"both entry and url rejected", []PluginUIEntry{{ID: "flow", Entry: "ui/index.html", URL: "https://flow.google.com/"}}, false},
 		{"traversal", []PluginUIEntry{{ID: "studio", Entry: "../other.html"}}, false},
 		{"absolute", []PluginUIEntry{{ID: "studio", Entry: "/etc/passwd"}}, false},
 		{"windows separator", []PluginUIEntry{{ID: "studio", Entry: `..\other.html`}}, false},
@@ -62,5 +66,9 @@ func TestPluginUIEntriesValidation(t *testing.T) {
 				t.Fatalf("validateManifest() error = %v, want valid %v", err, tc.valid)
 			}
 		})
+	}
+	panelWithURL := Manifest{ID: "example.ui", Name: "Example", Version: "1", UI: PluginUI{Panels: []PluginUIEntry{{ID: "p", URL: "https://flow.google.com/"}}}}
+	if err := validateManifest(&panelWithURL); err == nil {
+		t.Fatal("expected panel with external url to be rejected")
 	}
 }

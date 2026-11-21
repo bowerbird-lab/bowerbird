@@ -564,6 +564,8 @@
       "allowAssetWrite": "Allow creating and replacing assets",
       "refresh": "Refresh plugins",
       "openPluginWindow": "Open plugin window",
+      "downloadSaved": "Saved to library: {{name}}",
+      "downloadFailed": "Download import failed: {{error}}",
       "showSecret": "Show secret",
       "hideSecret": "Hide secret",
       "alwaysEnabled": "Built-in · Active",
