@@ -246,50 +246,68 @@ func (a *App) stripRange(c *ui.Context) (start, end int) {
 	return stripWindow(a.previewIndex, len(a.items), min(a.filmstripImages.limit, stripFitCount(width)))
 }
 
-func (a *App) previewImage(c *ui.Context, item core.Item) {
-	p := a.palette(c)
+func (a *App) handlePreviewImageInput(ev ui.InputEvent) bool {
+	if a.previewError != "" && ev.Kind != ui.InputKeyDown {
+		return false
+	}
 	previewMods, previewKey, previewOK := a.shortcutKeys(core.ShortcutTogglePreview)
 	dismissMods, dismissKey, dismissOK := a.shortcutKeys(core.ShortcutDismiss)
-	ui.Box(c).Fill().Grow(1).Shrink(1).Clip().HandleInput(func(ev ui.InputEvent) bool {
-		if a.previewError != "" && ev.Kind != ui.InputKeyDown {
-			return false
+	switch ev.Kind {
+	case ui.InputKeyDown:
+		if (previewOK && ev.Mods == previewMods && ev.Key == previewKey) ||
+			(dismissOK && ev.Mods == dismissMods && ev.Key == dismissKey) {
+			a.closePreview()
+			return true
 		}
-		switch ev.Kind {
-		case ui.InputKeyDown:
-			if (previewOK && ev.Mods == previewMods && ev.Key == previewKey) ||
-				(dismissOK && ev.Mods == dismissMods && ev.Key == dismissKey) {
-				a.closePreview()
-				return true
-			}
-		case ui.InputZoom:
-			a.previewZoom = minF(maxF(a.previewZoom*ev.Scale, previewMinZoom), previewMaxZoom)
-			return true
-		case ui.InputScroll:
-			if ev.Mods&ui.Cmd != 0 || ev.Mods&ui.Ctrl != 0 {
-				factor := float32(1) - ev.DY*0.01
-				a.previewZoom = minF(maxF(a.previewZoom*factor, previewMinZoom), previewMaxZoom)
-			} else {
-				a.previewPan.X -= ev.DX
-				a.previewPan.Y -= ev.DY
-			}
-			return true
-		case ui.InputPointerDown:
-			a.previewPanning = true
+	case ui.InputZoom:
+		a.previewZoom = minF(maxF(a.previewZoom*ev.Scale, previewMinZoom), previewMaxZoom)
+		return true
+	case ui.InputScroll:
+		if ev.Mods&ui.Cmd != 0 || ev.Mods&ui.Ctrl != 0 {
+			factor := float32(1) - ev.DY*0.01
+			a.previewZoom = minF(maxF(a.previewZoom*factor, previewMinZoom), previewMaxZoom)
+		} else {
+			a.previewPan.X -= ev.DX
+			a.previewPan.Y -= ev.DY
+		}
+		return true
+	case ui.InputPointerDown:
+		a.previewPanning = true
+		a.previewLastX, a.previewLastY = ev.X, ev.Y
+		return true
+	case ui.InputPointerMove:
+		if a.previewPanning {
+			a.previewPan.X += ev.X - a.previewLastX
+			a.previewPan.Y += ev.Y - a.previewLastY
 			a.previewLastX, a.previewLastY = ev.X, ev.Y
-			return true
-		case ui.InputPointerMove:
-			if a.previewPanning {
-				a.previewPan.X += ev.X - a.previewLastX
-				a.previewPan.Y += ev.Y - a.previewLastY
-				a.previewLastX, a.previewLastY = ev.X, ev.Y
-			}
-			return true
-		case ui.InputPointerUp:
-			a.previewPanning = false
-			return true
 		}
-		return false
+		return true
+	case ui.InputPointerUp:
+		a.previewPanning = false
+		return true
+	}
+	return false
+}
+
+func (a *App) drawPreviewImageCanvas(c *ui.Context, bmp *ui.Bitmap) {
+	p := a.palette(c)
+	ui.Box(c).Fill().Draw(func(pt *ui.Painter, r ui.Rect) {
+		// Soft checkerboard behind transparent images.
+		cell := float32(14)
+		for y := float32(0); y < r.H; y += cell {
+			for x := float32(0); x < r.W; x += cell {
+				if (int(x/cell)+int(y/cell))%2 == 0 {
+					pt.Fill(ui.Rect{X: r.X + x, Y: r.Y + y, W: cell, H: cell}, p.surface.Alpha(0.25), 0)
+				}
+			}
+		}
 	}).Children(func() {
+		ui.Image(c, bmp).Fill().Fit(ui.Contain).Scale(a.previewZoom, a.previewZoom).Translate(a.previewPan.X, a.previewPan.Y)
+	})
+}
+
+func (a *App) previewImage(c *ui.Context, item core.Item) {
+	ui.Box(c).Fill().Grow(1).Shrink(1).Clip().HandleInput(a.handlePreviewImageInput).Children(func() {
 		var bmp *ui.Bitmap
 		if a.previewError == "" {
 			path := item.FilePath
@@ -332,19 +350,7 @@ func (a *App) previewImage(c *ui.Context, item core.Item) {
 				trace.record("info", "display_ready", trace.started, fmt.Sprintf("width=%d height=%d", width, height))
 			}
 		}
-		ui.Box(c).Fill().Draw(func(pt *ui.Painter, r ui.Rect) {
-			// Soft checkerboard behind transparent images.
-			cell := float32(14)
-			for y := float32(0); y < r.H; y += cell {
-				for x := float32(0); x < r.W; x += cell {
-					if (int(x/cell)+int(y/cell))%2 == 0 {
-						pt.Fill(ui.Rect{X: r.X + x, Y: r.Y + y, W: cell, H: cell}, p.surface.Alpha(0.25), 0)
-					}
-				}
-			}
-		}).Children(func() {
-			ui.Image(c, bmp).Fill().Fit(ui.Contain).Scale(a.previewZoom, a.previewZoom).Translate(a.previewPan.X, a.previewPan.Y)
-		})
+		a.drawPreviewImageCanvas(c, bmp)
 	})
 }
 
@@ -708,49 +714,16 @@ func (a *App) closeVideo() {
 
 func (a *App) previewPSD(c *ui.Context, item core.Item) {
 	p := a.palette(c)
-	ui.Row(c).Fill().Grow(1).Shrink(1).Children(func() {
-		ui.Box(c).Grow(1).Shrink(1).FillHeight().Padding(16).Clip().Children(func() {
-			if a.previewBitmap != nil {
-				ui.Image(c, a.previewBitmap).Fill().Fit(ui.Contain).Scale(a.previewZoom, a.previewZoom)
-			} else if a.previewError != "" {
-				ui.Column(c).Fill().Center().Gap(8).Children(func() {
-					ui.Icon(c, iconImage).Size(34, 34).TextColor(p.faint)
-					ui.Text(c, a.previewError).FontSize(12).TextColor(p.muted)
-				})
-			} else {
-				ui.Column(c).Fill().Center().Children(func() { ui.Spinner(c) })
-			}
-		})
-		ui.Box(c).Width(1).FillHeight().Background(p.hairline)
-		ui.Column(c).Width(240).FillHeight().Padding(16).Gap(8).Children(func() {
-			a.sectionLabel(c, a.t("inspector.psd"))
-			if a.psdInfo != nil {
-				a.metaRow(c, a.t("inspector.dimensions"), fmt.Sprintf("%d × %d", a.psdInfo.Width, a.psdInfo.Height))
-				a.metaRow(c, a.t("inspector.colorMode"), a.psdInfo.ColorMode)
-				a.metaRow(c, "Depth", fmt.Sprintf("%d bit", a.psdInfo.Depth))
-				a.metaRow(c, "Channels", fmt.Sprintf("%d", a.psdInfo.Channels))
-				a.inspectorDivider(c)
-				a.sectionLabel(c, a.t("inspector.layers"))
-				ui.Scroll(c).Grow(1).Shrink(1).Children(func() {
-					for i, layer := range a.psdInfo.Layers {
-						if i > 200 {
-							break
-						}
-						ui.Row(c).FillWidth().Height(24).Gap(6).AlignItems(ui.Center).Children(func() {
-							ui.Icon(c, iconEye).Size(12, 12).TextColor(p.faint).Opacity(boolF(layer.Visible, 1, 0.25))
-							ui.Text(c, layer.Name).FontSize(11).TextColor(p.text).Grow(1).Shrink(1).SingleLine()
-							ui.Textf(c, "%d%%", layer.Opacity).FontSize(9.5).TextColor(p.faint)
-						})
-					}
-				})
-			}
-		})
+	ui.Box(c).Fill().Grow(1).Shrink(1).Clip().HandleInput(a.handlePreviewImageInput).Children(func() {
+		if a.previewBitmap != nil {
+			a.drawPreviewImageCanvas(c, a.previewBitmap)
+		} else if a.previewError != "" {
+			ui.Column(c).Fill().Center().Gap(8).Children(func() {
+				ui.Icon(c, iconImage).Size(34, 34).TextColor(p.faint)
+				ui.Text(c, a.previewError).FontSize(12).TextColor(p.muted)
+			})
+		} else {
+			ui.Column(c).Fill().Center().Children(func() { ui.Spinner(c) })
+		}
 	})
-}
-
-func boolF(v bool, yes, no float32) float32 {
-	if v {
-		return yes
-	}
-	return no
 }
