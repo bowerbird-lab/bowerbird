@@ -311,6 +311,145 @@ func (a *App) settingsGeneral(c *ui.Context) {
 			}
 		})
 	})
+	a.settingsCard(c, a.t("settings.performance"), func() {
+		p := a.palette(c)
+		profile := a.detectPerfProfile()
+		a.settingsRowInfo(c, a.t("settings.perfProfile.title"), a.t("settings.perfProfile.description"), func() {
+			options := []SelectOption{
+				{Value: "low-memory", Label: a.t("settings.perfProfile.lowMemory")},
+				{Value: "balanced", Label: a.t("settings.perfProfile.balanced")},
+				{Value: "high-performance", Label: a.t("settings.perfProfile.highPerformance")},
+			}
+			if profile == "custom" {
+				options = append(options, SelectOption{Value: "custom", Label: a.t("settings.perfProfile.custom")})
+			}
+			if val, changed := a.dropdown(c, "perf-profile", profile, options); changed && val != "custom" {
+				a.applyPerfPreset(val)
+				a.savePrefs()
+				a.scheduleMemoryIdleCleanup()
+			}
+		})
+		toggle := ui.ButtonBase(c.Key("perf-advanced-toggle")).FillWidth().MinHeight(30).Row().AlignItems(ui.Center).Gap(6).Cursor(ui.CursorPointer)
+		toggle.Children(func() {
+			arrow := "▸"
+			if a.perfAdvancedOpen {
+				arrow = "▾"
+			}
+			ui.Text(c, arrow+" "+a.t("settings.perfAdvanced")).FontSize(12).TextColor(p.muted)
+		})
+		if toggle.Clicked() {
+			a.perfAdvancedOpen = !a.perfAdvancedOpen
+		}
+		if !a.perfAdvancedOpen {
+			return
+		}
+		ui.Box(c).FillWidth().Height(1).Background(p.hairline)
+		a.settingsRowInfo(c, a.t("settings.perfReleasePixels.title"), a.t("settings.perfReleasePixels.description"), func() {
+			on := a.prefs.PerfReleasePixels
+			if ui.Switch(c.Key("perf-release-pixels"), &on).Changed() {
+				a.prefs.PerfReleasePixels = on
+				a.prefs.PerfProfile = a.detectPerfProfile()
+				a.ApplyMemoryPrefs()
+				a.savePrefs()
+				if on {
+					a.scheduleMemoryIdleCleanup()
+				}
+			}
+		})
+		a.settingsRowInfo(c, a.t("settings.perfIdleCacheTrim.title"), a.t("settings.perfIdleCacheTrim.description"), func() {
+			on := a.prefs.PerfIdleCacheTrim
+			if ui.Switch(c.Key("perf-idle-cache-trim"), &on).Changed() {
+				a.prefs.PerfIdleCacheTrim = on
+				a.prefs.PerfProfile = a.detectPerfProfile()
+				a.savePrefs()
+				if on {
+					a.scheduleMemoryIdleCleanup()
+				}
+			}
+		})
+		if a.prefs.PerfIdleCacheTrim {
+			keep := a.prefs.PerfIdleThumbKeep
+			if keep <= 0 {
+				keep = idleThumbCacheKeep
+			}
+			a.settingsRowInfo(c, a.t("settings.perfIdleThumbKeep.title"), a.t("settings.perfIdleThumbKeep.description"), func() {
+				options := []SelectOption{
+					{Value: "16", Label: "16"},
+					{Value: "32", Label: "32"},
+					{Value: "64", Label: "64"},
+					{Value: "128", Label: "128"},
+				}
+				if val, changed := a.dropdown(c, "perf-idle-thumb-keep", fmt.Sprint(keep), options); changed {
+					if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+						a.prefs.PerfIdleThumbKeep = parsed
+						a.prefs.PerfProfile = a.detectPerfProfile()
+						a.savePrefs()
+						a.scheduleMemoryIdleCleanup()
+					}
+				}
+			})
+		}
+		cacheMB := a.prefs.PerfThumbCacheMB
+		if cacheMB <= 0 {
+			cacheMB = defaultThumbCacheMB
+		}
+		a.settingsRowInfo(c, a.t("settings.perfThumbCacheLimit.title"), a.t("settings.perfThumbCacheLimit.description"), func() {
+			options := []SelectOption{
+				{Value: "32", Label: "32 MB"},
+				{Value: "64", Label: "64 MB"},
+				{Value: "128", Label: "128 MB"},
+				{Value: "256", Label: "256 MB"},
+			}
+			if val, changed := a.dropdown(c, "perf-thumb-cache-limit", fmt.Sprint(cacheMB), options); changed {
+				if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+					a.prefs.PerfThumbCacheMB = parsed
+					a.prefs.PerfProfile = a.detectPerfProfile()
+					a.ApplyMemoryPrefs()
+					a.savePrefs()
+					a.scheduleMemoryIdleCleanup()
+				}
+			}
+		})
+		a.settingsRowInfo(c, a.t("settings.perfMemoryReclaim.title"), a.t("settings.perfMemoryReclaim.description"), func() {
+			on := a.prefs.PerfMemoryReclaim
+			if ui.Switch(c.Key("perf-memory-reclaim"), &on).Changed() {
+				a.prefs.PerfMemoryReclaim = on
+				a.prefs.PerfProfile = a.detectPerfProfile()
+				a.ApplyMemoryPrefs()
+				a.savePrefs()
+				if on {
+					a.scheduleMemoryIdleCleanup()
+				}
+			}
+		})
+		if a.prefs.PerfMemoryReclaim {
+			limitMB := a.prefs.PerfMemoryLimitMB
+			if limitMB <= 0 {
+				limitMB = defaultMemoryLimitMB
+			}
+			a.settingsRowInfo(c, a.t("settings.perfMemoryLimit.title"), a.t("settings.perfMemoryLimit.description"), func() {
+				options := []SelectOption{
+					{Value: "64", Label: "64 MB"},
+					{Value: "96", Label: "96 MB"},
+					{Value: "128", Label: "128 MB"},
+					{Value: "160", Label: "160 MB"},
+					{Value: "192", Label: "192 MB"},
+					{Value: "256", Label: "256 MB"},
+					{Value: "384", Label: "384 MB"},
+					{Value: "512", Label: "512 MB"},
+				}
+				if val, changed := a.dropdown(c, "perf-memory-limit", fmt.Sprint(limitMB), options); changed {
+					if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+						a.prefs.PerfMemoryLimitMB = parsed
+						a.prefs.PerfProfile = a.detectPerfProfile()
+						a.ApplyMemoryPrefs()
+						a.savePrefs()
+						a.scheduleMemoryIdleCleanup()
+					}
+				}
+			})
+		}
+	})
 }
 
 // setLanguage persists a new UI language and re-applies it to every open

@@ -202,12 +202,18 @@ func (a *App) viewGallery(c *ui.Context) {
 	})
 
 	container.Children(func() {
+		a.visibleThumbCount = 0
 		list := ui.List(c.Key("gallery"), &a.galleryList, len(a.rows), func(row int) {
 			if row < 0 || row >= len(a.rows) {
 				return
 			}
+			a.visibleThumbCount += len(a.rows[row])
 			a.galleryRow(c, row, a.rows[row])
 		}).FillWidth().Grow(1).Shrink(1).TrackScroll(&a.galleryScroll).Gap(a.galleryGap()).Padding(top, gallerySidePadding, bottom, gallerySidePadding).ScrollbarInsets(top, 0, bottom, 0)
+		if a.galleryScroll.Y != a.lastScrollY {
+			a.lastScrollY = a.galleryScroll.Y
+			a.scheduleMemoryIdleCleanup()
+		}
 		if list.Clicked() && len(a.selected) > 0 {
 			a.clearSelection()
 			if a.win != nil {

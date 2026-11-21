@@ -149,7 +149,11 @@ func (h *appHost) newWindow(spec core.WindowSpec) *mygo.Window {
 func (h *appHost) OpenWindow(spec core.WindowSpec) error {
 	if h.liteActive.Swap(false) {
 		debug.SetGCPercent(100)
-		debug.SetMemoryLimit(math.MaxInt64)
+		if h.views != nil {
+			h.views.ApplyMemoryPrefs()
+		} else {
+			debug.SetMemoryLimit(math.MaxInt64)
+		}
 		mygo.App.Dock.Show()
 	}
 	h.mu.Lock()
@@ -206,7 +210,11 @@ func (h *appHost) CloseWindow(name string) {
 func (h *appHost) FocusMainWindow() {
 	if h.liteActive.Swap(false) {
 		debug.SetGCPercent(100)
-		debug.SetMemoryLimit(math.MaxInt64)
+		if h.views != nil {
+			h.views.ApplyMemoryPrefs()
+		} else {
+			debug.SetMemoryLimit(math.MaxInt64)
+		}
 		mygo.App.Dock.Show()
 	}
 	h.CancelLightweightIdle()

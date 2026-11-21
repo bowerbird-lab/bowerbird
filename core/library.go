@@ -1889,7 +1889,7 @@ func (m *LibraryManager) findDuplicateByHex(db *sql.DB, contentHex string) (*Ite
 // imported through two drop paths at once (the webview drop handler and the native
 // drop handler), and a library can live on a synced or virtual drive where writes
 // take longer, so "database is locked" is a routine event rather than a bug.
-const sqliteDSNOptions = "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-64000)&_pragma=temp_store(MEMORY)"
+const sqliteDSNOptions = "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-16000)&_pragma=temp_store(FILE)"
 
 // Library bookkeeping file names. These live inside a .library container and
 // describe its own contents; importing them as assets would recursively fill the
@@ -1941,7 +1941,13 @@ func isLibraryBookkeeping(path string) bool {
 }
 
 func openLibraryDB(dbPath string) (*sql.DB, error) {
-	return sql.Open("sqlite", dbPath+sqliteDSNOptions)
+	db, err := sql.Open("sqlite", dbPath+sqliteDSNOptions)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxIdleTime(30 * time.Second)
+	return db, nil
 }
 
 func copyAndHashFile(srcPath, tempDestPath string) (string, int64, []byte, error) {

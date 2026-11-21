@@ -12,9 +12,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -79,30 +81,44 @@ type Prefs struct {
 	SortOrder          string   `json:"sortOrder"`
 	RowHeight       float64  `json:"rowHeight"`
 	IncludeSubs     bool     `json:"includeSubfolders"`
-	PinnedFilters   []string `json:"pinnedFilters"`
-	LibraryOrder    []string `json:"libraryOrder,omitempty"`
-	RecordImportURL bool     `json:"recordImportUrl"`
+	PinnedFilters     []string `json:"pinnedFilters"`
+	LibraryOrder      []string `json:"libraryOrder,omitempty"`
+	RecordImportURL   bool     `json:"recordImportUrl"`
+	PerfProfile       string   `json:"perfProfile"`
+	PerfReleasePixels bool     `json:"perfReleasePixels"`
+	PerfIdleCacheTrim bool     `json:"perfIdleCacheTrim"`
+	PerfIdleThumbKeep int      `json:"perfIdleThumbKeep"`
+	PerfThumbCacheMB  int      `json:"perfThumbCacheMB"`
+	PerfMemoryReclaim bool     `json:"perfMemoryReclaim"`
+	PerfMemoryLimitMB int      `json:"perfMemoryLimitMB"`
 }
 
 func defaultPrefs() Prefs {
 	return Prefs{
-		VibrancySidebar: true,
-		VibrancyHeader:  true,
-		LightTheme:      "default-light",
-		DarkTheme:       "default-dark",
-		SystemAccent:    true,
-		InspectorOpen:   true,
-		SidebarOpen:     true,
-		SidebarWidth:    float64(defaultSidebarWidth),
-		InspectorWidth:  float64(defaultInspectorWidth),
+		VibrancySidebar:    true,
+		VibrancyHeader:     true,
+		LightTheme:         "default-light",
+		DarkTheme:          "default-dark",
+		SystemAccent:       true,
+		InspectorOpen:      true,
+		SidebarOpen:        true,
+		SidebarWidth:       float64(defaultSidebarWidth),
+		InspectorWidth:     float64(defaultInspectorWidth),
 		ShowNames:          true,
 		ShowExt:            true,
 		LayoutMode:         "justified",
 		VariantDisplayMode: "stacked",
 		SortOrder:          "desc",
-		RowHeight:       190,
-		PinnedFilters:   append([]string(nil), defaultPinnedFilterCriteria...),
-		RecordImportURL: true,
+		RowHeight:          190,
+		PinnedFilters:      append([]string(nil), defaultPinnedFilterCriteria...),
+		RecordImportURL:    true,
+		PerfProfile:        "balanced",
+		PerfReleasePixels:  true,
+		PerfIdleCacheTrim:  true,
+		PerfIdleThumbKeep:  idleThumbCacheKeep,
+		PerfThumbCacheMB:   defaultThumbCacheMB,
+		PerfMemoryReclaim:  true,
+		PerfMemoryLimitMB:  defaultMemoryLimitMB,
 	}
 }
 
@@ -408,8 +424,15 @@ type App struct {
 	systemAccent ui.Color
 
 	// Thumbnails.
-	thumbs    *thumbCache
-	thumbJobs *thumbJobQueue
+	thumbs            *thumbCache
+	thumbJobs         *thumbJobQueue
+	visibleThumbCount int
+	perfAdvancedOpen  bool
+	lastScrollY       float32
+	memIdleTimer      *time.Timer
+	memIdleSeq        uint64
+	memIdleDelay      time.Duration
+	reclaimFn         func()
 
 	// Drag previews, keyed by the dragged selection. They hold decoded pixels,
 	// so only a handful are kept.
@@ -523,6 +546,7 @@ func New(svc *core.Service) *App {
 		start:           time.Now(),
 	}
 	a.loadPrefs()
+	a.ApplyMemoryPrefs()
 	a.loadThemes()
 	// The service may already own a manager (tests, or a window created after
 	// startup), so pick the persisted language before the first frame.
@@ -562,14 +586,19 @@ func (a *App) tf(key string, args map[string]any) string { return a.trans.Tf(key
 func (a *App) SetMainWindow(w *mygo.Window) {
 	a.win = w
 	var notify func()
+	var thumbNotify func()
 	if w != nil {
 		notify = w.Invalidate
+		thumbNotify = func() {
+			w.Invalidate()
+			a.post(a.scheduleMemoryIdleCleanup)
+		}
 		w.OnResize(func() {
 			a.rebuildRows()
 			w.Invalidate()
 		})
 	}
-	a.thumbs.setNotify(notify)
+	a.thumbs.setNotify(thumbNotify)
 	a.previewImages.setNotify(notify)
 	a.filmstripImages.setNotify(notify)
 	a.refreshAll()
@@ -663,16 +692,174 @@ func (a *App) Notify(show bool) {
 		a.thumbs.restore()
 		a.previewImages.restore()
 		a.filmstripImages.restore()
+		a.ApplyMemoryPrefs()
 		a.refreshAll()
 		return
+	}
+	if a.memIdleTimer != nil {
+		a.memIdleTimer.Stop()
+		a.memIdleTimer = nil
 	}
 	a.thumbs.trim(0)
 	a.filmstripImages.trim(0)
 	a.thumbJobs = newThumbJobQueue()
 	a.closePreview()
+	if a.svc != nil {
+		go a.svc.ShrinkDBMemory()
+	}
 	runtime.GC()
 	// debug.FreeOSMemory is intentionally not called on every hide: the native
 	// app keeps a small Go heap and the OS reclaims textures with the window.
+}
+
+const (
+	idleThumbCacheKeep     = 64
+	idleFilmstripCacheKeep = 16
+	defaultThumbCacheMB    = 128
+	defaultMemoryLimitMB   = 160
+	defaultMemIdleDelay    = 3 * time.Second
+)
+
+func (a *App) applyPerfPreset(preset string) {
+	switch preset {
+	case "low-memory":
+		a.prefs.PerfProfile = "low-memory"
+		a.prefs.PerfReleasePixels = true
+		a.prefs.PerfIdleCacheTrim = true
+		a.prefs.PerfIdleThumbKeep = 32
+		a.prefs.PerfThumbCacheMB = 64
+		a.prefs.PerfMemoryReclaim = true
+		a.prefs.PerfMemoryLimitMB = 96
+	case "high-performance":
+		a.prefs.PerfProfile = "high-performance"
+		a.prefs.PerfReleasePixels = false
+		a.prefs.PerfIdleCacheTrim = false
+		a.prefs.PerfIdleThumbKeep = 128
+		a.prefs.PerfThumbCacheMB = 256
+		a.prefs.PerfMemoryReclaim = false
+		a.prefs.PerfMemoryLimitMB = 384
+	default:
+		a.prefs.PerfProfile = "balanced"
+		a.prefs.PerfReleasePixels = true
+		a.prefs.PerfIdleCacheTrim = true
+		a.prefs.PerfIdleThumbKeep = idleThumbCacheKeep
+		a.prefs.PerfThumbCacheMB = defaultThumbCacheMB
+		a.prefs.PerfMemoryReclaim = true
+		a.prefs.PerfMemoryLimitMB = defaultMemoryLimitMB
+	}
+	a.ApplyMemoryPrefs()
+}
+
+func (a *App) detectPerfProfile() string {
+	p := a.prefs
+	switch {
+	case p.PerfReleasePixels && p.PerfIdleCacheTrim && p.PerfIdleThumbKeep == 32 && p.PerfThumbCacheMB == 64 && p.PerfMemoryReclaim && p.PerfMemoryLimitMB == 96:
+		return "low-memory"
+	case p.PerfReleasePixels && p.PerfIdleCacheTrim && p.PerfIdleThumbKeep == idleThumbCacheKeep && p.PerfThumbCacheMB == defaultThumbCacheMB && p.PerfMemoryReclaim && p.PerfMemoryLimitMB == defaultMemoryLimitMB:
+		return "balanced"
+	case !p.PerfReleasePixels && !p.PerfIdleCacheTrim && p.PerfThumbCacheMB == 256 && !p.PerfMemoryReclaim:
+		return "high-performance"
+	default:
+		return "custom"
+	}
+}
+
+// ApplyMemoryPrefs syncs thumbnail pixel release, cache limits, and the
+// foreground Go memory limit with the current performance preferences.
+func (a *App) ApplyMemoryPrefs() {
+	if a == nil {
+		return
+	}
+	if a.thumbs != nil {
+		a.thumbs.setReleasePixels(a.prefs.PerfReleasePixels)
+		cacheMB := a.prefs.PerfThumbCacheMB
+		if cacheMB <= 0 {
+			cacheMB = defaultThumbCacheMB
+		}
+		a.thumbs.setLimits(max(256, cacheMB*4), int64(cacheMB)<<20)
+	}
+	if a.filmstripImages != nil {
+		a.filmstripImages.setReleasePixels(a.prefs.PerfReleasePixels)
+	}
+	if a.prefs.PerfMemoryReclaim {
+		limitMB := a.prefs.PerfMemoryLimitMB
+		if limitMB <= 0 {
+			limitMB = defaultMemoryLimitMB
+		}
+		debug.SetMemoryLimit(int64(limitMB) << 20)
+	} else {
+		debug.SetMemoryLimit(math.MaxInt64)
+	}
+}
+
+func (a *App) scheduleMemoryIdleCleanup() {
+	if a.win == nil {
+		return
+	}
+	if !a.prefs.PerfReleasePixels && !a.prefs.PerfIdleCacheTrim && !a.prefs.PerfMemoryReclaim {
+		if a.memIdleTimer != nil {
+			a.memIdleTimer.Stop()
+			a.memIdleTimer = nil
+		}
+		return
+	}
+	a.memIdleSeq++
+	seq := a.memIdleSeq
+	delay := a.memIdleDelay
+	if delay <= 0 {
+		delay = defaultMemIdleDelay
+	}
+	if a.memIdleTimer != nil {
+		a.memIdleTimer.Stop()
+	}
+	a.memIdleTimer = time.AfterFunc(delay, func() {
+		a.post(func() {
+			a.runMemoryIdleCleanup(seq)
+		})
+	})
+}
+
+func (a *App) runMemoryIdleCleanup(seq uint64) {
+	if seq != a.memIdleSeq {
+		return
+	}
+	if a.thumbs != nil && a.thumbs.isActive() {
+		a.scheduleMemoryIdleCleanup()
+		return
+	}
+	var freed int
+	if a.prefs.PerfReleasePixels && a.thumbs != nil {
+		freed += a.thumbs.releaseDrawnPixels()
+	}
+	if a.prefs.PerfIdleCacheTrim {
+		keep := a.prefs.PerfIdleThumbKeep
+		if keep <= 0 {
+			keep = idleThumbCacheKeep
+		}
+		if a.visibleThumbCount > 0 {
+			keep = max(keep, a.visibleThumbCount+16)
+		}
+		if a.thumbs != nil {
+			freed += a.thumbs.trim(keep)
+		}
+		if a.filmstripImages != nil && !a.previewOpen {
+			freed += a.filmstripImages.trim(idleFilmstripCacheKeep)
+		}
+	}
+	if a.prefs.PerfMemoryReclaim && freed > 0 {
+		reclaim := a.reclaimFn
+		if reclaim == nil {
+			svc := a.svc
+			reclaim = func() {
+				if svc != nil {
+					svc.ShrinkDBMemory()
+				}
+				runtime.GC()
+				debug.FreeOSMemory()
+			}
+		}
+		go reclaim()
+	}
 }
 
 // HandleEvent reacts to core events. The host calls it on any thread; the state
@@ -1419,6 +1606,18 @@ func (a *App) loadPrefs() {
 	}
 	if p.PinnedFilters == nil {
 		p.PinnedFilters = append([]string(nil), defaultPinnedFilterCriteria...)
+	}
+	if p.PerfIdleThumbKeep <= 0 {
+		p.PerfIdleThumbKeep = idleThumbCacheKeep
+	}
+	if p.PerfThumbCacheMB <= 0 {
+		p.PerfThumbCacheMB = defaultThumbCacheMB
+	}
+	if p.PerfMemoryLimitMB <= 0 {
+		p.PerfMemoryLimitMB = defaultMemoryLimitMB
+	}
+	if p.PerfProfile == "" {
+		p.PerfProfile = "balanced"
 	}
 	a.prefs = p
 	a.sortOrder = p.SortOrder

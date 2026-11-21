@@ -19,25 +19,28 @@ import (
 )
 
 type thumbCache struct {
-	mu       sync.Mutex
-	entries  map[string]*thumbEntry
-	order    []string
-	queue    []thumbRequest
-	limit    int
-	maxBytes int64
-	bytes    int64
-	active   int
-	workers  int
-	closed   bool
-	notify   func()
-	decode   func(string, int) (*ui.Bitmap, error)
+	mu            sync.Mutex
+	entries       map[string]*thumbEntry
+	order         []string
+	queue         []thumbRequest
+	limit         int
+	maxBytes      int64
+	bytes         int64
+	active        int
+	workers       int
+	closed        bool
+	releasePixels bool
+	notify        func()
+	decode        func(string, int) (*ui.Bitmap, error)
 }
 
 type thumbEntry struct {
-	bmp   *ui.Bitmap
-	err   error
-	bytes int64
-	path  string
+	bmp      *ui.Bitmap
+	err      error
+	bytes    int64
+	path     string
+	drawn    bool
+	released bool
 }
 
 type thumbRequest struct {
@@ -77,6 +80,64 @@ func (c *thumbCache) setNotify(fn func()) {
 	c.mu.Unlock()
 }
 
+func (c *thumbCache) setReleasePixels(enabled bool) {
+	c.mu.Lock()
+	c.releasePixels = enabled
+	c.mu.Unlock()
+}
+
+func (c *thumbCache) setLimits(limit int, maxBytes int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if limit > 0 {
+		c.limit = limit
+	}
+	if maxBytes > 0 {
+		c.maxBytes = maxBytes
+	}
+	c.trimLocked()
+}
+
+func (c *thumbCache) isActive() bool {
+	c.mu.Lock()
+	active := c.active > 0 || len(c.queue) > 0
+	c.mu.Unlock()
+	return active
+}
+
+func (c *thumbCache) releaseDrawnPixels() int {
+	c.mu.Lock()
+	var bitmaps []*ui.Bitmap
+	for _, entry := range c.entries {
+		if entry != nil && entry.bmp != nil && entry.drawn && !entry.released {
+			entry.released = true
+			c.shrinkEntryBytesLocked(entry)
+			bitmaps = append(bitmaps, entry.bmp)
+		}
+	}
+	c.mu.Unlock()
+	for _, bmp := range bitmaps {
+		bmp.ReleasePixels()
+	}
+	return len(bitmaps)
+}
+
+func (c *thumbCache) shrinkEntryBytesLocked(entry *thumbEntry) {
+	if entry == nil || entry.bytes <= 0 {
+		return
+	}
+	// ReleasePixels drops the decoded RGBA + mipmap buffers (~6 B/px), leaving
+	// only the compressed image data for remake (~1/16 of decoded size).
+	kept := max(int64(4096), entry.bytes/16)
+	if kept < entry.bytes {
+		c.bytes -= entry.bytes - kept
+		if c.bytes < 0 {
+			c.bytes = 0
+		}
+		entry.bytes = kept
+	}
+}
+
 func thumbTarget(targetPx int) int {
 	return min(4096, max(128, (targetPx+127)/128*128))
 }
@@ -109,13 +170,28 @@ func (c *thumbCache) getSystemIcon(ext string, filePath string) *ui.Bitmap {
 
 func (c *thumbCache) request(request thumbRequest) (*ui.Bitmap, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.closed {
+		c.mu.Unlock()
 		return nil, fmt.Errorf("image cache is paused")
 	}
 	if entry := c.entries[request.key]; entry != nil {
 		c.touchLocked(request.key)
-		return entry.bmp, entry.err
+		bmp, err := entry.bmp, entry.err
+		var releaseBmp *ui.Bitmap
+		if bmp != nil {
+			if !entry.drawn {
+				entry.drawn = true
+			} else if c.releasePixels && !entry.released {
+				entry.released = true
+				c.shrinkEntryBytesLocked(entry)
+				releaseBmp = bmp
+			}
+		}
+		c.mu.Unlock()
+		if releaseBmp != nil {
+			releaseBmp.ReleasePixels()
+		}
+		return bmp, err
 	}
 	c.entries[request.key] = request.entry
 	c.touchLocked(request.key)
@@ -123,6 +199,7 @@ func (c *thumbCache) request(request thumbRequest) (*ui.Bitmap, error) {
 	c.queue = append(c.queue, request)
 	c.trimLocked()
 	c.startLocked()
+	c.mu.Unlock()
 	return nil, nil
 }
 
@@ -245,18 +322,30 @@ func (c *thumbCache) invalidate(path string) {
 	c.order = order
 }
 
-func (c *thumbCache) trim(keep int) {
+func (c *thumbCache) trim(keep int) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	keep = max(0, keep)
+	evicted := 0
 	for len(c.order) > keep {
 		c.removeLocked(c.order[0])
+		c.order[0] = ""
 		c.order = c.order[1:]
+		evicted++
 	}
 	if keep == 0 {
 		c.queue = nil
 		c.closed = true
+	} else if len(c.queue) > keep*2 {
+		queue := make([]thumbRequest, 0, keep)
+		for _, request := range c.queue {
+			if c.entries[request.key] == request.entry {
+				queue = append(queue, request)
+			}
+		}
+		c.queue = queue
 	}
+	return evicted
 }
 
 func (c *thumbCache) restore() {

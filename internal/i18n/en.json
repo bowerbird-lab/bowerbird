@@ -702,6 +702,40 @@
       "title": "Record source URL",
       "description": "After downloading a media URL, save the resolved page/source URL into the item metadata. This is an application setting and is not controlled by plugins."
     },
+    "performance": "Performance",
+    "perfProfile": {
+      "title": "Performance preset",
+      "description": "Choose a balance between memory footprint and thumbnail caching, or expand advanced options to customize.",
+      "lowMemory": "Low memory",
+      "balanced": "Balanced",
+      "highPerformance": "High performance",
+      "custom": "Custom"
+    },
+    "perfAdvanced": "Advanced options",
+    "perfReleasePixels": {
+      "title": "Release thumbnail CPU pixels",
+      "description": "Drop decoded CPU pixel copies after thumbnails are drawn on the GPU, reducing memory usage while scrolling large libraries."
+    },
+    "perfIdleCacheTrim": {
+      "title": "Trim thumbnail cache when idle",
+      "description": "Automatically shrink the thumbnail cache to recent items shortly after scrolling stops instead of keeping the full cache allocated."
+    },
+    "perfIdleThumbKeep": {
+      "title": "Idle thumbnail retention",
+      "description": "Number of recent thumbnails kept in memory after idle cache trimming."
+    },
+    "perfThumbCacheLimit": {
+      "title": "Thumbnail cache limit",
+      "description": "Maximum memory budget for the scrolling thumbnail cache."
+    },
+    "perfMemoryReclaim": {
+      "title": "Reclaim memory after idle",
+      "description": "Set a foreground memory limit and trigger garbage collection and OS memory reclamation after idle cache trimming."
+    },
+    "perfMemoryLimit": {
+      "title": "Foreground memory limit",
+      "description": "Soft memory limit for Go garbage collection while the window is active."
+    },
     "importMode": {
       "title": "Import mode",
       "description": "Choose whether importing local files copies them into the library or moves them from their original location (leaving no file behind).",

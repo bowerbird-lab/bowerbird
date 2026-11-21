@@ -247,6 +247,14 @@ func (s *Service) GetItem(id string) (*Item, error) {
 	return s.mgr.GetItem(id)
 }
 
+// ShrinkDBMemory asks SQLite to release non-essential page-cache memory.
+func (s *Service) ShrinkDBMemory() {
+	if s == nil || s.mgr == nil || s.mgr.db == nil {
+		return
+	}
+	_, _ = s.mgr.db.Exec("PRAGMA shrink_memory")
+}
+
 func (s *Service) ImportFiles(sourcePaths []string) ([]Item, error) {
 	if s.mgr == nil {
 		return nil, ErrCoreNotInitialized

@@ -702,6 +702,40 @@
       "title": "记录来源 URL",
       "description": "从链接下载素材后，把解析后的页面/来源 URL 自动写入素材元数据。这是应用级设置，不受插件控制。"
     },
+    "performance": "性能",
+    "perfProfile": {
+      "title": "性能预设",
+      "description": "选择内存占用与缩略图缓存之间的平衡模式，或展开高级选项进行自定义。",
+      "lowMemory": "低内存",
+      "balanced": "均衡",
+      "highPerformance": "高性能",
+      "custom": "自定义"
+    },
+    "perfAdvanced": "高级选项",
+    "perfReleasePixels": {
+      "title": "释放缩略图 CPU 像素副本",
+      "description": "缩略图上传到 GPU 绘制后释放 CPU 侧像素副本，降低浏览大量素材时的内存占用。"
+    },
+    "perfIdleCacheTrim": {
+      "title": "空闲时自动收缩缩略图缓存",
+      "description": "停止滚动一段时间后，自动将缩略图缓存收缩至近期浏览条目，避免长期占满缓存上限。"
+    },
+    "perfIdleThumbKeep": {
+      "title": "空闲保留缩略图数量",
+      "description": "触发空闲缓存收缩后，保留在内存中的最近缩略图条目数。"
+    },
+    "perfThumbCacheLimit": {
+      "title": "缩略图缓存上限",
+      "description": "滚动浏览时缩略图缓存允许占用的最大内存上限。"
+    },
+    "perfMemoryReclaim": {
+      "title": "空闲时主动回收内存",
+      "description": "设置前台内存软上限，并在空闲缓存收缩后触发垃圾回收与系统内存归还。"
+    },
+    "perfMemoryLimit": {
+      "title": "前台内存软上限",
+      "description": "窗口处于前台活跃状态时，Go 垃圾回收参考的内存软上限。"
+    },
     "importMode": {
       "title": "导入方式",
       "description": "选择导入本地文件时是复制到资源库，还是从原位置移动过来（原位置不保留文件）。",

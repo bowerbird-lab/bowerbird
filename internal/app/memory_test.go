@@ -279,3 +279,113 @@ func BenchmarkGalleryLayout30000(b *testing.B) {
 		}
 	})
 }
+
+func TestThumbCacheReleasesDrawnPixels(t *testing.T) {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 16, 16))); err != nil {
+		t.Fatal(err)
+	}
+	encoded := buf.Bytes()
+
+	cache := newThumbCache()
+	cache.setReleasePixels(true)
+	cache.decode = func(path string, target int) (*ui.Bitmap, error) {
+		return ui.DecodeBitmap(encoded)
+	}
+
+	cache.get("a", 128)
+	waitThumbIdle(t, cache)
+
+	// First hit marks the bitmap as drawn without dropping pixels before first render.
+	if bmp := cache.get("a", 128); bmp == nil {
+		t.Fatal("expected decoded bitmap on first hit")
+	}
+	cache.mu.Lock()
+	entry := cache.entries["a\x00128"]
+	if !entry.drawn || entry.released {
+		cache.mu.Unlock()
+		t.Fatalf("unexpected entry state after first draw: drawn=%v released=%v", entry.drawn, entry.released)
+	}
+	cache.mu.Unlock()
+
+	// Second hit releases CPU pixels.
+	if bmp := cache.get("a", 128); bmp == nil {
+		t.Fatal("expected decoded bitmap on second hit")
+	}
+	cache.mu.Lock()
+	released := entry.released
+	cache.mu.Unlock()
+	if !released {
+		t.Fatal("expected CPU pixels to be released after second hit")
+	}
+}
+
+func TestRunMemoryIdleCleanupRespectsPrefs(t *testing.T) {
+	if got := defaultPrefs().PerfMemoryLimitMB; got != 160 {
+		t.Fatalf("expected default PerfMemoryLimitMB=160, got %d", got)
+	}
+	app := New(nil)
+	app.prefs.PerfThumbCacheMB = 128
+	app.prefs.PerfIdleThumbKeep = idleThumbCacheKeep
+	app.ApplyMemoryPrefs()
+	app.thumbs.decode = func(path string, target int) (*ui.Bitmap, error) {
+		return ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 8, 8))), nil
+	}
+	for i := 0; i < idleThumbCacheKeep+16; i++ {
+		app.thumbs.get(fmt.Sprint(i), 128)
+		waitThumbIdle(t, app.thumbs)
+	}
+
+	reclaimed := make(chan struct{}, 2)
+	app.reclaimFn = func() { reclaimed <- struct{}{} }
+
+	app.prefs.PerfReleasePixels = false
+	app.prefs.PerfIdleCacheTrim = false
+	app.prefs.PerfMemoryReclaim = false
+	app.ApplyMemoryPrefs()
+	app.runMemoryIdleCleanup(app.memIdleSeq)
+
+	app.thumbs.mu.Lock()
+	countBefore := len(app.thumbs.entries)
+	app.thumbs.mu.Unlock()
+	if countBefore != idleThumbCacheKeep+16 {
+		t.Fatalf("expected cache untouched when disabled, got %d", countBefore)
+	}
+
+	app.prefs.PerfIdleCacheTrim = true
+	app.prefs.PerfMemoryReclaim = true
+	app.ApplyMemoryPrefs()
+	app.runMemoryIdleCleanup(app.memIdleSeq)
+
+	app.thumbs.mu.Lock()
+	countAfter := len(app.thumbs.entries)
+	app.thumbs.mu.Unlock()
+	if countAfter != idleThumbCacheKeep {
+		t.Fatalf("expected cache trimmed to %d, got %d", idleThumbCacheKeep, countAfter)
+	}
+	select {
+	case <-reclaimed:
+	case <-time.After(time.Second):
+		t.Fatal("expected memory reclaim callback after idle trim")
+	}
+}
+
+func TestPerfPresetsUpdateSettingsAndDetectCustom(t *testing.T) {
+	app := New(nil)
+	app.applyPerfPreset("low-memory")
+	if app.detectPerfProfile() != "low-memory" || app.prefs.PerfMemoryLimitMB != 96 || app.prefs.PerfThumbCacheMB != 64 {
+		t.Fatalf("unexpected low-memory preset: %+v", app.prefs)
+	}
+	app.applyPerfPreset("high-performance")
+	if app.detectPerfProfile() != "high-performance" || app.prefs.PerfMemoryReclaim || app.prefs.PerfReleasePixels {
+		t.Fatalf("unexpected high-performance preset: %+v", app.prefs)
+	}
+	app.applyPerfPreset("balanced")
+	if app.detectPerfProfile() != "balanced" || app.prefs.PerfMemoryLimitMB != 160 || app.prefs.PerfThumbCacheMB != 128 {
+		t.Fatalf("unexpected balanced preset: %+v", app.prefs)
+	}
+	app.prefs.PerfMemoryLimitMB = 192
+	if got := app.detectPerfProfile(); got != "custom" {
+		t.Fatalf("expected custom profile after manual tweak, got %q", got)
+	}
+}
