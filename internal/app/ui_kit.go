@@ -165,24 +165,33 @@ func uiThemeFor(p palette) *ui.Theme {
 // iconButton is the standard square toolbar button. The icon inherits hover and
 // selection states through AnimateColor, so nothing pops.
 func (a *App) iconButton(c *ui.Context, key any, icon *ui.SVG, selected bool, label string, onClick func()) {
+	a.iconButtonEnabled(c, key, icon, selected, true, label, onClick)
+}
+
+func (a *App) iconButtonEnabled(c *ui.Context, key any, icon *ui.SVG, selected bool, enabled bool, label string, onClick func()) {
 	if icon == nil {
 		return
 	}
 	p := a.palette(c)
 	b := ui.ButtonBase(c.Key(key)).Size(30, 30).Radius(7).FocusRing(false).AlignItems(ui.Center).Justify(ui.Center)
 	bg := ui.Transparent
-	switch {
-	case selected:
-		bg = p.press
-	case b.Hovered():
-		bg = p.hover
+	iconColor := p.text
+	if !enabled {
+		iconColor = p.faint
+	} else {
+		switch {
+		case selected:
+			bg = p.press
+		case b.Hovered():
+			bg = p.hover
+		}
 	}
 	b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
 	b.Tooltip(label)
 	b.Children(func() {
-		ui.Icon(c, icon).Size(17, 17).TextColor(p.text)
+		ui.Icon(c, icon).Size(17, 17).TextColor(iconColor)
 	})
-	if b.Clicked() && onClick != nil {
+	if enabled && b.Clicked() && onClick != nil {
 		onClick()
 	}
 }

@@ -44,12 +44,16 @@ func (a *App) viewMain(c *ui.Context) {
 			}
 			ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0).Children(func() {
 				if a.previewOpen && a.previewMode == "inline" {
-					a.viewPreviewToolbar(c)
-					ui.Box(c).FillWidth().Height(1).Background(p.hairline)
-					a.mainBodySurface(c, 0, func() {
-						if len(a.items) > 0 && a.previewIndex >= 0 && a.previewIndex < len(a.items) {
-							a.viewPreviewBody(c, a.currentPreviewItem())
-						}
+					inline := ui.Column(c.Key("inline-preview")).Fill().Focusable().AutoFocus()
+					a.handlePreviewContainerInput(inline)
+					inline.Children(func() {
+						a.viewPreviewToolbar(c)
+						ui.Box(c).FillWidth().Height(1).Background(p.hairline)
+						a.mainBodySurface(c, 0, func() {
+							if len(a.items) > 0 && a.previewIndex >= 0 && a.previewIndex < len(a.items) {
+								a.viewPreviewBody(c, a.currentPreviewItem())
+							}
+						})
 					})
 				} else {
 					a.mainBodySurface(c, mainHeaderHeight, func() {
@@ -77,43 +81,8 @@ func (a *App) viewMain(c *ui.Context) {
 		if a.previewOpen && a.previewMode == "full" {
 			ui.Overlay(c, func() {
 				overlay := ui.Box(c).Absolute().Fill().Background(p.bg).Focusable().AutoFocus().Modal()
-				previewMods, previewKey, previewOK := a.shortcutKeys(core.ShortcutTogglePreview)
-				dismissMods, dismissKey, dismissOK := a.shortcutKeys(core.ShortcutDismiss)
-				overlay.HandleInput(func(ev ui.InputEvent) bool {
-					if ev.Kind != ui.InputKeyDown {
-						return false
-					}
-					if (previewOK && ev.Mods == previewMods && ev.Key == previewKey) ||
-						(dismissOK && ev.Mods == dismissMods && ev.Key == dismissKey) {
-						if ev.Repeat {
-							return true
-						}
-						a.closePreview()
-						return true
-					}
-					return false
-				})
-				if previewOK && (overlay.Shortcut(previewMods, previewKey) || overlay.OverlayShortcut(previewMods, previewKey)) && !c.ShortcutRepeated() {
-					a.closePreview()
-				}
-				if dismissOK && overlay.OverlayShortcut(dismissMods, dismissKey) {
-					a.closePreview()
-				}
-				// The window's shortcuts wait behind the modal overlay, so the
-				// preview registers the keys it owns here: the arrows step
-				// through the film strip, and the zoom keys act on the image.
-				a.overlayShortcut(overlay, core.ShortcutMoveLeft, func() { a.movePreview(-1) })
-				a.overlayShortcut(overlay, core.ShortcutMoveRight, func() { a.movePreview(1) })
-				a.overlayShortcut(overlay, core.ShortcutZoomIn, func() {
-					a.previewZoom = minF(a.previewZoom*1.2, previewMaxZoom)
-				})
-				a.overlayShortcut(overlay, core.ShortcutZoomOut, func() {
-					a.previewZoom = maxF(a.previewZoom/1.2, previewMinZoom)
-				})
-				a.overlayShortcut(overlay, core.ShortcutZoomReset, func() {
-					a.previewZoom = 1
-					a.previewPan = ui.Point{}
-				})
+				a.handlePreviewContainerInput(overlay)
+				a.registerPreviewOverlayShortcuts(overlay)
 				overlay.Children(func() {
 					a.viewPreview(c)
 				})
@@ -151,6 +120,98 @@ func (a *App) mainBodySurface(c *ui.Context, topInset float32, body func()) {
 	e.Children(body)
 }
 
+// handlePreviewContainerInput binds keyboard actions directly on the active
+// preview container (both inline and full-window overlay) so Esc, Space,
+// left/right navigation and zoom work reliably regardless of prior focus.
+func (a *App) handlePreviewContainerInput(container ui.Element) {
+	matchKey := func(ev ui.InputEvent, id string) bool {
+		pair, ok := a.shortcutPairs[id]
+		return ok && pair.ok && ev.Mods == pair.mods && ev.Key == pair.key
+	}
+	container.HandleInput(func(ev ui.InputEvent) bool {
+		if ev.Kind != ui.InputKeyDown {
+			return false
+		}
+		if matchKey(ev, core.ShortcutDismiss) {
+			if ev.Repeat {
+				return true
+			}
+			if a.isImmersiveFullscreen() {
+				a.win.SetFullScreen(false)
+				return true
+			}
+			a.closePreview()
+			return true
+		}
+		if matchKey(ev, core.ShortcutTogglePreview) {
+			if ev.Repeat {
+				return true
+			}
+			a.closePreview()
+			return true
+		}
+		if matchKey(ev, core.ShortcutMoveLeft) {
+			a.movePreview(-1)
+			return true
+		}
+		if matchKey(ev, core.ShortcutMoveRight) {
+			a.movePreview(1)
+			return true
+		}
+		if matchKey(ev, core.ShortcutZoomIn) {
+			a.previewZoom = minF(a.previewZoom*1.2, previewMaxZoom)
+			return true
+		}
+		if matchKey(ev, core.ShortcutZoomOut) {
+			a.previewZoom = maxF(a.previewZoom/1.2, previewMinZoom)
+			return true
+		}
+		if matchKey(ev, core.ShortcutZoomReset) {
+			a.previewZoom = 1
+			a.previewPan = ui.Point{}
+			return true
+		}
+		return false
+	})
+}
+
+func (a *App) registerPreviewOverlayShortcuts(overlay ui.Element) {
+	bind := func(id string, fn func()) {
+		pair, ok := a.shortcutPairs[id]
+		if !ok || !pair.ok {
+			return
+		}
+		if overlay.Shortcut(pair.mods, pair.key) || overlay.OverlayShortcut(pair.mods, pair.key) {
+			fn()
+		}
+	}
+	bind(core.ShortcutTogglePreview, func() {
+		if !a.previewOpen {
+			return
+		}
+		a.closePreview()
+	})
+	bind(core.ShortcutDismiss, func() {
+		if a.isImmersiveFullscreen() {
+			a.win.SetFullScreen(false)
+			return
+		}
+		a.closePreview()
+	})
+	bind(core.ShortcutMoveLeft, func() { a.movePreview(-1) })
+	bind(core.ShortcutMoveRight, func() { a.movePreview(1) })
+	bind(core.ShortcutZoomIn, func() {
+		a.previewZoom = minF(a.previewZoom*1.2, previewMaxZoom)
+	})
+	bind(core.ShortcutZoomOut, func() {
+		a.previewZoom = maxF(a.previewZoom/1.2, previewMinZoom)
+	})
+	bind(core.ShortcutZoomReset, func() {
+		a.previewZoom = 1
+		a.previewPan = ui.Point{}
+	})
+}
+
 // handleMainShortcuts runs the main window's keys. Every binding comes from
 // core's catalog, so the list Settings shows is exactly what this window
 // answers to, whether the binding is rebindable or fixed.
@@ -161,7 +222,7 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 		pair, ok := a.shortcutPairs[id]
 		return ok && pair.ok && c.Shortcut(pair.mods, pair.key)
 	}
-	if matched(core.ShortcutSearch) {
+	if matched(core.ShortcutSearch) && !a.previewOpen {
 		a.searchBox.Focus(c)
 	}
 	if matched(core.ShortcutOpenSettings) {
@@ -184,10 +245,6 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 	if matched(core.ShortcutForceReload) {
 		a.reloadIgnoringCache()
 	}
-	if matched(core.ShortcutDismiss) && a.isImmersiveFullscreen() {
-		a.win.SetFullScreen(false)
-		return
-	}
 	if matched(core.ShortcutFullscreen) && a.win != nil {
 		a.win.ToggleFullScreen()
 	}
@@ -202,22 +259,19 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 	if matched(core.ShortcutCopy) || c.Shortcut(ui.Ctrl, ui.KeyC) {
 		a.copySelected()
 	}
-	if matched(core.ShortcutSelectAll) && !a.previewOpen {
-		for _, it := range a.items {
-			a.selected[it.ID] = true
-		}
-		a.selectedAt = len(a.items) - 1
-		if len(a.items) > 0 {
-			a.activeItemID = a.items[0].ID
-		}
-		// Move the focus with the selection so the gallery keys, Delete
-		// above all, act on what the user just selected.
-		if !c.Focused(a.searchBox) {
-			a.galleryBox.Focus(c)
-		}
+	if (!a.previewOpen || a.previewMode == "inline") && matched(core.ShortcutToggleSidebar) {
+		a.prefs.SidebarOpen = !a.prefs.SidebarOpen
+		a.savePrefs()
+		a.rebuildRows()
+	}
+	if (!a.previewOpen || a.previewMode == "inline") && matched(core.ShortcutToggleInspector) {
+		a.prefs.InspectorOpen = !a.prefs.InspectorOpen
+		a.savePrefs()
 	}
 	if matched(core.ShortcutDismiss) {
-		if a.previewOpen {
+		if a.isImmersiveFullscreen() {
+			a.win.SetFullScreen(false)
+		} else if a.previewOpen {
 			a.closePreview()
 		} else if a.dialog != dialogNone {
 			a.dialog = dialogNone
@@ -226,6 +280,7 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 		} else if len(a.selected) > 0 {
 			a.clearSelection()
 		}
+		return
 	}
 	if matched(core.ShortcutTogglePreview) && !c.ShortcutRepeated() {
 		if a.previewOpen {
@@ -262,6 +317,20 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 		}
 		return
 	}
+	if matched(core.ShortcutSelectAll) {
+		for _, it := range a.items {
+			a.selected[it.ID] = true
+		}
+		a.selectedAt = len(a.items) - 1
+		if len(a.items) > 0 {
+			a.activeItemID = a.items[0].ID
+		}
+		// Move the focus with the selection so the gallery keys, Delete
+		// above all, act on what the user just selected.
+		if !c.Focused(a.searchBox) {
+			a.galleryBox.Focus(c)
+		}
+	}
 	moved := false
 	if matched(core.ShortcutMoveLeft) {
 		a.moveGallerySelection(-1, 0)
@@ -290,15 +359,6 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 	}
 	if matched(core.ShortcutZoomReset) {
 		a.setRowHeight(190)
-	}
-	if matched(core.ShortcutToggleSidebar) {
-		a.prefs.SidebarOpen = !a.prefs.SidebarOpen
-		a.savePrefs()
-		a.rebuildRows()
-	}
-	if matched(core.ShortcutToggleInspector) {
-		a.prefs.InspectorOpen = !a.prefs.InspectorOpen
-		a.savePrefs()
 	}
 }
 

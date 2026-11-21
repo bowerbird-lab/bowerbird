@@ -69,7 +69,6 @@ func (a *App) refreshWorkspace() {
 				a.activeItem = active
 			}
 			a.rebuildRows()
-			a.recordHistory()
 			if err != nil {
 				a.showToast(err.Error())
 			}

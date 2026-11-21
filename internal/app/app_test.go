@@ -2468,3 +2468,124 @@ func TestLargeJustifiedGalleryMarqueeAndClickAfterScroll(t *testing.T) {
 	}
 }
 
+func TestDoubleClickInlinePreviewEscClosesAndHidesNavButtons(t *testing.T) {
+	a := seededApp(t)
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.Frame()
+
+	// Double-click Gamma card to open inline preview.
+	r, ok := tester.Find("Gamma")
+	if !ok {
+		t.Fatal("Gamma card not found")
+	}
+	x, y := r.X+r.W/2, r.Y+r.H/2
+	tester.ClickAt(x, y)
+	tester.Frame()
+	tester.ClickAt(x, y)
+	tester.Frame()
+
+	if !a.previewOpen || a.previewMode != "inline" {
+		t.Fatalf("double click should open inline preview, got open=%v mode=%q", a.previewOpen, a.previewMode)
+	}
+
+	// Inline preview header must not show previous/next navigation buttons.
+	if _, hasPrev := tester.Access(a.t("preview.previous")); hasPrev {
+		t.Fatal("inline preview header should hide preview.previous button")
+	}
+	if _, hasNext := tester.Access(a.t("preview.next")); hasNext {
+		t.Fatal("inline preview header should hide preview.next button")
+	}
+
+	// Pressing Escape must exit inline preview.
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if a.previewOpen {
+		t.Fatal("Escape should close inline preview opened by double-click")
+	}
+}
+
+func TestHistoryBackAndForwardAcrossFolders(t *testing.T) {
+	a := seededApp(t)
+	a.recordHistory() // Initial NavAll stop
+
+	// Enter Folder A, then switch to Folder B.
+	a.navigate(NavFolder, "f1")
+	a.navigate(NavFolder, "f2")
+
+	if len(a.history) != 3 || a.historyAt != 2 {
+		t.Fatalf("history = (len=%d, at=%d), want (3, 2)", len(a.history), a.historyAt)
+	}
+	if !a.canGoBack() || a.canGoForward() {
+		t.Fatalf("canGoBack=%v canGoForward=%v, want true/false", a.canGoBack(), a.canGoForward())
+	}
+
+	// First Back should return to Folder A (f1), not NavAll.
+	a.goHistory(-1)
+	if a.nav != NavFolder || a.folderID != "f1" {
+		t.Fatalf("first back = (%s, %s), want (folder, f1)", a.nav, a.folderID)
+	}
+	// Simulate async refresh completing after goHistory; must not truncate forward history.
+	a.recordHistory()
+	if !a.canGoBack() || !a.canGoForward() {
+		t.Fatalf("after back: canGoBack=%v canGoForward=%v, want true/true", a.canGoBack(), a.canGoForward())
+	}
+
+	// Second Back should return to NavAll.
+	a.goHistory(-1)
+	if a.nav != NavAll || a.folderID != "" {
+		t.Fatalf("second back = (%s, %s), want (all, \"\")", a.nav, a.folderID)
+	}
+	if a.canGoBack() || !a.canGoForward() {
+		t.Fatalf("at root: canGoBack=%v canGoForward=%v, want false/true", a.canGoBack(), a.canGoForward())
+	}
+
+	// Forward should walk back to Folder A, then Folder B.
+	a.goHistory(1)
+	if a.nav != NavFolder || a.folderID != "f1" {
+		t.Fatalf("first forward = (%s, %s), want (folder, f1)", a.nav, a.folderID)
+	}
+	a.goHistory(1)
+	if a.nav != NavFolder || a.folderID != "f2" {
+		t.Fatalf("second forward = (%s, %s), want (folder, f2)", a.nav, a.folderID)
+	}
+}
+
+func TestSpaceTogglePreviewDoesNotScrollGallery(t *testing.T) {
+	a := seededApp(t)
+	var items []core.Item
+	for i := 0; i < 60; i++ {
+		items = append(items, core.Item{
+			ID:     fmt.Sprintf("item-%d", i),
+			Name:   fmt.Sprintf("Item %d", i),
+			Width:  400,
+			Height: 300,
+		})
+	}
+	a.setWorkspaceItems(items, len(items), 0)
+	a.activeItemID = "item-0"
+	tester := ui.NewTester(a.viewMain, 1280, 800)
+	tester.Frame()
+
+	// Press Space to open full preview: gallery scroll must remain 0.
+	tester.Key(0, ui.KeySpace)
+	tester.Frame()
+	if !a.previewOpen || a.previewMode != "full" {
+		t.Fatalf("Space should open full preview, got open=%v mode=%q", a.previewOpen, a.previewMode)
+	}
+	if a.galleryScroll.Y != 0 {
+		t.Fatalf("galleryScroll.Y = %v after opening preview with Space, want 0", a.galleryScroll.Y)
+	}
+
+	// Press Space again to close full preview: gallery scroll must still remain 0.
+	tester.Key(0, ui.KeySpace)
+	tester.Frame()
+	if a.previewOpen {
+		t.Fatal("Space should close full preview")
+	}
+	if a.galleryScroll.Y != 0 {
+		t.Fatalf("galleryScroll.Y = %v after closing preview with Space, want 0", a.galleryScroll.Y)
+	}
+}
+
+
+

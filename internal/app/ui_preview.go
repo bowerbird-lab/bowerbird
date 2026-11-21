@@ -102,10 +102,6 @@ func (a *App) viewPreviewToolbar(c *ui.Context) {
 			return
 		}
 
-		// The step buttons stay at the left end of the row, as the history
-		// buttons do in the workspace header.
-		a.iconButton(c, "preview-prev", iconBack, false, a.t("preview.previous"), func() { a.movePreview(-1) })
-		a.iconButton(c, "preview-next", iconForward, false, a.t("preview.next"), func() { a.movePreview(1) })
 		ui.Text(c, item.Name).FontSize(13).FontWeight(600).TextColor(p.text).Grow(1).Shrink(1).MinWidth(0).SingleLine()
 		ui.Textf(c, "%d / %d", a.previewIndex+1, len(a.items)).FontSize(11).TextColor(p.faint).FontFeatures("tnum")
 		ui.Box(c).Width(1).Height(18).Background(p.hairline)
@@ -297,18 +293,10 @@ func (a *App) stripRange(c *ui.Context) (start, end int) {
 }
 
 func (a *App) handlePreviewImageInput(ev ui.InputEvent) bool {
-	if a.previewError != "" && ev.Kind != ui.InputKeyDown {
+	if a.previewError != "" {
 		return false
 	}
-	previewMods, previewKey, previewOK := a.shortcutKeys(core.ShortcutTogglePreview)
-	dismissMods, dismissKey, dismissOK := a.shortcutKeys(core.ShortcutDismiss)
 	switch ev.Kind {
-	case ui.InputKeyDown:
-		if (previewOK && ev.Mods == previewMods && ev.Key == previewKey) ||
-			(dismissOK && ev.Mods == dismissMods && ev.Key == dismissKey) {
-			a.closePreview()
-			return true
-		}
 	case ui.InputZoom:
 		a.previewZoom = minF(maxF(a.previewZoom*ev.Scale, previewMinZoom), previewMaxZoom)
 		return true

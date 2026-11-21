@@ -101,9 +101,9 @@ func (a *App) viewHeader(c *ui.Context) {
 		contentUnder: a.headerHasContentUnder(),
 	}, func() {
 		// History always sits at the left end of the row, right after the
-		// sidebar toggle; the preview keeps its step buttons there too.
-		a.iconButton(c, "back", iconBack, false, a.t("common.back"), func() { a.goHistory(-1) })
-		a.iconButton(c, "forward", iconForward, false, a.t("common.forward"), func() { a.goHistory(1) })
+		// sidebar toggle.
+		a.iconButtonEnabled(c, "back", iconBack, false, a.canGoBack(), a.t("common.back"), func() { a.goHistory(-1) })
+		a.iconButtonEnabled(c, "forward", iconForward, false, a.canGoForward(), a.t("common.forward"), func() { a.goHistory(1) })
 
 		zoomVal := float64(a.rowHeight)
 		ui.Slider(c.Key("zoom-slider"), &zoomVal, 90, 420).Width(110)

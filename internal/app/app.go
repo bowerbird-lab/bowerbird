@@ -185,6 +185,7 @@ type App struct {
 	loadCancel          context.CancelFunc
 	history             []historyEntry
 	historyAt           int
+	restoringHistory    bool
 
 	// Selection and the active item.
 	selected        map[string]bool
@@ -817,6 +818,8 @@ func (a *App) refreshAll() {
 	a.loadCancel = cancel
 	a.loadSeq++
 	seq := a.loadSeq
+	record := !a.restoringHistory
+	a.restoringHistory = false
 	previewNav, previewFolder := a.nav, a.folderID
 	previewSort := a.sortOrder
 	request := workspaceRequest{
@@ -871,7 +874,9 @@ func (a *App) refreshAll() {
 			}
 			a.plugins = a.pluginRows(plugins)
 			a.rebuildRows()
-			a.recordHistory()
+			if record {
+				a.recordHistory()
+			}
 			if err != nil {
 				a.showToast(err.Error())
 			}
@@ -1062,19 +1067,18 @@ func (a *App) navigate(nav Nav, folderID string) {
 	a.activeItemID = ""
 	a.activeItem = nil
 	a.closePreview()
+	a.recordHistory()
 	a.refreshAll()
 }
 
 func (a *App) recordHistory() {
 	entry := historyEntry{Nav: a.nav, FolderID: a.folderID, Query: a.query, Filters: cloneFilters(a.filters), SortOrder: a.sortOrder, SelectedID: a.activeItemID}
-	if len(a.history) > 0 && a.historyAt < len(a.history) {
-		a.history = a.history[:a.historyAt+1]
-	}
-	if len(a.history) > 0 {
-		last := a.history[len(a.history)-1]
-		if last.Nav == entry.Nav && last.FolderID == entry.FolderID && last.Query == entry.Query && filtersEqual(last.Filters, entry.Filters) {
+	if len(a.history) > 0 && a.historyAt >= 0 && a.historyAt < len(a.history) {
+		cur := a.history[a.historyAt]
+		if cur.Nav == entry.Nav && cur.FolderID == entry.FolderID && cur.Query == entry.Query && cur.SortOrder == entry.SortOrder && filtersEqual(cur.Filters, entry.Filters) {
 			return
 		}
+		a.history = a.history[:a.historyAt+1]
 	}
 	a.history = append(a.history, entry)
 	if len(a.history) > 100 {
@@ -1101,6 +1105,14 @@ func filtersEqual(a, b Filters) bool {
 	return fmt.Sprint(a) == fmt.Sprint(b)
 }
 
+func (a *App) canGoBack() bool {
+	return len(a.history) > 1 && a.historyAt > 0
+}
+
+func (a *App) canGoForward() bool {
+	return a.historyAt >= 0 && a.historyAt < len(a.history)-1
+}
+
 func (a *App) goHistory(delta int) {
 	if len(a.history) == 0 {
 		return
@@ -1116,9 +1128,13 @@ func (a *App) goHistory(delta int) {
 	a.query = h.Query
 	a.filters = cloneFilters(h.Filters)
 	a.sortOrder = h.SortOrder
-	if h.SelectedID != "" {
-		a.activeItemID = h.SelectedID
-	}
+	a.galleryScroll.Y = 0
+	a.selected = map[string]bool{}
+	a.selectedAt = -1
+	a.activeItemID = h.SelectedID
+	a.activeItem = nil
+	a.closePreview()
+	a.restoringHistory = true
 	a.refreshAll()
 }
 
