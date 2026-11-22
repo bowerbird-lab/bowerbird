@@ -52,6 +52,7 @@ type LibraryManager struct {
 	pluginMgr    *PluginManager
 	assetServer  *AssetServer
 	mobileServer *MobileServer
+	pool         *LibraryPool
 	// High-speed in-memory index for sub-millisecond queries and searches
 	cacheMu     sync.RWMutex
 	cacheLoaded bool
@@ -76,6 +77,7 @@ var ioCopyBufPool = sync.Pool{
 // and automatically mounts the remembered library if present.
 func NewLibraryManager() *LibraryManager {
 	mgr := &LibraryManager{}
+	mgr.pool = newLibraryPool(mgr)
 
 	// Initialize ultra-thin user data store
 	store, err := NewUserDataStore()
@@ -103,6 +105,7 @@ func NewLibraryManager() *LibraryManager {
 				if _, openErr := mgr.OpenLibrary(savedPath); openErr != nil {
 					log.Printf("[Core] failed to restore saved library %s: %v", savedPath, openErr)
 				} else {
+					mgr.pool.RegisterInitial(mgr)
 					log.Printf("[Core] successfully restored library: %s", savedPath)
 				}
 			}
@@ -110,6 +113,39 @@ func NewLibraryManager() *LibraryManager {
 	}
 
 	return mgr
+}
+
+// Pool returns the shared LibraryPool for this manager, if initialized.
+func (m *LibraryManager) Pool() *LibraryPool {
+	if m == nil {
+		return nil
+	}
+	return m.pool
+}
+
+func (m *LibraryManager) newChildManager() *LibraryManager {
+	m.mu.RLock()
+	h := m.host
+	m.mu.RUnlock()
+	return &LibraryManager{
+		host:         h,
+		userData:     m.userData,
+		pluginMgr:    m.pluginMgr,
+		assetServer:  m.assetServer,
+		mobileServer: m.mobileServer,
+		pool:         m.pool,
+	}
+}
+
+func (m *LibraryManager) closeDBOnly() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.db != nil {
+		_ = m.db.Close()
+		m.db = nil
+	}
+	m.activeLib = nil
+	m.invalidateCache()
 }
 
 // SetHost wires the desktop shell into the manager and its plugin manager.
@@ -303,20 +339,16 @@ func (m *LibraryManager) CreateLibrary(parentDir string, libName string) (*Libra
 	if m.userData != nil {
 		_ = m.userData.SetActiveLibraryPath(fullLibPath)
 	}
-	if m.mobileServer != nil {
-		m.mobileServer.Broadcast("library_changed", map[string]any{
-			"id":        libID,
-			"name":      strings.TrimSuffix(cleanName, ".library"),
-			"path":      fullLibPath,
-			"itemCount": 0,
-		})
-	}
 
 	return m.activeLib, nil
 }
 
 // OpenLibrary mounts an existing xxx.library and persists it to the user data store.
 func (m *LibraryManager) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
+	return m.openLibraryInternal(libraryPath, true)
+}
+
+func (m *LibraryManager) openLibraryInternal(libraryPath string, persistUserData bool) (*LibraryInfo, error) {
 	start := time.Now()
 	libJSONPath := filepath.Join(libraryPath, "library.json")
 	data, err := os.ReadFile(libJSONPath)
@@ -374,17 +406,8 @@ func (m *LibraryManager) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
 	m.invalidateCache()
 	m.mu.Unlock()
 	// Persist to user data store so next launch reloads automatically
-	if m.userData != nil {
+	if persistUserData && m.userData != nil {
 		_ = m.userData.SetActiveLibraryPath(libraryPath)
-	}
-
-	if m.mobileServer != nil {
-		m.mobileServer.Broadcast("library_changed", map[string]any{
-			"id":        meta.ID,
-			"name":      meta.Name,
-			"path":      libraryPath,
-			"itemCount": count,
-		})
 	}
 
 	RecordLog("info", "core", "Opened library", fmt.Sprintf("name=%s items=%d path=%s", meta.Name, count, libraryPath), time.Since(start).Milliseconds())
@@ -534,14 +557,6 @@ func (m *LibraryManager) CloseLibrary() error {
 	m.invalidateCache()
 	if m.userData != nil {
 		_ = m.userData.ClearActiveLibraryPath()
-	}
-	if m.mobileServer != nil {
-		m.mobileServer.Broadcast("library_changed", map[string]any{
-			"id":        "",
-			"name":      "",
-			"path":      "",
-			"itemCount": 0,
-		})
 	}
 	return nil
 }

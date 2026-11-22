@@ -259,6 +259,9 @@ func (a *App) handleMainShortcuts(c *ui.Context) {
 	if matched(core.ShortcutCloseWindow) && a.win != nil {
 		a.win.Close()
 	}
+	if matched(core.ShortcutNewWindow) && a.svc != nil {
+		go func() { _ = a.svc.OpenNewWindow("") }()
+	}
 	if matched(core.ShortcutQuit) {
 		a.quit()
 	}

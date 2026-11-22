@@ -56,6 +56,10 @@ type MobileServer struct {
 	clients             map[*wsClient]bool
 	urlImporter         func(rawURL, folderID string) ([]Item, error)
 
+	mobileLibMu   sync.RWMutex
+	mobileLibPath string
+	mobileMgr     *LibraryManager
+
 	shareMu           sync.Mutex
 	activeShares      int
 	shareNotifyCount  int
@@ -83,6 +87,29 @@ func (s *MobileServer) SetURLImporter(fn func(rawURL, folderID string) ([]Item, 
 	s.mu.Lock()
 	s.urlImporter = fn
 	s.mu.Unlock()
+}
+
+// libraryManager returns the LibraryManager currently selected by the mobile
+// client, falling back to the desktop's active library if mobile hasn't
+// explicitly switched yet.
+func (s *MobileServer) libraryManager() *LibraryManager {
+	s.mobileLibMu.RLock()
+	mgr := s.mobileMgr
+	s.mobileLibMu.RUnlock()
+	if mgr != nil {
+		return mgr
+	}
+	if s.manager != nil {
+		if s.manager.GetActiveLibrary() != nil {
+			return s.manager
+		}
+		if pool := s.manager.Pool(); pool != nil {
+			if active := pool.AnyActive(); active != nil {
+				return active
+			}
+		}
+	}
+	return s.manager
 }
 
 // MobileItemSummary represents an item in the lightweight mobile timeline view.
@@ -659,13 +686,15 @@ func (s *MobileServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	port := s.port
 	s.mu.RUnlock()
 
-	if s.manager != nil {
-		if active := s.manager.GetActiveLibrary(); active != nil {
+	if mgr := s.libraryManager(); mgr != nil {
+		if active := mgr.GetActiveLibrary(); active != nil {
 			itemCount = active.ItemCount
 			if active.Name != "" {
 				name = active.Name
 			}
 		}
+	}
+	if s.manager != nil {
 		if s.manager.userData != nil {
 			settings := s.manager.userData.GetMobileSettings()
 			pairingRequired = settings.PairingRequired
@@ -880,20 +909,31 @@ func (s *MobileServer) handleLibrariesList(w http.ResponseWriter, r *http.Reques
 
 	var activePath string
 	var activeLib *LibraryInfo
+	var desktopPath string
 	var recentPaths []string
+	if mgr := s.libraryManager(); mgr != nil {
+		activePath = mgr.GetActiveLibraryPath()
+		activeLib = mgr.GetActiveLibrary()
+	}
 	if s.manager != nil {
-		activePath = s.manager.GetActiveLibraryPath()
-		activeLib = s.manager.GetActiveLibrary()
+		desktopPath = s.manager.GetActiveLibraryPath()
 		if s.manager.userData != nil {
 			recentPaths = s.manager.userData.GetRecentLibraries()
 		}
 	}
 
-	allPaths := make([]string, 0, len(recentPaths)+1)
+	allPaths := make([]string, 0, len(recentPaths)+2)
 	seen := make(map[string]bool)
 	if activePath != "" {
 		allPaths = append(allPaths, activePath)
 		seen[filepath.Clean(activePath)] = true
+	}
+	if desktopPath != "" {
+		clean := filepath.Clean(desktopPath)
+		if !seen[clean] {
+			seen[clean] = true
+			allPaths = append(allPaths, clean)
+		}
 	}
 	for _, p := range recentPaths {
 		clean := filepath.Clean(p)
@@ -956,7 +996,8 @@ func (s *MobileServer) handleLibrariesList(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// handleLibrarySwitch changes the active library and notifies desktop and mobile clients.
+// handleLibrarySwitch changes the mobile client's selected library without
+// switching the desktop's active library.
 func (s *MobileServer) handleLibrarySwitch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, ErrCodeMethodNotAllowed, "method not allowed")
@@ -995,20 +1036,42 @@ func (s *MobileServer) handleLibrarySwitch(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	info, err := s.manager.OpenLibrary(targetPath)
+	var (
+		targetMgr *LibraryManager
+		err       error
+		pool      *LibraryPool
+	)
+	if s.manager != nil {
+		pool = s.manager.Pool()
+	}
+	if pool != nil {
+		targetMgr, err = pool.Acquire(targetPath)
+	} else if s.manager != nil {
+		targetMgr = s.manager.newChildManager()
+		_, err = targetMgr.openLibraryInternal(filepath.Clean(targetPath), false)
+	} else {
+		err = ErrCoreNotInitialized
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "SWITCH_FAILED", err.Error())
 		return
 	}
 
-	// Notify desktop UI via LibraryOpenedEvent
-	s.manager.emit(LibraryOpenedEvent, info)
+	s.mobileLibMu.Lock()
+	oldMgr := s.mobileMgr
+	s.mobileMgr = targetMgr
+	s.mobileLibPath = filepath.Clean(targetPath)
+	s.mobileLibMu.Unlock()
+
+	if oldMgr != nil && oldMgr != targetMgr && pool != nil {
+		pool.Release(oldMgr)
+	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":  "success",
-		"library": info,
+		"library": targetMgr.GetActiveLibrary(),
 	})
 }
 
@@ -1018,7 +1081,8 @@ func (s *MobileServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, ErrCodeMethodNotAllowed, "method not allowed")
 		return
 	}
-	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+	mgr := s.libraryManager()
+	if mgr == nil || mgr.GetActiveLibrary() == nil {
 		writeError(w, http.StatusServiceUnavailable, "NO_ACTIVE_LIBRARY", "no active library opened")
 		return
 	}
@@ -1102,7 +1166,7 @@ func (s *MobileServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 		s.finishMobileShare(sharedItems, folderID, sharedMode)
 	}()
 
-	items, importErr := s.manager.ImportFilesFromMobileToFolder(savedPaths, folderID)
+	items, importErr := mgr.ImportFilesFromMobileToFolder(savedPaths, folderID)
 	if importErr != nil {
 		writeError(w, http.StatusInternalServerError, "IMPORT_FAILED", importErr.Error())
 		return
@@ -1112,7 +1176,7 @@ func (s *MobileServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if len(items) > 0 {
 		// The import pipeline already broadcast items_updated to mobile clients;
 		// notify the desktop UI immediately to refresh while batching the toast/OS notification.
-		s.manager.emit("library-items-upserted", items)
+		mgr.emit("library-items-upserted", items)
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -1137,7 +1201,8 @@ func (s *MobileServer) handleShareText(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, ErrCodeMethodNotAllowed, "method not allowed")
 		return
 	}
-	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+	mgr := s.libraryManager()
+	if mgr == nil || mgr.GetActiveLibrary() == nil {
 		writeError(w, http.StatusServiceUnavailable, "NO_ACTIVE_LIBRARY", "no active library opened")
 		return
 	}
@@ -1184,7 +1249,7 @@ func (s *MobileServer) handleShareText(w http.ResponseWriter, r *http.Request) {
 				if req.FolderID != "" {
 					opts.FolderIDs = []string{req.FolderID}
 				}
-				if single, impErr := s.manager.ImportFromURLWithOptions(rawURL, opts); impErr != nil {
+				if single, impErr := mgr.ImportFromURLWithOptions(rawURL, opts); impErr != nil {
 					err = impErr
 				} else if single != nil {
 					imported = []Item{*single}
@@ -1223,7 +1288,7 @@ func (s *MobileServer) handleShareText(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to write shared text")
 			return
 		}
-		imported, err := s.manager.ImportFilesFromMobileToFolder([]string{destPath}, req.FolderID)
+		imported, err := mgr.ImportFilesFromMobileToFolder([]string{destPath}, req.FolderID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "IMPORT_FAILED", err.Error())
 			return
@@ -1232,7 +1297,7 @@ func (s *MobileServer) handleShareText(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(items) > 0 {
-		s.manager.emit("library-items-upserted", items)
+		mgr.emit("library-items-upserted", items)
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -1471,13 +1536,13 @@ func (s *MobileServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stats := MobileStatsResponse{TopColors: []string{}}
-	if s.manager != nil && s.manager.GetActiveLibrary() != nil {
-		workspace, err := s.manager.WorkspaceStats("desc")
+	if mgr := s.libraryManager(); mgr != nil && mgr.GetActiveLibrary() != nil {
+		workspace, err := mgr.WorkspaceStats("desc")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 			return
 		}
-		trash, err := s.manager.GetTrashCount()
+		trash, err := mgr.GetTrashCount()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 			return
@@ -1518,11 +1583,12 @@ func (s *MobileServer) handleCollectionItems(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusBadRequest, "INVALID_QUERY", "only the trash collection can be emptied")
 			return
 		}
-		if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+		mgr := s.libraryManager()
+		if mgr == nil || mgr.GetActiveLibrary() == nil {
 			writeError(w, http.StatusServiceUnavailable, ErrCodeNoActiveLibrary, "no active library")
 			return
 		}
-		if err := s.manager.EmptyTrash(); err != nil {
+		if err := mgr.EmptyTrash(); err != nil {
 			writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 			return
 		}
@@ -1569,13 +1635,14 @@ func (s *MobileServer) writeCollectionQueryResponse(w http.ResponseWriter, query
 }
 
 func (s *MobileServer) writeTrashResponse(w http.ResponseWriter, offset, limit int) {
-	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+	mgr := s.libraryManager()
+	if mgr == nil || mgr.GetActiveLibrary() == nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(MobileItemsResponse{Limit: limit, Offset: offset, Items: []MobileItemSummary{}})
 		return
 	}
 
-	items, err := s.manager.GetTrashItems("", "desc")
+	items, err := mgr.GetTrashItems("", "desc")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 		return
@@ -1601,7 +1668,8 @@ func (s *MobileServer) writeTrashResponse(w http.ResponseWriter, offset, limit i
 }
 
 func (s *MobileServer) writeQueryResponse(w http.ResponseWriter, spec QuerySpec, sortOrder string, offset, limit int) {
-	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+	mgr := s.libraryManager()
+	if mgr == nil || mgr.GetActiveLibrary() == nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(MobileItemsResponse{
 			Total:  0,
@@ -1612,7 +1680,7 @@ func (s *MobileServer) writeQueryResponse(w http.ResponseWriter, spec QuerySpec,
 		return
 	}
 
-	items, total, err := s.manager.QueryItems(spec, sortOrder, offset, limit)
+	items, total, err := mgr.QueryItems(spec, sortOrder, offset, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 		return
@@ -1671,13 +1739,14 @@ func (s *MobileServer) handleTagsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+	mgr := s.libraryManager()
+	if mgr == nil || mgr.GetActiveLibrary() == nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode([]Tag{})
 		return
 	}
 
-	tags, err := s.manager.GetTags()
+	tags, err := mgr.GetTags()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 		return
@@ -1697,13 +1766,14 @@ func (s *MobileServer) handleFoldersList(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+	mgr := s.libraryManager()
+	if mgr == nil || mgr.GetActiveLibrary() == nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode([]Folder{})
 		return
 	}
 
-	folders, err := s.manager.GetFolders()
+	folders, err := mgr.GetFolders()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 		return
@@ -1723,13 +1793,14 @@ func (s *MobileServer) handleColorsList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+	mgr := s.libraryManager()
+	if mgr == nil || mgr.GetActiveLibrary() == nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode([]string{})
 		return
 	}
 
-	items, err := s.manager.GetItems("", "desc")
+	items, err := mgr.GetItems("", "desc")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 		return
@@ -1865,11 +1936,12 @@ func (s *MobileServer) handleItemRestore(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusMethodNotAllowed, ErrCodeMethodNotAllowed, "method not allowed")
 		return
 	}
-	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+	mgr := s.libraryManager()
+	if mgr == nil || mgr.GetActiveLibrary() == nil {
 		writeError(w, http.StatusServiceUnavailable, ErrCodeNoActiveLibrary, "no active library")
 		return
 	}
-	if err := s.manager.RestoreFromTrash(itemID); err != nil {
+	if err := mgr.RestoreFromTrash(itemID); err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 		return
 	}
@@ -1881,7 +1953,8 @@ func (s *MobileServer) handleItemAddTag(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusMethodNotAllowed, ErrCodeMethodNotAllowed, "method not allowed")
 		return
 	}
-	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+	mgr := s.libraryManager()
+	if mgr == nil || mgr.GetActiveLibrary() == nil {
 		writeError(w, http.StatusServiceUnavailable, ErrCodeNoActiveLibrary, "no active library")
 		return
 	}
@@ -1897,7 +1970,7 @@ func (s *MobileServer) handleItemAddTag(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "INVALID_TAG", "tag is required")
 		return
 	}
-	if err := s.manager.AddTagToItem(itemID, tag); err != nil {
+	if err := mgr.AddTagToItem(itemID, tag); err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 		return
 	}
@@ -1909,7 +1982,8 @@ func (s *MobileServer) handleItemAddFolder(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusMethodNotAllowed, ErrCodeMethodNotAllowed, "method not allowed")
 		return
 	}
-	if s.manager == nil || s.manager.GetActiveLibrary() == nil {
+	mgr := s.libraryManager()
+	if mgr == nil || mgr.GetActiveLibrary() == nil {
 		writeError(w, http.StatusServiceUnavailable, ErrCodeNoActiveLibrary, "no active library")
 		return
 	}
@@ -1925,7 +1999,7 @@ func (s *MobileServer) handleItemAddFolder(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "INVALID_FOLDER", "folderId is required")
 		return
 	}
-	if err := s.manager.AddItemToFolder(itemID, folderID); err != nil {
+	if err := mgr.AddItemToFolder(itemID, folderID); err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeUnknown, err.Error())
 		return
 	}
@@ -1940,19 +2014,20 @@ func (s *MobileServer) handleItemDetail(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	if s.manager == nil {
+	mgr := s.libraryManager()
+	if mgr == nil {
 		writeError(w, http.StatusServiceUnavailable, ErrCodeNoActiveLibrary, "no active library")
 		return
 	}
 
-	item, err := s.manager.GetItem(itemID)
+	item, err := mgr.GetItem(itemID)
 	if err != nil || item == nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "item not found")
 		return
 	}
 
 	if r.Method == http.MethodDelete {
-		s.handleItemDelete(w, item)
+		s.handleItemDelete(w, mgr, item)
 		return
 	}
 
@@ -1967,20 +2042,20 @@ func (s *MobileServer) handleItemDetail(w http.ResponseWriter, r *http.Request, 
 
 // handleItemDelete moves an item to the recycle bin (MoveToTrash). The item can
 // still be restored from the desktop trash view; there is no permanent delete.
-func (s *MobileServer) handleItemDelete(w http.ResponseWriter, item *Item) {
+func (s *MobileServer) handleItemDelete(w http.ResponseWriter, mgr *LibraryManager, item *Item) {
 	if item.InTrash {
 		writeError(w, http.StatusConflict, ErrCodeItemAlreadyTrashed, "item is already in trash")
 		return
 	}
 
-	if err := s.manager.MoveToTrash(item.ID); err != nil {
+	if err := mgr.MoveToTrash(item.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeDeleteItemFailed, err.Error())
 		return
 	}
 
 	// MoveToTrash broadcasts items_updated to mobile clients. Tell the desktop
 	// UI to drop the item in place without broadcasting a second ws event.
-	s.manager.emit("library-items-trashed", []string{item.ID})
+	mgr.emit("library-items-trashed", []string{item.ID})
 	writeSuccess(w, map[string]any{"id": item.ID, "inTrash": true})
 }
 
@@ -1998,7 +2073,11 @@ func (s *MobileServer) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activePath := s.manager.GetActiveLibraryPath()
+	mgr := s.libraryManager()
+	activePath := ""
+	if mgr != nil {
+		activePath = mgr.GetActiveLibraryPath()
+	}
 	if activePath == "" {
 		http.Error(w, "no active library", http.StatusServiceUnavailable)
 		return
@@ -2019,7 +2098,7 @@ func (s *MobileServer) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback to original image if thumbnail not generated yet
-	item, err := s.manager.GetItem(itemID)
+	item, err := mgr.GetItem(itemID)
 	if err != nil || item == nil {
 		http.NotFound(w, r)
 		return
@@ -2056,13 +2135,17 @@ func (s *MobileServer) handleOriginal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activePath := s.manager.GetActiveLibraryPath()
+	mgr := s.libraryManager()
+	activePath := ""
+	if mgr != nil {
+		activePath = mgr.GetActiveLibraryPath()
+	}
 	if activePath == "" {
 		http.Error(w, "no active library", http.StatusServiceUnavailable)
 		return
 	}
 
-	item, err := s.manager.GetItem(itemID)
+	item, err := mgr.GetItem(itemID)
 	if err != nil || item == nil {
 		http.NotFound(w, r)
 		return

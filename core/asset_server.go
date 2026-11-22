@@ -109,6 +109,11 @@ func (s *AssetServer) handleAssetRequest(w http.ResponseWriter, r *http.Request)
 	assetKind := parts[1]
 
 	activePath := s.manager.GetActiveLibraryPath()
+	if activePath == "" && s.manager != nil && s.manager.Pool() != nil {
+		if active := s.manager.Pool().AnyActive(); active != nil {
+			activePath = active.GetActiveLibraryPath()
+		}
+	}
 	if activePath == "" {
 		http.Error(w, "no active library", http.StatusServiceUnavailable)
 		return
@@ -183,6 +188,11 @@ func (s *AssetServer) handleDownloadRequest(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	itemID := strings.TrimPrefix(r.URL.Path, "/asset/download/")
 	activePath := s.manager.GetActiveLibraryPath()
+	if activePath == "" && s.manager != nil && s.manager.Pool() != nil {
+		if active := s.manager.Pool().AnyActive(); active != nil {
+			activePath = active.GetActiveLibraryPath()
+		}
+	}
 	if activePath == "" {
 		http.Error(w, "no active library", http.StatusServiceUnavailable)
 		return

@@ -47,12 +47,19 @@ type dropZoneWindowEntry struct {
 	bounds   mygo.Rectangle
 }
 
+type mainWindowEntry struct {
+	win  *mygo.Window
+	view *app.App
+	svc  *core.Service
+}
+
 // appHost is the mygo implementation of core.Host. It owns the native shell:
 // windows, events, dialogs, clipboard and the main-thread hop.
 type appHost struct {
-	mu      sync.RWMutex
-	windows map[string]*mygo.Window
-	main    *mygo.Window
+	mu          sync.RWMutex
+	windows     map[string]*mygo.Window
+	main        *mygo.Window
+	mainWindows []*mainWindowEntry
 	// openingMain is set while a main window is being created, so a second
 	// OpenMainWindow waits for the first instead of building another one.
 	openingMain     chan struct{}
@@ -61,6 +68,7 @@ type appHost struct {
 	dropZones       map[int64]dropZoneWindowEntry
 	dropZoneSyncSeq atomic.Uint64
 
+	rootMgr  *core.LibraryManager
 	svc      *core.Service
 	views    *app.App
 	quitting atomic.Bool
@@ -97,8 +105,24 @@ func (h *appHost) event(name string) *mygo.Event[any] {
 }
 
 func (h *appHost) Emit(name string, payload any) {
+	h.mu.RLock()
+	views := make([]*app.App, 0, len(h.mainWindows)+1)
+	seen := make(map[*app.App]struct{}, len(h.mainWindows)+1)
 	if h.views != nil {
-		h.views.HandleEvent(name, payload)
+		views = append(views, h.views)
+		seen[h.views] = struct{}{}
+	}
+	for _, entry := range h.mainWindows {
+		if entry.view != nil {
+			if _, ok := seen[entry.view]; !ok {
+				seen[entry.view] = struct{}{}
+				views = append(views, entry.view)
+			}
+		}
+	}
+	h.mu.RUnlock()
+	for _, v := range views {
+		v.HandleEvent(name, payload)
 	}
 	// Diagnostics belong to the native log viewer. Broadcasting every entry
 	// would also serialize it and enqueue it for unrelated embedded web pages.
@@ -124,6 +148,18 @@ func (h *appHost) setMain(w *mygo.Window) {
 	h.mu.Lock()
 	h.main = w
 	h.windows["main"] = w
+	if w != nil {
+		found := false
+		for _, entry := range h.mainWindows {
+			if entry.win == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			h.mainWindows = append(h.mainWindows, &mainWindowEntry{win: w, view: h.views, svc: h.svc})
+		}
+	}
 	h.mu.Unlock()
 }
 
@@ -242,19 +278,20 @@ func (h *appHost) ToggleMainWindow() {
 // on the close button still hides the window; this path is for leaving a
 // library, where the window must actually go away.
 func (h *appHost) CloseMainWindow() {
-	w := h.mainWindow()
-	if w == nil {
-		return
-	}
 	h.mu.Lock()
-	if h.main == w {
-		h.main = nil
-	}
-	if h.windows["main"] == w {
-		delete(h.windows, "main")
-	}
+	entries := append([]*mainWindowEntry(nil), h.mainWindows...)
+	h.mainWindows = nil
+	h.main = nil
+	delete(h.windows, "main")
 	h.mu.Unlock()
-	w.Destroy()
+	for _, entry := range entries {
+		if entry.svc != nil {
+			entry.svc.ReleaseWindow()
+		}
+		if entry.win != nil {
+			entry.win.Destroy()
+		}
+	}
 }
 
 // OpenMainWindow creates a fresh main window, or reveals the one that is
@@ -285,16 +322,80 @@ func (h *appHost) OpenMainWindow() {
 	h.mu.Lock()
 	h.main = w
 	h.windows["main"] = w
+	h.mainWindows = append(h.mainWindows, &mainWindowEntry{win: w, view: h.views, svc: h.svc})
 	h.openingMain = nil
 	close(done)
 	h.mu.Unlock()
 	mygo.App.Focus()
 }
 
+// OpenNewMainWindow opens an additional independent main window, optionally
+// pointing at libraryPath (or the active main window's library when empty).
+func (h *appHost) OpenNewMainWindow(libraryPath string) {
+	h.RunOnMain(func() {
+		h.CancelLightweightIdle()
+		h.exitLightweightMode()
+		if h.mainWindow() == nil && libraryPath == "" {
+			h.OpenMainWindow()
+			return
+		}
+		if h.rootMgr == nil {
+			h.OpenMainWindow()
+			return
+		}
+
+		targetPath := strings.TrimSpace(libraryPath)
+		if targetPath == "" {
+			h.mu.RLock()
+			var activeSvc *core.Service
+			for _, entry := range h.mainWindows {
+				if entry.win == h.main && entry.svc != nil {
+					activeSvc = entry.svc
+					break
+				}
+			}
+			if activeSvc == nil {
+				activeSvc = h.svc
+			}
+			h.mu.RUnlock()
+			if activeSvc != nil {
+				if lib, _ := activeSvc.GetActiveLibrary(); lib != nil {
+					targetPath = lib.Path
+				}
+			}
+		}
+
+		winSvc := core.NewWindowService(h.rootMgr, h)
+		if targetPath != "" {
+			if _, err := winSvc.OpenLibrary(targetPath); err != nil {
+				log.Printf("[Window] new window open library %s: %v", targetPath, err)
+			}
+		}
+		winApp := app.New(winSvc)
+		w := h.createMainWindowForView(winApp, winSvc)
+
+		h.mu.Lock()
+		if h.main == nil {
+			h.main = w
+			h.windows["main"] = w
+		}
+		h.mainWindows = append(h.mainWindows, &mainWindowEntry{win: w, view: winApp, svc: winSvc})
+		h.mu.Unlock()
+
+		w.Show()
+		w.Focus()
+		mygo.App.Focus()
+	})
+}
+
 // createMainWindow builds the main window with the same options used at
 // launch. Callers publish it through setMain or OpenMainWindow.
 func (h *appHost) createMainWindow() *mygo.Window {
-	w := mygo.NewWindow(h.windowOptions(core.WindowSpec{
+	return h.createMainWindowForView(h.views, h.svc)
+}
+
+func (h *appHost) createMainWindowForView(view *app.App, svc *core.Service) *mygo.Window {
+	opts := h.windowOptions(core.WindowSpec{
 		Title:          "Bowerbird",
 		URL:            "/",
 		Width:          1280,
@@ -303,17 +404,65 @@ func (h *appHost) createMainWindow() *mygo.Window {
 		MinHeight:      600,
 		TitleBarHidden: true,
 		TitleBarHeight: 52,
-	}))
+	})
+	if view != nil {
+		opts.Content = view.MainContent()
+	}
+	w := mygo.NewWindow(opts)
 	h.applyWindowVibrancy(w)
-	h.attachDrop(w)
-	h.views.SetMainWindow(w)
+	h.attachDropForView(w, view, svc)
+	if view != nil {
+		view.SetMainWindow(w)
+	}
+	w.OnFocus(func() {
+		h.mu.Lock()
+		h.main = w
+		h.mu.Unlock()
+	})
 	w.OnClose(func(e *mygo.CloseEvent) {
 		if h.quitting.Load() {
+			return
+		}
+		h.mu.RLock()
+		count := len(h.mainWindows)
+		h.mu.RUnlock()
+		if count > 1 {
 			return
 		}
 		e.PreventDefault()
 		w.Hide()
 		h.scheduleLightweightIdle()
+	})
+	w.OnClosed(func() {
+		h.mu.Lock()
+		var closedSvc *core.Service
+		next := h.mainWindows[:0]
+		for _, entry := range h.mainWindows {
+			if entry.win == w {
+				closedSvc = entry.svc
+				continue
+			}
+			next = append(next, entry)
+		}
+		h.mainWindows = next
+		if h.main == w {
+			if len(next) > 0 {
+				h.main = next[len(next)-1].win
+			} else {
+				h.main = nil
+			}
+		}
+		if h.windows["main"] == w {
+			if h.main != nil {
+				h.windows["main"] = h.main
+			} else {
+				delete(h.windows, "main")
+			}
+		}
+		h.mu.Unlock()
+		if closedSvc != nil {
+			closedSvc.ReleaseWindow()
+		}
 	})
 	return w
 }
@@ -362,16 +511,34 @@ func (h *appHost) EnterLightweightMode() {
 	h.liteActive.Store(true)
 
 	h.mu.Lock()
-	windows := make([]*mygo.Window, 0, len(h.windows))
+	windows := make([]*mygo.Window, 0, len(h.windows)+len(h.mainWindows))
 	for name, w := range h.windows {
 		windows = append(windows, w)
 		delete(h.windows, name)
 	}
+	var releaseSvcs []*core.Service
+	for _, entry := range h.mainWindows {
+		if entry.win != nil {
+			windows = append(windows, entry.win)
+		}
+		if entry.svc != nil {
+			releaseSvcs = append(releaseSvcs, entry.svc)
+		}
+	}
+	h.mainWindows = nil
 	h.main = nil
 	h.mu.Unlock()
 
+	for _, svc := range releaseSvcs {
+		svc.ReleaseWindow()
+	}
+	seen := make(map[*mygo.Window]struct{}, len(windows))
 	for _, w := range windows {
 		if w != nil {
+			if _, ok := seen[w]; ok {
+				continue
+			}
+			seen[w] = struct{}{}
 			w.Destroy()
 		}
 	}
@@ -514,9 +681,12 @@ func (h *appHost) ApplyVibrancy(enabled bool) {
 		material = windowVibrancyMaterial
 	}
 	h.mu.RLock()
-	windows := make([]*mygo.Window, 0, len(h.windows)+1)
+	windows := make([]*mygo.Window, 0, len(h.windows)+len(h.mainWindows)+1)
 	for _, w := range h.windows {
 		windows = append(windows, w)
+	}
+	for _, entry := range h.mainWindows {
+		windows = append(windows, entry.win)
 	}
 	if h.main != nil {
 		windows = append(windows, h.main)
@@ -540,9 +710,12 @@ func (h *appHost) ApplyVibrancy(enabled bool) {
 func (h *appHost) ApplyTheme(theme string) {
 	mygo.Theme.SetSource(nativeThemeSource(theme))
 	h.mu.RLock()
-	windows := make([]*mygo.Window, 0, len(h.windows)+1)
+	windows := make([]*mygo.Window, 0, len(h.windows)+len(h.mainWindows)+1)
 	for _, w := range h.windows {
 		windows = append(windows, w)
+	}
+	for _, entry := range h.mainWindows {
+		windows = append(windows, entry.win)
 	}
 	if h.main != nil {
 		windows = append(windows, h.main)
@@ -564,19 +737,23 @@ func (h *appHost) ApplyTheme(theme string) {
 }
 
 func (h *appHost) attachDrop(w *mygo.Window) {
+	h.attachDropForView(w, h.views, h.svc)
+}
+
+func (h *appHost) attachDropForView(w *mygo.Window, view *app.App, svc *core.Service) {
 	w.OnFileDrop(func(e *mygo.FileDropEvent) {
 		paths := append([]string(nil), e.Paths...)
-		if h.views != nil {
-			h.views.HandleDrop(paths)
+		if view != nil {
+			view.HandleDrop(paths)
 			return
 		}
-		if h.svc != nil {
-			go func() { _ = h.svc.HandleNativeDrop(paths, "", "") }()
+		if svc != nil {
+			go func() { _ = svc.HandleNativeDrop(paths, "", "") }()
 		}
 	})
 	w.OnHide(func() {
-		if h.views != nil {
-			h.views.Notify(false)
+		if view != nil {
+			view.Notify(false)
 		}
 	})
 }
@@ -754,14 +931,23 @@ func (h *appHost) buildAppMenu() *mygo.Menu {
 		},
 	}
 
+	newWinLabel := "New Window"
+	if h.views != nil && h.views.Translator().Language() == "zh" {
+		newWinLabel = "新建窗口"
+	}
+
 	return mygo.NewMenu([]*mygo.MenuItem{
 		appMenu,
+		{Label: "File", Submenu: []*mygo.MenuItem{
+			{Label: newWinLabel, Accelerator: core.AcceleratorForMyGo(h.svc.ShortcutAccelerator(core.AppMenuNewWindow)), Click: appAction(core.AppMenuNewWindow)},
+			mygo.Separator(),
+			{Role: mygo.RoleClose},
+		}},
 		{Label: "Capture", Submenu: []*mygo.MenuItem{
 			captureItem(core.AppMenuCaptureArea),
 			captureItem(core.AppMenuCaptureFullscreen),
 			captureItem(core.AppMenuCaptureWindow),
 		}},
-		{Role: mygo.RoleFileMenu},
 		{Role: mygo.RoleEditMenu},
 		{Role: mygo.RoleViewMenu},
 		{Role: mygo.RoleWindowMenu},
@@ -942,6 +1128,9 @@ func main() {
 	mygo.App.WhenReady(func() {
 		coreMgr = core.NewLibraryManager()
 		coreMgr.SetHost(host)
+		host.mu.Lock()
+		host.rootMgr = coreMgr
+		host.mu.Unlock()
 		core.AttachManager(coreService, coreMgr)
 		// The views were built before the manager existed, so they could not read
 		// the stored language yet. Apply it before any window, menu or tray is

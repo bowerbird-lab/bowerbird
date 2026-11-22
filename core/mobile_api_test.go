@@ -477,25 +477,12 @@ func TestMobileAPIEndpoints(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "test done")
 
-	// Trigger library switch to test library_changed ws event
+	// Trigger library creation on desktop: mobile must NOT follow/receive library_changed
 	secondLib, err := mgr.CreateLibrary(tempDir, "SecondLib")
 	if err != nil {
 		t.Fatalf("failed to create second library: %v", err)
 	}
 	_ = secondLib
-
-	// Read ws event
-	_, msg, err := wsConn.Read(wsCtx)
-	if err != nil {
-		t.Fatalf("failed to read ws event: %v", err)
-	}
-	var wsEv map[string]any
-	if err := json.Unmarshal(msg, &wsEv); err != nil {
-		t.Fatalf("failed to parse ws event: %v", err)
-	}
-	if wsEv["event"] != "library_changed" {
-		t.Errorf("expected library_changed event, got %v", wsEv["event"])
-	}
 
 	// 15. Test GET /api/v1/libraries
 	req, _ = http.NewRequest(http.MethodGet, baseURL+"/api/v1/libraries", nil)
@@ -513,7 +500,7 @@ func TestMobileAPIEndpoints(t *testing.T) {
 		t.Errorf("expected at least 2 libraries, got %d", len(libsResp.Libraries))
 	}
 
-	// 16. Test POST /api/v1/libraries/switch (switch back to first library)
+	// 16. Test POST /api/v1/libraries/switch (mobile switches to first library; desktop must NOT follow)
 	switchPayload, _ := json.Marshal(map[string]string{
 		"path": info.Path,
 	})
@@ -526,18 +513,28 @@ func TestMobileAPIEndpoints(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	if mgr.GetActiveLibraryPath() != info.Path {
-		t.Errorf("expected active library to switch back to %s, got %s", info.Path, mgr.GetActiveLibraryPath())
+	if mgr.GetActiveLibraryPath() != secondLib.Path {
+		t.Errorf("expected desktop active library to remain %s, got %s", secondLib.Path, mgr.GetActiveLibraryPath())
 	}
-	// Read ws event for switch
-	_, msg, err = wsConn.Read(wsCtx)
-	if err != nil {
-		t.Fatalf("failed to read switch ws event: %v", err)
+
+	// Verify GET /api/v1/libraries reports mobile's selected library as active
+	req, _ = http.NewRequest(http.MethodGet, baseURL+"/api/v1/libraries", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/v1/libraries after switch failed: %v, status %d", err, resp.StatusCode)
 	}
-	var switchEv map[string]any
-	_ = json.Unmarshal(msg, &switchEv)
-	if switchEv["event"] != "library_changed" {
-		t.Errorf("expected library_changed event after switch, got %v", switchEv["event"])
+	_ = json.NewDecoder(resp.Body).Decode(&libsResp)
+	resp.Body.Close()
+	var mobileActivePath string
+	for _, lib := range libsResp.Libraries {
+		if lib.IsActive {
+			mobileActivePath = lib.Path
+			break
+		}
+	}
+	if mobileActivePath != info.Path {
+		t.Errorf("expected mobile active library to be %s, got %s", info.Path, mobileActivePath)
 	}
 
 	// 17. Test POST /api/v1/upload multipart upload
@@ -570,7 +567,7 @@ func TestMobileAPIEndpoints(t *testing.T) {
 	}
 
 	// Read ws event for items_updated
-	_, msg, err = wsConn.Read(wsCtx)
+	_, msg, err := wsConn.Read(wsCtx)
 	if err != nil {
 		t.Fatalf("failed to read items_updated ws event: %v", err)
 	}

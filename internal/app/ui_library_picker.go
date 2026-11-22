@@ -295,15 +295,25 @@ func (a *App) libraryPickerRow(c *ui.Context, ref core.LibraryRef, canReorder bo
 		a.openLibraryRef(ref)
 	}
 	row.ContextMenu(func(m *ui.Menu) {
+		if m.Item(a.t("sidebar.openInNewWindow")).Chosen() {
+			a.libraryPickerOpen = false
+			path := ref.Path
+			go func() {
+				if err := a.svc.OpenNewWindow(path); err != nil {
+					a.post(func() { a.showToast(err.Error()) })
+				}
+			}()
+		}
 		if active {
+			m.Separator()
 			if m.Item(a.t("sidebar.rescanLibrary")).Chosen() {
 				a.libraryPickerOpen = false
 				a.dialog = dialogRescanLibrary
 				a.dialogValue = libraryRefName(ref)
 				a.dialogError = ""
 			}
-			m.Separator()
 		}
+		m.Separator()
 		if m.Item(a.t("sidebar.removeLibrary")).Chosen() {
 			if err := a.svc.RemoveRecentLibrary(ref.Path); err != nil {
 				a.showToast(err.Error())

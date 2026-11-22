@@ -43,6 +43,9 @@ type Host interface {
 	// OpenMainWindow creates the main window when it is gone, or shows and
 	// focuses it when it is still open.
 	OpenMainWindow()
+	// OpenNewMainWindow opens an additional independent main window, optionally
+	// pointing at libraryPath (or the current active library when empty).
+	OpenNewMainWindow(libraryPath string)
 
 	// OpenDirectory asks the user for a directory.
 	OpenDirectory(title string) (string, error)
@@ -94,5 +97,8 @@ func AttachHost(s *Service, h Host) {
 func AttachManager(s *Service, m *LibraryManager) {
 	if s != nil {
 		s.mgr = m
+		if s.rootMgr == nil {
+			s.rootMgr = m
+		}
 	}
 }

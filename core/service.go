@@ -20,8 +20,11 @@ import (
 
 // Service is the RPC surface exposed to the frontend.
 type Service struct {
-	mgr  *LibraryManager
-	host Host
+	mgr          *LibraryManager
+	rootMgr      *LibraryManager
+	host         Host
+	windowScoped bool
+	acquired     bool
 
 	// settingsMu guards settings-window creation so rapid calls cannot spawn
 	// duplicate windows.
@@ -29,13 +32,59 @@ type Service struct {
 }
 
 func NewService(mgr *LibraryManager) *Service {
-	return &Service{mgr: mgr}
+	return &Service{mgr: mgr, rootMgr: mgr}
+}
+
+// NewWindowService creates a window-scoped Service backed by root's shared
+// resources (pool, userData, plugins, host) so each window can open and switch
+// libraries independently.
+func NewWindowService(root *LibraryManager, host Host) *Service {
+	return &Service{
+		mgr:          root,
+		rootMgr:      root,
+		host:         host,
+		windowScoped: true,
+	}
+}
+
+func (s *Service) root() *LibraryManager {
+	if s.rootMgr != nil {
+		return s.rootMgr
+	}
+	return s.mgr
+}
+
+// OpenNewWindow asks the desktop host to open a new independent main window,
+// optionally targeting libraryPath.
+func (s *Service) OpenNewWindow(libraryPath string) error {
+	if h := s.getHost(); h != nil {
+		h.OpenNewMainWindow(libraryPath)
+	}
+	return nil
+}
+
+// ReleaseWindow releases any pooled library reference held by a window-scoped
+// Service when its window is destroyed.
+func (s *Service) ReleaseWindow() {
+	if !s.windowScoped || !s.acquired {
+		return
+	}
+	root := s.root()
+	if root == nil || root.pool == nil || s.mgr == nil {
+		return
+	}
+	root.pool.Release(s.mgr)
+	s.mgr = nil
+	s.acquired = false
 }
 
 // Internal wiring methods (unexported from RPC)
 
 func (s *Service) SetManager(mgr *LibraryManager) {
 	s.mgr = mgr
+	if s.rootMgr == nil {
+		s.rootMgr = mgr
+	}
 	if mgr != nil && s.host == nil {
 		s.host = mgr.Host()
 	}
@@ -69,12 +118,25 @@ func (s *Service) GetActiveLibrary() (*LibraryInfo, error) {
 }
 
 func (s *Service) CreateLibrary(parentDir string, libName string) (*LibraryInfo, error) {
-	if s.mgr == nil {
+	root := s.root()
+	if root == nil {
 		return nil, ErrCoreNotInitialized
+	}
+	if s.windowScoped && root.pool != nil {
+		tempMgr := root.newChildManager()
+		info, err := tempMgr.CreateLibrary(parentDir, libName)
+		if err != nil {
+			return nil, WrapAppError(ErrCodeCreateLibDirFailed, err)
+		}
+		tempMgr.closeDBOnly()
+		return s.OpenLibrary(info.Path)
 	}
 	info, err := s.mgr.CreateLibrary(parentDir, libName)
 	if err != nil {
 		return nil, WrapAppError(ErrCodeCreateLibDirFailed, err)
+	}
+	if root.pool != nil {
+		root.pool.RegisterInitial(s.mgr)
 	}
 	s.emit(LibraryOpenedEvent, info)
 	s.openMainWindow()
@@ -83,16 +145,44 @@ func (s *Service) CreateLibrary(parentDir string, libName string) (*LibraryInfo,
 }
 
 func (s *Service) OpenLibrary(libraryPath string) (*LibraryInfo, error) {
-	if s.mgr == nil {
+	root := s.root()
+	if root == nil {
 		return nil, ErrCoreNotInitialized
+	}
+	if pool := root.pool; pool != nil {
+		newMgr, err := pool.Acquire(libraryPath)
+		if err != nil {
+			return nil, WrapAppError(ErrCodeInvalidLibDir, err)
+		}
+		oldMgr := s.mgr
+		wasAcquired := s.acquired
+		s.mgr = newMgr
+		s.acquired = true
+		if wasAcquired && oldMgr != nil && oldMgr != newMgr {
+			pool.Release(oldMgr)
+		} else if !s.windowScoped && oldMgr != nil && oldMgr != newMgr {
+			pool.Release(oldMgr)
+		}
+		if root.userData != nil {
+			_ = root.userData.SetActiveLibraryPath(libraryPath)
+		}
+		info := newMgr.GetActiveLibrary()
+		s.emit(LibraryOpenedEvent, info)
+		if !s.windowScoped {
+			s.openMainWindow()
+			_ = s.CloseSetupWindow()
+		}
+		return info, nil
 	}
 	info, err := s.mgr.OpenLibrary(libraryPath)
 	if err != nil {
 		return nil, WrapAppError(ErrCodeInvalidLibDir, err)
 	}
 	s.emit(LibraryOpenedEvent, info)
-	s.openMainWindow()
-	_ = s.CloseSetupWindow()
+	if !s.windowScoped {
+		s.openMainWindow()
+		_ = s.CloseSetupWindow()
+	}
 	return info, nil
 }
 

@@ -38,6 +38,7 @@ const (
 	AppMenuCaptureFullscreen AppMenuAction = "capture-fullscreen"
 	AppMenuCaptureWindow     AppMenuAction = "capture-window"
 	AppMenuOpenMainWindow    AppMenuAction = "open-main-window"
+	AppMenuNewWindow         AppMenuAction = "new-window"
 	AppMenuToggleMainWindow  AppMenuAction = "toggle-main-window"
 	AppMenuEnterLightweight  AppMenuAction = "enter-lightweight"
 )
@@ -112,6 +113,8 @@ func shortcutIDForAppMenu(action string) string {
 		return ShortcutCaptureWindow
 	case AppMenuToggleMainWindow, AppMenuOpenMainWindow:
 		return ShortcutToggleMainWindow
+	case AppMenuNewWindow:
+		return ShortcutNewWindow
 	case AppMenuSettings:
 		return ShortcutOpenSettings
 	case AppMenuLogs:
@@ -241,6 +244,11 @@ func (s *Service) InvokeAppMenu(action string) error {
 			h.OpenMainWindow()
 		}
 		return nil
+	case AppMenuNewWindow:
+		if h := s.getHost(); h != nil {
+			h.OpenNewMainWindow("")
+		}
+		return nil
 	case AppMenuToggleMainWindow:
 		if h := s.getHost(); h != nil {
 			h.ToggleMainWindow()
@@ -289,6 +297,7 @@ func TrayMenuModelWithSettings(appName string, isZh bool, settings ShortcutSetti
 	fullscreenTitle := "Fullscreen Capture"
 	windowTitle := "Window Capture"
 	showTitle := "Show Main Window"
+	newWinTitle := "New Window"
 	settingsTitle := "Settings…"
 	liteTitle := "Enter Lightweight Mode"
 	quitTitle := "Quit " + appName
@@ -298,6 +307,7 @@ func TrayMenuModelWithSettings(appName string, isZh bool, settings ShortcutSetti
 		fullscreenTitle = "全屏截图"
 		windowTitle = "窗口截图"
 		showTitle = "显示主窗口"
+		newWinTitle = "新建窗口"
 		settingsTitle = "偏好设置…"
 		liteTitle = "立即进入轻量模式"
 		quitTitle = "退出 " + appName
@@ -309,6 +319,7 @@ func TrayMenuModelWithSettings(appName string, isZh bool, settings ShortcutSetti
 		{Label: fullscreenTitle, Action: AppMenuCaptureFullscreen, Accelerator: appMenuAcceleratorFromSettings(AppMenuCaptureFullscreen, settings)},
 		{Separator: true},
 		{Label: showTitle, Action: AppMenuOpenMainWindow, Accelerator: appMenuAcceleratorFromSettings(AppMenuToggleMainWindow, settings)},
+		{Label: newWinTitle, Action: AppMenuNewWindow, Accelerator: settings.Accelerator(ShortcutNewWindow)},
 		{Label: settingsTitle, Action: AppMenuSettings, Accelerator: appMenuAcceleratorFromSettings(AppMenuSettings, settings)},
 		{Label: liteTitle, Action: AppMenuEnterLightweight},
 		{Separator: true},

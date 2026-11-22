@@ -31,6 +31,7 @@ const (
 	ShortcutFullscreen        = "fullscreen"
 	ShortcutQuit              = "quit"
 	ShortcutCloseWindow       = "close-window"
+	ShortcutNewWindow         = "new-window"
 	ShortcutZoomIn            = "zoom-in"
 	ShortcutZoomOut           = "zoom-out"
 	ShortcutZoomReset         = "zoom-reset"
@@ -88,6 +89,7 @@ func ShortcutCatalog() []ShortcutDef {
 		{ID: ShortcutFullscreen, Scope: ShortcutScopeApp},
 		{ID: ShortcutQuit, Scope: ShortcutScopeApp},
 		{ID: ShortcutCloseWindow, Scope: ShortcutScopeApp},
+		{ID: ShortcutNewWindow, Scope: ShortcutScopeApp},
 		{ID: ShortcutZoomIn, Scope: ShortcutScopeApp},
 		{ID: ShortcutZoomOut, Scope: ShortcutScopeApp},
 		{ID: ShortcutZoomReset, Scope: ShortcutScopeApp},
@@ -186,6 +188,7 @@ var defaultShortcutBindings = func() map[string]string {
 		ShortcutFullscreen:        "F11",
 		ShortcutQuit:              "CmdOrCtrl+Q",
 		ShortcutCloseWindow:       "CmdOrCtrl+W",
+		ShortcutNewWindow:         "CmdOrCtrl+N",
 		ShortcutZoomIn:            "CmdOrCtrl+=",
 		ShortcutZoomOut:           "CmdOrCtrl+-",
 		ShortcutZoomReset:         "CmdOrCtrl+0",
