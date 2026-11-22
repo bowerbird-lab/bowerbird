@@ -1104,6 +1104,8 @@
   "header": {
     "clearFilters": "Clear filters",
     "filters": "Filters",
+    "nameAsc": "Name (A→Z)",
+    "nameDesc": "Name (Z→A)",
     "newest": "Newest",
     "oldest": "Oldest",
     "searchPlaceholder": "Search library…",

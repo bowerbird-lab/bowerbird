@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -67,15 +68,56 @@ func diskItemScope(trash bool, folders []string) (string, []any) {
 	return where, args
 }
 
+func normalizeSortOrder(sortOrder string) string {
+	switch strings.ToLower(strings.TrimSpace(sortOrder)) {
+	case "asc":
+		return "asc"
+	case "name_asc":
+		return "name_asc"
+	case "name_desc":
+		return "name_desc"
+	default:
+		return "desc"
+	}
+}
+
+func isNameSortOrder(sortOrder string) bool {
+	s := normalizeSortOrder(sortOrder)
+	return s == "name_asc" || s == "name_desc"
+}
+
+func sortItemsByName(items []Item, desc bool) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Name != items[j].Name {
+			if desc {
+				return NaturalLess(items[j].Name, items[i].Name)
+			}
+			return NaturalLess(items[i].Name, items[j].Name)
+		}
+		if desc {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].ID < items[j].ID
+	})
+}
+
 func diskItemOrder(sortOrder string, trash bool) string {
-	direction := " DESC"
-	if strings.EqualFold(sortOrder, "asc") {
-		direction = " ASC"
+	switch normalizeSortOrder(sortOrder) {
+	case "asc":
+		if trash {
+			return "i.trashed_at ASC, i.imported_at ASC, i.id ASC"
+		}
+		return "i.imported_at ASC, i.id ASC"
+	case "name_asc":
+		return "LOWER(i.name) ASC, i.name ASC, i.id ASC"
+	case "name_desc":
+		return "LOWER(i.name) DESC, i.name DESC, i.id DESC"
+	default:
+		if trash {
+			return "i.trashed_at DESC, i.imported_at DESC, i.id DESC"
+		}
+		return "i.imported_at DESC, i.id DESC"
 	}
-	if trash {
-		return "i.trashed_at" + direction + ", i.imported_at" + direction + ", i.id" + direction
-	}
-	return "i.imported_at" + direction + ", i.id" + direction
 }
 
 func simpleWorkspaceQuery(spec QuerySpec) bool {
@@ -173,6 +215,9 @@ func (m *LibraryManager) WorkspaceIndexContext(ctx context.Context, spec QuerySp
 		page.Total++
 		page.TotalSize += item.Size
 	})
+	if err == nil && isNameSortOrder(sortOrder) {
+		sortItemsByName(page.Items, normalizeSortOrder(sortOrder) == "name_desc")
+	}
 	return page, err
 }
 
@@ -223,15 +268,36 @@ func (m *LibraryManager) workspaceItems(ids []string, cards bool) ([]Item, error
 func (m *LibraryManager) diskQueryPage(spec QuerySpec, sortOrder string, offset, limit int, scope []string, unrated bool) (QueryPage, error) {
 	page := QueryPage{Items: []Item{}, Offset: offset, Limit: limit}
 	var ids []string
-	err := m.diskQuery(spec, sortOrder, scope, unrated, false, true, func(item Item) {
-		if page.Total >= offset && len(ids) < limit {
-			ids = append(ids, item.ID)
+	var err error
+	if isNameSortOrder(sortOrder) {
+		var matched []Item
+		err = m.diskQuery(spec, sortOrder, scope, unrated, false, true, func(item Item) {
+			matched = append(matched, item)
+			page.Total++
+			page.TotalSize += item.Size
+		})
+		if err != nil {
+			return page, err
 		}
-		page.Total++
-		page.TotalSize += item.Size
-	})
-	if err != nil {
-		return page, err
+		sortItemsByName(matched, normalizeSortOrder(sortOrder) == "name_desc")
+		if offset < len(matched) {
+			end := min(offset+limit, len(matched))
+			ids = make([]string, 0, end-offset)
+			for _, item := range matched[offset:end] {
+				ids = append(ids, item.ID)
+			}
+		}
+	} else {
+		err = m.diskQuery(spec, sortOrder, scope, unrated, false, true, func(item Item) {
+			if page.Total >= offset && len(ids) < limit {
+				ids = append(ids, item.ID)
+			}
+			page.Total++
+			page.TotalSize += item.Size
+		})
+		if err != nil {
+			return page, err
+		}
 	}
 	items, err := m.WorkspaceItems(ids)
 	byID := make(map[string]Item, len(items))
@@ -357,6 +423,9 @@ func (m *LibraryManager) diskAllItems(query, sortOrder string, trash bool) ([]It
 	})
 	if err != nil {
 		return nil, err
+	}
+	if isNameSortOrder(sortOrder) {
+		sortItemsByName(items, normalizeSortOrder(sortOrder) == "name_desc")
 	}
 	return items, nil
 }

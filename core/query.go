@@ -293,12 +293,42 @@ func (m *LibraryManager) QueryPage(spec QuerySpec, sortOrder string, offset int,
 	}
 
 	text := strings.ToLower(strings.TrimSpace(spec.Text))
-	isAsc := strings.ToLower(sortOrder) == "asc"
+	order := normalizeSortOrder(sortOrder)
+	isAsc := order == "asc"
+	nameSort := isNameSortOrder(order)
 
 	m.cacheMu.RLock()
 	defer m.cacheMu.RUnlock()
 
 	n := len(m.itemsDesc)
+	if nameSort {
+		var matchedItems []Item
+		for step := 0; step < n; step++ {
+			it := &m.itemsDesc[step]
+			if text != "" && !strings.Contains(m.searchIndex[it.ID], text) {
+				continue
+			}
+			if !spec.matches(it) {
+				continue
+			}
+			if onlyUnrated && it.Rating != 0 {
+				continue
+			}
+			if scope != nil && !itemInFolderScope(it, scope) {
+				continue
+			}
+			page.Total++
+			page.TotalSize += it.Size
+			matchedItems = append(matchedItems, *it)
+		}
+		sortItemsByName(matchedItems, order == "name_desc")
+		if offset < len(matchedItems) {
+			end := min(offset+limit, len(matchedItems))
+			page.Items = append(page.Items, matchedItems[offset:end]...)
+		}
+		return page, nil
+	}
+
 	matched := 0
 	for step := 0; step < n; step++ {
 		idx := step
@@ -432,12 +462,23 @@ func (m *LibraryManager) FolderPreviews(folderGroups [][]string, sortOrder strin
 		return m.diskFolderPreviews(folderGroups, sortOrder)
 	}
 
-	isAsc := strings.ToLower(sortOrder) == "asc"
+	order := normalizeSortOrder(sortOrder)
+	isAsc := order == "asc"
+	nameSort := isNameSortOrder(order)
 	m.cacheMu.RLock()
 	defer m.cacheMu.RUnlock()
 
 	// First four items per folder in sort order; enough to build any cover.
 	folderFirst := make(map[string][]Item, len(folderGroups)*2)
+	var nameCandidates []Item
+	allFolderIDs := make(map[string]struct{})
+	if nameSort {
+		for _, set := range sets {
+			for fid := range set {
+				allFolderIDs[fid] = struct{}{}
+			}
+		}
+	}
 	n := len(m.itemsDesc)
 	for step := 0; step < n; step++ {
 		idx := step
@@ -445,9 +486,15 @@ func (m *LibraryManager) FolderPreviews(folderGroups [][]string, sortOrder strin
 			idx = n - 1 - step
 		}
 		it := &m.itemsDesc[idx]
-		for _, fid := range it.Folders {
-			if len(folderFirst[fid]) < 4 {
-				folderFirst[fid] = append(folderFirst[fid], *it)
+		if nameSort {
+			if len(allFolderIDs) > 0 && itemInFolderScope(it, allFolderIDs) {
+				nameCandidates = append(nameCandidates, *it)
+			}
+		} else {
+			for _, fid := range it.Folders {
+				if len(folderFirst[fid]) < 4 {
+					folderFirst[fid] = append(folderFirst[fid], *it)
+				}
 			}
 		}
 		for gi, set := range sets {
@@ -456,6 +503,17 @@ func (m *LibraryManager) FolderPreviews(folderGroups [][]string, sortOrder strin
 			}
 			previews[gi].Total++
 			previews[gi].TotalSize += it.Size
+		}
+	}
+	if nameSort && len(nameCandidates) > 0 {
+		sortItemsByName(nameCandidates, order == "name_desc")
+		for i := range nameCandidates {
+			it := nameCandidates[i]
+			for _, fid := range it.Folders {
+				if len(folderFirst[fid]) < 4 {
+					folderFirst[fid] = append(folderFirst[fid], it)
+				}
+			}
 		}
 	}
 

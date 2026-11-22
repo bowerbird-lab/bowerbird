@@ -2753,6 +2753,36 @@ func TestGalleryDragEdgeScroll(t *testing.T) {
 	}
 }
 
+func TestHeaderSortMenuIncludesNameSort(t *testing.T) {
+	a := seededApp(t)
+	tester := ui.NewTester(a.viewMain, 1100, 760)
+	tester.Frame()
+
+	if err := tester.Click(a.t("header.newest")); err != nil {
+		t.Fatalf("click sort button: %v", err)
+	}
+	tester.Frame()
+
+	menu := tester.Menu()
+	for _, key := range []string{"header.newest", "header.oldest", "header.nameAsc", "header.nameDesc"} {
+		if !contains(menu, a.t(key)) {
+			t.Fatalf("sort menu missing %s (%q): %v", key, a.t(key), menu)
+		}
+	}
+
+	if err := tester.ChooseMenuItem(a.t("header.nameAsc")); err != nil {
+		t.Fatalf("choose nameAsc: %v", err)
+	}
+	tester.Frame()
+
+	if a.sortOrder != "name_asc" || a.prefs.SortOrder != "name_asc" {
+		t.Fatalf("sortOrder=%q prefs.SortOrder=%q, want name_asc", a.sortOrder, a.prefs.SortOrder)
+	}
+	if !tester.HasText(a.t("header.nameAsc")) {
+		t.Fatalf("header sort button did not update label to %q: %v", a.t("header.nameAsc"), tester.Texts())
+	}
+}
+
 
 
 

@@ -293,3 +293,132 @@ func BenchmarkDiskWorkspace30000(b *testing.B) {
 		}
 	})
 }
+
+func TestWorkspaceSortByName(t *testing.T) {
+	path := t.TempDir()
+	db, err := openLibraryDB(filepath.Join(path, "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	manager := &LibraryManager{db: db, activeLib: &LibraryInfo{ID: "sort-name", Path: path}}
+	if err := manager.initSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO folders (id, name, parent_id, created_at, sort_order) VALUES ('f1', 'Folder', '', 1, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	seed := []struct {
+		id         string
+		name       string
+		importedAt int64
+		inTrash    int
+	}{
+		{"id1", "img10", 100, 0},
+		{"id2", "Beta", 200, 0},
+		{"id3", "img2", 300, 0},
+		{"id4", "alpha", 400, 0},
+		{"t1", "z_trash", 500, 1},
+		{"t2", "a_trash", 600, 1},
+	}
+	for _, s := range seed {
+		_, err := db.Exec(`INSERT INTO items
+			(id,hex,name,extension,filename,size,mime_type,width,height,has_thumbnail,tags,created_at,imported_at,
+			note,prompt,url,rating,in_trash,trashed_at,trashed_folders,dominant_color,palette,meta_json)
+			VALUES (?,?,?,'jpg','original.jpg',100,'image/jpeg',100,100,1,'',1,?,'','','',0,?,?,?,'#FF0000','#FF0000','{}')`,
+			s.id, "hex-"+s.id, s.name, s.importedAt, s.inTrash, s.importedAt, `["f1"]`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.inTrash == 0 {
+			if _, err := db.Exec(`INSERT INTO item_folders(item_id,folder_id,added_at) VALUES (?,'f1',1)`, s.id); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	wantAsc := []string{"alpha", "Beta", "img2", "img10"}
+	wantDesc := []string{"img10", "img2", "Beta", "alpha"}
+
+	names := func(items []Item) []string {
+		out := make([]string, len(items))
+		for i, it := range items {
+			out[i] = it.Name
+		}
+		return out
+	}
+
+	// Disk path: WorkspaceIndex
+	idxAsc, err := manager.WorkspaceIndex(QuerySpec{}, "name_asc", nil, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(idxAsc.Items); !reflect.DeepEqual(got, wantAsc) {
+		t.Fatalf("WorkspaceIndex name_asc = %v, want %v", got, wantAsc)
+	}
+	idxDesc, err := manager.WorkspaceIndex(QuerySpec{}, "name_desc", nil, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(idxDesc.Items); !reflect.DeepEqual(got, wantDesc) {
+		t.Fatalf("WorkspaceIndex name_desc = %v, want %v", got, wantDesc)
+	}
+
+	// Disk path: Trash
+	trashAsc, err := manager.WorkspaceIndex(QuerySpec{}, "name_asc", nil, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(trashAsc.Items); !reflect.DeepEqual(got, []string{"a_trash", "z_trash"}) {
+		t.Fatalf("WorkspaceIndex trash name_asc = %v, want [a_trash z_trash]", got)
+	}
+
+	// Disk path: FolderPreviews
+	prevDesc, err := manager.FolderPreviews([][]string{{"f1"}}, "name_desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prevDesc) != 1 || len(prevDesc[0].Items) != 4 {
+		t.Fatalf("FolderPreviews disk unexpected: %+v", prevDesc)
+	}
+
+	// In-memory cache path
+	if err := manager.ensureCacheLoaded(); err != nil {
+		t.Fatal(err)
+	}
+	pageAsc, err := manager.QueryPage(QuerySpec{}, "name_asc", 0, 10, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(pageAsc.Items); !reflect.DeepEqual(got, wantAsc) {
+		t.Fatalf("QueryPage name_asc = %v, want %v", got, wantAsc)
+	}
+	pageDesc, err := manager.QueryPage(QuerySpec{}, "name_desc", 1, 2, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(pageDesc.Items); !reflect.DeepEqual(got, []string{"img2", "Beta"}) {
+		t.Fatalf("QueryPage name_desc offset=1 limit=2 = %v, want [img2 Beta]", got)
+	}
+	allAsc, err := manager.GetItems("", "name_asc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(allAsc); !reflect.DeepEqual(got, wantAsc) {
+		t.Fatalf("GetItems name_asc = %v, want %v", got, wantAsc)
+	}
+	trashMemDesc, err := manager.GetTrashItems("", "name_desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(trashMemDesc); !reflect.DeepEqual(got, []string{"z_trash", "a_trash"}) {
+		t.Fatalf("GetTrashItems name_desc = %v, want [z_trash a_trash]", got)
+	}
+	memPrevAsc, err := manager.FolderPreviews([][]string{{"f1"}}, "name_asc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(memPrevAsc[0].Items); !reflect.DeepEqual(got, wantAsc) {
+		t.Fatalf("FolderPreviews mem name_asc = %v, want %v", got, wantAsc)
+	}
+}

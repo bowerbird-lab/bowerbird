@@ -124,22 +124,7 @@ func (a *App) viewHeader(c *ui.Context) {
 		ui.Row(c).FillWidth().Height(headerSecondRowHeight).Padding(0, 12).Gap(8).AlignItems(ui.Center).DragWindow().Children(func() {
 			// Sort order and the multi-facet filter live on their own row so
 			// neither label gets squeezed on narrow windows.
-			sortLabel := a.t("header.newest")
-			sortIcon := iconArrowDown
-			if a.sortOrder == "asc" {
-				sortLabel = a.t("header.oldest")
-				sortIcon = iconArrowUp
-			}
-			a.pillIconButton(c, "sort", sortIcon, sortLabel, false, func() {
-				if a.sortOrder == "asc" {
-					a.sortOrder = "desc"
-				} else {
-					a.sortOrder = "asc"
-				}
-				a.prefs.SortOrder = a.sortOrder
-				a.savePrefs()
-				a.refreshAll()
-			})
+			a.viewSortButton(c)
 
 			ui.Box(c).Width(1).Height(20).Background(p.hairline)
 			a.viewFilterBar(c)
@@ -214,6 +199,53 @@ func (a *App) viewSearchField(c *ui.Context) {
 			}
 		}
 	})
+}
+
+func (a *App) viewSortButton(c *ui.Context) {
+	p := a.palette(c)
+	sortIcon, sortLabel := a.sortOrderMeta(a.sortOrder)
+	b := ui.ButtonBase(c.Key("sort")).Height(28).PaddingX(10).Radius(999).FocusRing(false).AlignItems(ui.Center).Gap(6)
+	bg := p.surface2
+	if b.Hovered() {
+		bg = p.hover
+	}
+	b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond}))
+	b.PopoverMenuButton(func(m *ui.Menu) {
+		for _, order := range []string{"desc", "asc", "name_asc", "name_desc"} {
+			_, label := a.sortOrderMeta(order)
+			if m.Item(label).Radio(a.sortOrder == order).Chosen() {
+				a.setSortOrder(order)
+			}
+		}
+	})
+	b.Children(func() {
+		ui.Icon(c, sortIcon).Size(13, 13).TextColor(p.text)
+		ui.Text(c, sortLabel).FontSize(12).FontWeight(550).SingleLine().TextColor(p.text)
+		ui.Icon(c, iconChevron).Size(11, 11).TextColor(p.faint)
+	})
+}
+
+func (a *App) sortOrderMeta(order string) (*ui.SVG, string) {
+	switch order {
+	case "asc":
+		return iconArrowUp, a.t("header.oldest")
+	case "name_asc":
+		return iconArrowUp, a.t("header.nameAsc")
+	case "name_desc":
+		return iconArrowDown, a.t("header.nameDesc")
+	default:
+		return iconArrowDown, a.t("header.newest")
+	}
+}
+
+func (a *App) setSortOrder(order string) {
+	if a.sortOrder == order {
+		return
+	}
+	a.sortOrder = order
+	a.prefs.SortOrder = order
+	a.savePrefs()
+	a.refreshAll()
 }
 
 func (a *App) folderDisplayName(id string) string {

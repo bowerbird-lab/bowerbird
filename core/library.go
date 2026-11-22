@@ -1020,7 +1020,8 @@ func (m *LibraryManager) GetItems(query string, sortOrder string) ([]Item, error
 	defer m.cacheMu.RUnlock()
 
 	trimmed := strings.ToLower(strings.TrimSpace(query))
-	isAsc := strings.ToLower(sortOrder) == "asc"
+	order := normalizeSortOrder(sortOrder)
+	isAsc := order == "asc"
 
 	n := len(m.itemsDesc)
 	if n == 0 {
@@ -1035,6 +1036,9 @@ func (m *LibraryManager) GetItems(query string, sortOrder string) ([]Item, error
 			for i := range n {
 				result[i] = m.itemsDesc[n-1-i]
 			}
+		}
+		if isNameSortOrder(order) {
+			sortItemsByName(result, order == "name_desc")
 		}
 		return result, nil
 	}
@@ -1054,6 +1058,9 @@ func (m *LibraryManager) GetItems(query string, sortOrder string) ([]Item, error
 				result = append(result, it)
 			}
 		}
+	}
+	if isNameSortOrder(order) {
+		sortItemsByName(result, order == "name_desc")
 	}
 	return result, nil
 }
@@ -4233,7 +4240,8 @@ func (m *LibraryManager) GetTrashItems(query string, sortOrder string) ([]Item, 
 	defer m.cacheMu.RUnlock()
 
 	trimmed := strings.ToLower(strings.TrimSpace(query))
-	isAsc := strings.ToLower(sortOrder) == "asc"
+	order := normalizeSortOrder(sortOrder)
+	isAsc := order == "asc"
 	n := len(m.trashDesc)
 	if n == 0 {
 		return []Item{}, nil
@@ -4247,6 +4255,9 @@ func (m *LibraryManager) GetTrashItems(query string, sortOrder string) ([]Item, 
 			for i := range n {
 				result[i] = m.trashDesc[n-1-i]
 			}
+		}
+		if isNameSortOrder(order) {
+			sortItemsByName(result, order == "name_desc")
 		}
 		return result, nil
 	}
@@ -4266,6 +4277,9 @@ func (m *LibraryManager) GetTrashItems(query string, sortOrder string) ([]Item, 
 				result = append(result, it)
 			}
 		}
+	}
+	if isNameSortOrder(order) {
+		sortItemsByName(result, order == "name_desc")
 	}
 	return result, nil
 }

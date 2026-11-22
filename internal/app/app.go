@@ -1616,7 +1616,9 @@ func (a *App) loadPrefs() {
 		log.Printf("[Prefs] %s is unreadable, using defaults: %v", path, err)
 		return
 	}
-	if p.SortOrder == "" {
+	switch p.SortOrder {
+	case "desc", "asc", "name_asc", "name_desc":
+	default:
 		p.SortOrder = "desc"
 	}
 	if p.LightTheme == "" {
