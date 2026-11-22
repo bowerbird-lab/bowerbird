@@ -934,8 +934,7 @@ func (a *App) itemCard(c *ui.Context, item core.Item, index int, w, h float32) {
 	if a.nav != NavTrash {
 		if dropped, ok := ui.Drop[sidebarDrag](card); ok && len(dropped.ItemIDs) > 0 {
 			a.linkItemsAsVariants(item.ID, dropped.ItemIDs)
-		}
-		if drop, ok := ui.DropData(card, fileDropOpts); ok {
+		} else if drop, ok := ui.DropData(card, fileDropOpts); ok {
 			if files, err := drop.Data.Files(); err == nil && len(files) > 0 {
 				a.addVariantFiles(item.ID, files)
 			}

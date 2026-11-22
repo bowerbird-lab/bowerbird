@@ -65,32 +65,32 @@ type Filters struct {
 // Prefs are the native-only appearance preferences that used to live in
 // localStorage.
 type Prefs struct {
-	VibrancySidebar bool     `json:"vibrancySidebar"`
-	VibrancyHeader  bool     `json:"vibrancyHeader"`
-	LightTheme      string   `json:"lightTheme"`
-	DarkTheme       string   `json:"darkTheme"`
-	SystemAccent    bool     `json:"systemAccent"`
-	InspectorOpen   bool     `json:"inspectorOpen"`
-	SidebarOpen     bool     `json:"sidebarOpen"`
-	SidebarWidth    float64  `json:"sidebarWidth"`
-	InspectorWidth  float64  `json:"inspectorWidth"`
+	VibrancySidebar    bool     `json:"vibrancySidebar"`
+	VibrancyHeader     bool     `json:"vibrancyHeader"`
+	LightTheme         string   `json:"lightTheme"`
+	DarkTheme          string   `json:"darkTheme"`
+	SystemAccent       bool     `json:"systemAccent"`
+	InspectorOpen      bool     `json:"inspectorOpen"`
+	SidebarOpen        bool     `json:"sidebarOpen"`
+	SidebarWidth       float64  `json:"sidebarWidth"`
+	InspectorWidth     float64  `json:"inspectorWidth"`
 	ShowNames          bool     `json:"showNames"`
 	ShowExt            bool     `json:"showExt"`
 	LayoutMode         string   `json:"layoutMode"`
 	VariantDisplayMode string   `json:"variantDisplayMode"`
 	SortOrder          string   `json:"sortOrder"`
-	RowHeight       float64  `json:"rowHeight"`
-	IncludeSubs     bool     `json:"includeSubfolders"`
-	PinnedFilters     []string `json:"pinnedFilters"`
-	LibraryOrder      []string `json:"libraryOrder,omitempty"`
-	RecordImportURL   bool     `json:"recordImportUrl"`
-	PerfProfile       string   `json:"perfProfile"`
-	PerfReleasePixels bool     `json:"perfReleasePixels"`
-	PerfIdleCacheTrim bool     `json:"perfIdleCacheTrim"`
-	PerfIdleThumbKeep int      `json:"perfIdleThumbKeep"`
-	PerfThumbCacheMB  int      `json:"perfThumbCacheMB"`
-	PerfMemoryReclaim bool     `json:"perfMemoryReclaim"`
-	PerfMemoryLimitMB int      `json:"perfMemoryLimitMB"`
+	RowHeight          float64  `json:"rowHeight"`
+	IncludeSubs        bool     `json:"includeSubfolders"`
+	PinnedFilters      []string `json:"pinnedFilters"`
+	LibraryOrder       []string `json:"libraryOrder,omitempty"`
+	RecordImportURL    bool     `json:"recordImportUrl"`
+	PerfProfile        string   `json:"perfProfile"`
+	PerfReleasePixels  bool     `json:"perfReleasePixels"`
+	PerfIdleCacheTrim  bool     `json:"perfIdleCacheTrim"`
+	PerfIdleThumbKeep  int      `json:"perfIdleThumbKeep"`
+	PerfThumbCacheMB   int      `json:"perfThumbCacheMB"`
+	PerfMemoryReclaim  bool     `json:"perfMemoryReclaim"`
+	PerfMemoryLimitMB  int      `json:"perfMemoryLimitMB"`
 }
 
 func defaultPrefs() Prefs {
@@ -166,42 +166,45 @@ type App struct {
 	crop              *CropDialog
 	libIconBusy       bool
 
-	folders             []core.Folder
-	folderLookup        *folderIndex
-	folderPreviews      map[string]core.FolderPreview
-	subfoldersCollapsed bool
-	tags                []core.Tag
-	stats               core.WorkspaceStats
-	trashCount          int
-	recentUsedCount     int
-	nav                 Nav
-	folderID            string
-	expanded            map[string]bool
-	query               string
-	filters             Filters
-	sortOrder           string
-	items               []core.Item
-	itemPages           map[int]bool
-	itemPageOrder       []int
-	itemPagePending     map[int]bool
-	itemPageActive      int
-	stackCards          map[string]core.Item
-	expandedVariantGroups map[string]bool
-	variantGroupCacheID   string
-	variantGroupPrimary   *core.Item
-	variantGroupItems     []core.Item
+	folders                  []core.Folder
+	folderLookup             *folderIndex
+	folderPreviews           map[string]core.FolderPreview
+	subfoldersCollapsed      bool
+	tags                     []core.Tag
+	stats                    core.WorkspaceStats
+	trashCount               int
+	recentUsedCount          int
+	nav                      Nav
+	folderID                 string
+	expanded                 map[string]bool
+	query                    string
+	filters                  Filters
+	sortOrder                string
+	items                    []core.Item
+	itemPages                map[int]bool
+	itemPageOrder            []int
+	itemPagePending          map[int]bool
+	itemPageActive           int
+	stackCards               map[string]core.Item
+	expandedVariantGroups    map[string]bool
+	variantGroupCacheID      string
+	variantGroupPrimary      *core.Item
+	variantGroupItems        []core.Item
 	variantGroupPending      string
+	variantGroupSort         map[string]variantGroupSortState
 	previewVariantID         string
+	scrollPreviewVariantID   string
+	scrollInspectorVariantID string
 	previewVariantsCollapsed bool
-	stackCardsPending   bool
-	total               int
-	totalSize           int64
-	loading             bool
-	loadSeq             uint64
-	loadCancel          context.CancelFunc
-	history             []historyEntry
-	historyAt           int
-	restoringHistory    bool
+	stackCardsPending        bool
+	total                    int
+	totalSize                int64
+	loading                  bool
+	loadSeq                  uint64
+	loadCancel               context.CancelFunc
+	history                  []historyEntry
+	historyAt                int
+	restoringHistory         bool
 
 	// Selection and the active item.
 	selected        map[string]bool

@@ -758,6 +758,14 @@ func (s *Service) SetPrimaryVariant(parentID string, newPrimaryID string) (*Item
 	return s.mgr.SetPrimaryVariant(parentID, newPrimaryID)
 }
 
+// ReorderVariants reorders the items in the variant group of parentID.
+func (s *Service) ReorderVariants(parentID string, orderedIDs []string) (*Item, error) {
+	if s.mgr == nil {
+		return nil, ErrCoreNotInitialized
+	}
+	return s.mgr.ReorderVariants(parentID, orderedIDs)
+}
+
 // GetVariantGroup returns the primary item and active variant items for itemID.
 func (s *Service) GetVariantGroup(itemID string) (*Item, []Item, error) {
 	if s.mgr == nil {

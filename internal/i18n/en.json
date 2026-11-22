@@ -1239,7 +1239,18 @@
     "added": "Page file added",
     "primaryUpdated": "Cover updated",
     "unlinked": "Removed from group",
-    "togglePanel": "Toggle pages panel"
+    "togglePanel": "Toggle pages panel",
+    "sort": "Sort Pages",
+    "toggleOrder": "Toggle Ascending/Descending",
+    "sortManual": "Manual Order",
+    "sortNameAsc": "Alphanumeric (A→Z)",
+    "sortNameDesc": "Alphanumeric (Z→A)",
+    "reverseOrder": "Reverse Page Order",
+    "moveUp": "Move Earlier",
+    "moveDown": "Move Later",
+    "moveToTop": "Move to First (Set as Cover)",
+    "moveToBottom": "Move to Last",
+    "orderUpdated": "Page order updated"
   },
   "dropZone": {
     "idle": "Drop to Library",

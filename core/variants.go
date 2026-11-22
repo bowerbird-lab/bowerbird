@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 )
 
 func (m *LibraryManager) updateItemMetadataVariants(libPath, itemID string, variants []string, now int64) error {
@@ -383,6 +384,225 @@ func (m *LibraryManager) SetPrimaryVariant(parentID string, newPrimaryID string)
 	return newPrimary, nil
 }
 
+// NaturalLess implements natural alphanumeric comparison for strings (case-insensitive,
+// handling embedded integers of arbitrary length without integer overflow).
+func NaturalLess(s1, s2 string) bool {
+	r1 := []rune(s1)
+	r2 := []rune(s2)
+	n1, n2 := len(r1), len(r2)
+	i, j := 0, 0
+	for i < n1 && j < n2 {
+		c1 := r1[i]
+		c2 := r2[j]
+		if unicode.IsDigit(c1) && unicode.IsDigit(c2) {
+			// Extract digit runs
+			start1 := i
+			for i < n1 && unicode.IsDigit(r1[i]) {
+				i++
+			}
+			start2 := j
+			for j < n2 && unicode.IsDigit(r2[j]) {
+				j++
+			}
+			digits1 := string(r1[start1:i])
+			digits2 := string(r2[start2:j])
+
+			// Trim leading zeros
+			trim1 := strings.TrimLeft(digits1, "0")
+			trim2 := strings.TrimLeft(digits2, "0")
+
+			if len(trim1) != len(trim2) {
+				return len(trim1) < len(trim2)
+			}
+			if trim1 != trim2 {
+				return trim1 < trim2
+			}
+			// If numerical values are equal, fewer leading zeros comes first (e.g. 1 before 01)
+			if len(digits1) != len(digits2) {
+				return len(digits1) < len(digits2)
+			}
+		} else {
+			low1 := unicode.ToLower(c1)
+			low2 := unicode.ToLower(c2)
+			if low1 != low2 {
+				return low1 < low2
+			}
+			i++
+			j++
+		}
+	}
+	if i >= n1 && j >= n2 {
+		// Tie break with raw rune comparison if case-insensitively equal
+		return s1 < s2
+	}
+	return i >= n1 && j < n2
+}
+
+// ReorderVariants reorders all items in the variant group of rootID (or parentID)
+// to match the given orderedIDs slice. The first item in orderedIDs becomes the
+// primary item (Cover). Any existing group items omitted from orderedIDs are
+// kept at the end in their previous relative order.
+func (m *LibraryManager) ReorderVariants(rootID string, orderedIDs []string) (*Item, error) {
+	m.mu.RLock()
+	active := m.activeLib
+	db := m.db
+	m.mu.RUnlock()
+	if active == nil || db == nil {
+		return nil, errors.New("no active library")
+	}
+
+	parent, err := m.GetItem(rootID)
+	if err != nil || parent == nil {
+		return nil, errors.New("parent item not found")
+	}
+	if parent.InTrash {
+		return nil, errors.New("cannot reorder a trashed item")
+	}
+	if parent.VariantOf != "" {
+		if root, rErr := m.GetItem(parent.VariantOf); rErr == nil && root != nil && !root.InTrash {
+			parent = root
+		}
+	}
+
+	currentMembers := make([]string, 0, 1+len(parent.Variants))
+	currentMembers = append(currentMembers, parent.ID)
+	memberSet := map[string]bool{parent.ID: true}
+	for _, vid := range parent.Variants {
+		vid = strings.TrimSpace(vid)
+		if vid != "" && !memberSet[vid] {
+			memberSet[vid] = true
+			currentMembers = append(currentMembers, vid)
+		}
+	}
+	if len(currentMembers) <= 1 {
+		return parent, nil
+	}
+
+	finalOrder := make([]string, 0, len(currentMembers))
+	seen := make(map[string]bool, len(currentMembers))
+	for _, id := range orderedIDs {
+		id = strings.TrimSpace(id)
+		if memberSet[id] && !seen[id] {
+			seen[id] = true
+			finalOrder = append(finalOrder, id)
+		}
+	}
+	for _, id := range currentMembers {
+		if !seen[id] {
+			seen[id] = true
+			finalOrder = append(finalOrder, id)
+		}
+	}
+
+	same := true
+	for i, id := range finalOrder {
+		if id != currentMembers[i] {
+			same = false
+			break
+		}
+	}
+	if same {
+		return parent, nil
+	}
+
+	newPrimaryID := finalOrder[0]
+	newVariants := finalOrder[1:]
+	now := time.Now().Unix()
+
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+
+	var upserted []Item
+
+	if newPrimaryID == parent.ID {
+		// Primary remains the same; update variants list
+		if _, err := tx.Exec("UPDATE items SET variants_json = ?, updated_at = ? WHERE id = ?", marshalVariantsJSON(newVariants), now, parent.ID); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		if err := m.updateItemMetadataVariants(active.Path, parent.ID, newVariants, now); err != nil {
+			return nil, err
+		}
+		m.mutateCachedItem(parent.ID, func(it *Item) {
+			it.Variants = append([]string(nil), newVariants...)
+			it.UpdatedAt = now
+		})
+		if up, gErr := m.GetItem(parent.ID); gErr == nil && up != nil {
+			parent = up
+			upserted = append(upserted, *up)
+		}
+	} else {
+		// New primary is promoted; old primary becomes a variant
+		if _, err := tx.Exec("UPDATE items SET variants_json = '', variant_of = ?, updated_at = ? WHERE id = ?", newPrimaryID, now, parent.ID); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		if _, err := tx.Exec("UPDATE items SET variants_json = ?, variant_of = '', updated_at = ? WHERE id = ?", marshalVariantsJSON(newVariants), now, newPrimaryID); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		for _, vid := range newVariants {
+			if vid != parent.ID {
+				if _, err := tx.Exec("UPDATE items SET variant_of = ?, updated_at = ? WHERE id = ?", newPrimaryID, now, vid); err != nil {
+					_ = tx.Rollback()
+					return nil, err
+				}
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		if err := m.updateItemMetadataVariants(active.Path, parent.ID, nil, now); err != nil {
+			return nil, err
+		}
+		if err := m.updateItemMetadataVariants(active.Path, newPrimaryID, newVariants, now); err != nil {
+			return nil, err
+		}
+
+		m.mutateCachedItem(parent.ID, func(it *Item) {
+			it.Variants = nil
+			it.VariantOf = newPrimaryID
+			it.UpdatedAt = now
+		})
+		if oldP, gErr := m.GetItem(parent.ID); gErr == nil && oldP != nil {
+			upserted = append(upserted, *oldP)
+		}
+
+		m.mutateCachedItem(newPrimaryID, func(it *Item) {
+			it.Variants = append([]string(nil), newVariants...)
+			it.VariantOf = ""
+			it.UpdatedAt = now
+		})
+		if np, gErr := m.GetItem(newPrimaryID); gErr == nil && np != nil {
+			parent = np
+			upserted = append(upserted, *np)
+		}
+
+		for _, vid := range newVariants {
+			if vid != parent.ID {
+				m.mutateCachedItem(vid, func(it *Item) {
+					it.VariantOf = newPrimaryID
+					it.UpdatedAt = now
+				})
+				if vIt, gErr := m.GetItem(vid); gErr == nil && vIt != nil {
+					upserted = append(upserted, *vIt)
+				}
+			}
+		}
+	}
+
+	if len(upserted) > 0 {
+		m.emit("library-items-upserted", upserted)
+	}
+	m.notifyItemsUpdated()
+	return parent, nil
+}
+
 // GetVariantGroup resolves the root primary item and all active variant items for itemID.
 func (m *LibraryManager) GetVariantGroup(itemID string) (*Item, []Item, error) {
 	item, err := m.GetItem(itemID)
@@ -410,8 +630,36 @@ func (m *LibraryManager) GetVariantGroup(itemID string) (*Item, []Item, error) {
 }
 
 // AddVariantFromFile imports any file on disk and links it as a variant of parentID.
+// If sourcePath already belongs to an item in the active library, that existing
+// item is linked as a variant instead of re-importing its payload.
 func (m *LibraryManager) AddVariantFromFile(parentID string, sourcePath string) (*Item, error) {
-	imported, err := m.importSingleFile(sourcePath)
+	cleanPath := normalizeDropPath(sourcePath)
+	if cleanPath == "" {
+		return nil, errors.New("variant file path is empty")
+	}
+
+	m.mu.RLock()
+	active := m.activeLib
+	m.mu.RUnlock()
+	if active != nil && pathIsWithin(active.Path, cleanPath) {
+		internalID := extractInternalItemID(cleanPath)
+		if internalID == "" {
+			return nil, errors.New("cannot add internal library file as variant")
+		}
+		existing, err := m.GetItem(internalID)
+		if err != nil || existing == nil {
+			return nil, errors.New("variant item not found")
+		}
+		if existing.InTrash {
+			return nil, errors.New("cannot link a trashed item as variant")
+		}
+		if _, err := m.LinkVariants(parentID, []string{internalID}); err != nil {
+			return nil, err
+		}
+		return m.GetItem(internalID)
+	}
+
+	imported, err := m.importSingleFile(cleanPath)
 	if err != nil {
 		return nil, err
 	}

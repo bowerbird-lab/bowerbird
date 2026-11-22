@@ -1239,7 +1239,18 @@
     "added": "已添加页面文件",
     "primaryUpdated": "已更新封面",
     "unlinked": "已移出页面组",
-    "togglePanel": "显示/隐藏页面列表"
+    "togglePanel": "显示/隐藏页面列表",
+    "sort": "页面排序",
+    "toggleOrder": "切换正序/倒序",
+    "sortManual": "手动排序",
+    "sortNameAsc": "按数字与字母顺序 (A→Z)",
+    "sortNameDesc": "按数字与字母倒序 (Z→A)",
+    "reverseOrder": "反转页面顺序",
+    "moveUp": "向前移动",
+    "moveDown": "向后移动",
+    "moveToTop": "移至最前 (设为封面)",
+    "moveToBottom": "移至最后",
+    "orderUpdated": "已更新页面顺序"
   },
   "dropZone": {
     "idle": "拖入当前库",

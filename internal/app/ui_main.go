@@ -820,6 +820,7 @@ func (a *App) openPreview(id string, mode string) {
 	}
 	a.activeItemID = id
 	a.previewVariantID = ""
+	a.scrollPreviewVariantID = id
 	a.previewIndex = a.indexFor(id)
 	a.previewOpen = true
 	a.previewMode = mode
@@ -851,6 +852,7 @@ func (a *App) movePreview(delta int) {
 	a.previewVariantID = ""
 	a.previewIndex = n
 	a.activeItemID = a.items[n].ID
+	a.scrollPreviewVariantID = a.items[n].ID
 	a.activeItem = &a.items[n]
 	a.previewZoom = 1
 	a.previewPan = ui.Point{}

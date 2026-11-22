@@ -133,114 +133,110 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 	hasVariants := len(item.Variants) > 0 || item.VariantOf != ""
 	hasFilmstrip := len(a.items) > 1 && !a.isImmersiveFullscreen()
 	renderMain := func() {
-		ui.Column(c).Fill().Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).FillHeight().Clip().Children(func() {
 			ext := strings.ToLower(item.Extension)
-		switch {
-		case ext == "psd" || ext == "psb":
-			if a.nativeFeature("official.psd-preview") {
-				a.previewPSD(c, item)
-			} else {
-				a.previewDocument(c, item)
-			}
-		case ext == "hsj":
-			if a.nativeFeature("official.hsj-preview") {
-				a.previewPSD(c, item)
-			} else {
-				a.previewDocument(c, item)
-			}
-		case ext == "ipv":
-			if a.nativeFeature("official.ipv-preview") {
-				a.previewPSD(c, item)
-			} else {
-				a.previewDocument(c, item)
-			}
-		case ext == "pntr":
-			if a.nativeFeature("official.pntr-preview") {
-				a.previewPSD(c, item)
-			} else {
-				a.previewDocument(c, item)
-			}
-		case categoryOf(item) == "image":
-			a.previewImage(c, item)
-		case categoryOf(item) == "audio":
-			if a.nativeFeature("official.audio-player") {
-				a.previewAudio(c, item)
-			} else {
-				a.previewDocument(c, item)
-			}
-		case categoryOf(item) == "video":
-			if a.nativeFeature("builtin.video") {
-				a.previewVideo(c, item)
-			} else {
-				a.previewDocument(c, item)
-			}
-		default:
-			a.previewDocument(c, item)
-		}
-		// Film strip of the current page. It takes the width the window has
-		// and shows as many cells as fit in it, so a wide window offers more
-		// neighbours and a narrow one fewer, the current item staying centred.
-		if len(a.items) > 1 && !a.isImmersiveFullscreen() {
-			ui.Box(c).FillWidth().Height(1).Background(p.hairline)
-			strip := ui.Row(c).FillWidth().Height(64).PaddingX(stripPaddingX).Gap(stripGap).AlignItems(ui.Center).Justify(ui.Center).Bind(&a.stripBox)
-			strip.Children(func() {
-				start, end := a.stripRange(c)
-				a.beginFilmstripLoad(start, end)
-				ready, waiting, failed, missing := 0, 0, 0, 0
-				for i := start; i < end; i++ {
-					i := i
-					it := a.workspaceItem(i)
-					box := ui.ButtonBase(c.Key(fmt.Sprintf("strip-%s", it.ID))).Width(stripThumbWidth).Height(stripThumbHeight).Radius(6).Background(p.surface2).Clip().FocusRing(false).KeepFocus()
-					if i == a.previewIndex {
-						box.Border(2, p.accent)
-					}
-					path := ""
-					if it.HasThumbnail && it.ItemPath != "" {
-						path = filepath.Join(it.ItemPath, "thumbnail.jpg")
-					}
-					var bmp *ui.Bitmap
-					var err error
-					if path == "" {
-						missing++
-					} else {
-						bmp, err = a.filmstripBitmap(it, i, path)
-						if err != nil {
-							failed++
-						} else if bmp != nil {
-							ready++
-						} else {
-							waiting++
-						}
-					}
-					box.Children(func() {
-						if bmp != nil {
-							ui.Image(c, bmp).Fill().Fit(ui.Cover)
-						} else {
-							ui.Icon(c, categoryIcon(it)).Size(16, 16).TextColor(p.faint)
-						}
-					})
-					if box.Clicked() {
-						a.previewIndex = i
-						a.activeItem = &a.items[i]
-						a.activeItemID = it.ID
-						a.previewZoom = 1
-						a.previewPan = ui.Point{}
-						a.loadPreviewContent()
-					}
+			switch {
+			case ext == "psd" || ext == "psb":
+				if a.nativeFeature("official.psd-preview") {
+					a.previewPSD(c, item)
+				} else {
+					a.previewDocument(c, item)
 				}
-				a.recordFilmstripLoad(c, ready, waiting, failed, missing)
-			})
-		}
-	})
+			case ext == "hsj":
+				if a.nativeFeature("official.hsj-preview") {
+					a.previewPSD(c, item)
+				} else {
+					a.previewDocument(c, item)
+				}
+			case ext == "ipv":
+				if a.nativeFeature("official.ipv-preview") {
+					a.previewPSD(c, item)
+				} else {
+					a.previewDocument(c, item)
+				}
+			case ext == "pntr":
+				if a.nativeFeature("official.pntr-preview") {
+					a.previewPSD(c, item)
+				} else {
+					a.previewDocument(c, item)
+				}
+			case categoryOf(item) == "image":
+				a.previewImage(c, item)
+			case categoryOf(item) == "audio":
+				if a.nativeFeature("official.audio-player") {
+					a.previewAudio(c, item)
+				} else {
+					a.previewDocument(c, item)
+				}
+			case categoryOf(item) == "video":
+				if a.nativeFeature("builtin.video") {
+					a.previewVideo(c, item)
+				} else {
+					a.previewDocument(c, item)
+				}
+			default:
+				a.previewDocument(c, item)
+			}
+			// Film strip of the current page. It takes the width the window has
+			// and shows as many cells as fit in it, so a wide window offers more
+			// neighbours and a narrow one fewer, the current item staying centred.
+			if hasFilmstrip {
+				ui.Box(c).FillWidth().Height(1).Background(p.hairline)
+				strip := ui.Row(c).FillWidth().Height(64).PaddingX(stripPaddingX).Gap(stripGap).AlignItems(ui.Center).Justify(ui.Center).Bind(&a.stripBox)
+				strip.Children(func() {
+					start, end := a.stripRange(c)
+					a.beginFilmstripLoad(start, end)
+					ready, waiting, failed, missing := 0, 0, 0, 0
+					for i := start; i < end; i++ {
+						i := i
+						it := a.workspaceItem(i)
+						box := ui.ButtonBase(c.Key(fmt.Sprintf("strip-%s", it.ID))).Width(stripThumbWidth).Height(stripThumbHeight).Radius(6).Background(p.surface2).Clip().FocusRing(false).KeepFocus()
+						if i == a.previewIndex {
+							box.Border(2, p.accent)
+						}
+						path := ""
+						if it.HasThumbnail && it.ItemPath != "" {
+							path = filepath.Join(it.ItemPath, "thumbnail.jpg")
+						}
+						var bmp *ui.Bitmap
+						var err error
+						if path == "" {
+							missing++
+						} else {
+							bmp, err = a.filmstripBitmap(it, i, path)
+							if err != nil {
+								failed++
+							} else if bmp != nil {
+								ready++
+							} else {
+								waiting++
+							}
+						}
+						box.Children(func() {
+							if bmp != nil {
+								ui.Image(c, bmp).Fill().Fit(ui.Cover)
+							} else {
+								ui.Icon(c, categoryIcon(it)).Size(16, 16).TextColor(p.faint)
+							}
+						})
+						if box.Clicked() {
+							a.previewIndex = i
+							a.activeItem = &a.items[i]
+							a.activeItemID = it.ID
+							a.previewZoom = 1
+							a.previewPan = ui.Point{}
+							a.loadPreviewContent()
+						}
+					}
+					a.recordFilmstripLoad(c, ready, waiting, failed, missing)
+				})
+			}
+		})
 	}
-	ui.Box(c).Grow(1).Shrink(1).FillWidth().Clip().Children(func() {
+	ui.Row(c).Grow(1).Shrink(1).FillWidth().Clip().Children(func() {
 		renderMain()
 		if hasVariants {
-			bottomPad := float32(12)
-			if hasFilmstrip {
-				bottomPad = 76
-			}
-			a.viewPreviewVariantSidebar(c, item, bottomPad)
+			a.viewPreviewVariantSidebar(c, item)
 		}
 	})
 }
