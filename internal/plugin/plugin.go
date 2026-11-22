@@ -25,91 +25,19 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"bowerbird/core"
 )
 
-// Manifest is the plugin.json schema. A plugin either ships JavaScript hooks
-// (Main) or declares a renderer implemented natively by the host (Native).
-type Manifest struct {
-	ID            string              `json:"id"`
-	Name          string              `json:"name"`
-	Version       string              `json:"version"`
-	MinAppVersion string              `json:"minAppVersion,omitempty"`
-	Kind          string              `json:"kind,omitempty"`
-	Native        string              `json:"native,omitempty"`
-	Preview       PreviewContribution `json:"preview,omitempty"`
-	Main          string              `json:"main,omitempty"`
-	Description   string              `json:"description,omitempty"`
-	Author        string              `json:"author,omitempty"`
-	Priority      int                 `json:"priority,omitempty"`
-	Extensions    []string            `json:"extensions,omitempty"`
-	MimePrefixes  []string            `json:"mimePrefixes,omitempty"`
-	SupportsZoom  bool                `json:"supportsZoom,omitempty"`
-	Capabilities  []string            `json:"capabilities,omitempty"`
-	URLPatterns   []string            `json:"urlPatterns,omitempty"`
-	URLHosts      []string            `json:"urlHosts,omitempty"`
-	Permissions   Permissions         `json:"permissions,omitempty"`
-	UI            PluginUI            `json:"ui,omitempty"`
-	Settings      []Setting           `json:"settings,omitempty"`
-	Hooks         []string            `json:"hooks,omitempty"`
-	Homepage      string              `json:"homepage,omitempty"`
-	License       string              `json:"license,omitempty"`
-	Builtin       bool                `json:"builtin,omitempty"`
-	Platforms     []string            `json:"platforms,omitempty"`
-	Extra         map[string]any      `json:"-,"`
-}
-
-// PreviewContribution is the structured form of a native preview declaration.
-type PreviewContribution struct {
-	Renderer     string   `json:"renderer,omitempty"`
-	Entry        string   `json:"entry,omitempty"`
-	Extensions   []string `json:"extensions,omitempty"`
-	MimePrefixes []string `json:"mimePrefixes,omitempty"`
-	SupportsZoom bool     `json:"supportsZoom,omitempty"`
-	Priority     int      `json:"priority,omitempty"`
-	Platforms    []string `json:"platforms,omitempty"`
-}
-
-// PluginUI describes HTML pages packaged with the plugin.
-type PluginUI struct {
-	Panels    []PluginUIEntry         `json:"panels,omitempty"`
-	Windows   []PluginUIEntry         `json:"windows,omitempty"`
-	Inspector []PluginInspectorAction `json:"inspector,omitempty"`
-}
-
-// PluginInspectorAction contributes a button for a selected asset.
-type PluginInspectorAction struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Title  string `json:"title"`
-	Window string `json:"window"`
-}
-
-type PluginUIEntry struct {
-	ID                 string `json:"id"`
-	Title              string `json:"title,omitempty"`
-	Location           string `json:"location,omitempty"`
-	Entry              string `json:"entry,omitempty"`
-	URL                string `json:"url,omitempty"`
-	InterceptDownloads bool   `json:"interceptDownloads,omitempty"`
-}
-
-// Permissions declares the capabilities a plugin may use.
-type Permissions struct {
-	Network      []string `json:"network,omitempty"`
-	Assets       []string `json:"assets,omitempty"`
-	Process      []string `json:"process,omitempty"`
-	OpenExternal bool     `json:"openExternal,omitempty"`
-}
-
-// Setting is one row the settings window renders.
-type Setting struct {
-	Key         string `json:"key"`
-	Label       string `json:"label"`
-	Help        string `json:"help,omitempty"`
-	Placeholder string `json:"placeholder,omitempty"`
-	Default     string `json:"default,omitempty"`
-	Secret      bool   `json:"secret,omitempty"`
-}
+// Manifest and its sub-structs are type-aliased to core's canonical schema so
+// core.PluginManager and plugin.Host share one single source of truth.
+type Manifest = core.PluginManifest
+type PreviewContribution = core.PreviewContribution
+type PluginUI = core.PluginUI
+type PluginInspectorAction = core.PluginInspectorAction
+type PluginUIEntry = core.PluginUIEntry
+type Permissions = core.PluginPermissions
+type Setting = core.PluginSetting
 
 // Plugin is a loaded plugin directory.
 type Plugin struct {
@@ -353,7 +281,7 @@ func loadPlugin(dir string) (*Plugin, error) {
 	if err := validateManifest(&m); err != nil {
 		return nil, err
 	}
-	if m.Main == "" && m.Native == "" && len(m.UI.Panels) == 0 && len(m.UI.Windows) == 0 {
+	if m.Main == "" && m.Native == "" && m.Preview.Entry == "" && len(m.UI.Panels) == 0 && len(m.UI.Windows) == 0 {
 		m.Main = "index.js"
 	}
 	if m.Main != "" {
@@ -385,146 +313,11 @@ func (p *Plugin) prepareURLRules() error {
 }
 
 func validateManifest(m *Manifest) error {
-	m.ID = strings.TrimSpace(m.ID)
-	m.Name = strings.TrimSpace(m.Name)
-	m.Version = strings.TrimSpace(m.Version)
-	if m.ID == "" || strings.Contains(m.ID, "..") || strings.ContainsAny(m.ID, `/\`) {
-		return errors.New("invalid plugin id")
-	}
-	if m.Name == "" || m.Version == "" {
-		return errors.New("plugin name and version are required")
-	}
-	if m.Main != "" && (strings.Contains(m.Main, "..") || filepath.IsAbs(m.Main)) {
-		return errors.New("plugin main must stay inside its directory")
-	}
-	for idx, entries := range [][]PluginUIEntry{m.UI.Panels, m.UI.Windows} {
-		isWindow := idx == 1
-		seen := map[string]bool{}
-		for _, entry := range entries {
-			if entry.ID == "" || strings.ContainsAny(entry.ID, "/\\") || seen[entry.ID] {
-				return fmt.Errorf("invalid or duplicate plugin UI id %q", entry.ID)
-			}
-			seen[entry.ID] = true
-			if entry.URL != "" {
-				if !isWindow {
-					return fmt.Errorf("plugin UI panel %q cannot use an external url", entry.ID)
-				}
-				if entry.Entry != "" {
-					return fmt.Errorf("plugin UI window %q cannot specify both entry and url", entry.ID)
-				}
-				parsed, err := url.Parse(entry.URL)
-				if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
-					return fmt.Errorf("plugin UI window url must be a valid https URL: %q", entry.URL)
-				}
-				continue
-			}
-			clean := filepath.ToSlash(filepath.Clean(entry.Entry))
-			if entry.Entry == "" || filepath.IsAbs(entry.Entry) || strings.Contains(entry.Entry, "\\") || clean == ".." || strings.HasPrefix(clean, "../") {
-				return fmt.Errorf("plugin UI entry must stay inside its directory: %q", entry.Entry)
-			}
-		}
-	}
-	windowIDs := make(map[string]bool, len(m.UI.Windows))
-	for _, window := range m.UI.Windows {
-		windowIDs[window.ID] = true
-	}
-	actionIDs := map[string]bool{}
-	for _, action := range m.UI.Inspector {
-		if action.ID == "" || strings.ContainsAny(action.ID, "/\\") || actionIDs[action.ID] || strings.TrimSpace(action.Title) == "" || action.Type != "window" || !windowIDs[action.Window] {
-			return fmt.Errorf("invalid inspector action %q", action.ID)
-		}
-		actionIDs[action.ID] = true
-	}
-	if m.Preview.Renderer != "" {
-		if m.Native == "" {
-			m.Native = strings.TrimSpace(m.Preview.Renderer)
-		}
-		if len(m.Extensions) == 0 {
-			m.Extensions = m.Preview.Extensions
-		}
-		if len(m.MimePrefixes) == 0 {
-			m.MimePrefixes = m.Preview.MimePrefixes
-		}
-		if !m.SupportsZoom {
-			m.SupportsZoom = m.Preview.SupportsZoom
-		}
-		if m.Priority == 0 {
-			m.Priority = m.Preview.Priority
-		}
-	}
-	if m.Native != "" && strings.ContainsAny(m.Native, " /\\") {
-		return errors.New("invalid native renderer id")
-	}
-	if m.Kind == "" {
-		if m.Native != "" {
-			m.Kind = "preview"
-		} else {
-			m.Kind = "metadata"
-		}
-	}
-	m.Extensions = normalizeExtensions(m.Extensions)
-	allowedHooks := map[string]bool{"resolveUrl": true, "inspect": true, "actions": true, "runAction": true, "thumbnail": true}
-	seenHooks := map[string]bool{}
-	normalizedHooks := make([]string, 0, len(m.Hooks))
-	for _, raw := range m.Hooks {
-		hook := strings.TrimSpace(raw)
-		if hook == "" {
-			continue
-		}
-		if !allowedHooks[hook] {
-			return fmt.Errorf("unknown plugin hook %q", hook)
-		}
-		if seenHooks[hook] {
-			continue
-		}
-		seenHooks[hook] = true
-		normalizedHooks = append(normalizedHooks, hook)
-	}
-	m.Hooks = normalizedHooks
-	if m.Main != "" && len(m.Hooks) == 0 {
-		return errors.New("JavaScript plugins must declare hooks in plugin.json")
-	}
-	if m.Main == "" && len(m.Hooks) > 0 {
-		return errors.New("native plugins cannot declare JavaScript hooks")
-	}
-	for _, permission := range m.Permissions.Assets {
-		if permission != "read" && permission != "write" {
-			return fmt.Errorf("unknown asset permission %q", permission)
-		}
-	}
-	for _, host := range m.Permissions.Network {
-		host = strings.TrimSpace(host)
-		if host == "" {
-			return errors.New("empty network permission")
-		}
-		if host == "*" || strings.Contains(host, "://") || strings.ContainsAny(host, "/\\") {
-			return fmt.Errorf("network permission must be a hostname pattern: %q", host)
-		}
-	}
-	for _, process := range m.Permissions.Process {
-		process = strings.TrimSpace(process)
-		if process == "" {
-			return errors.New("empty process permission")
-		}
-		if process == "*" {
-			return errors.New("process permission cannot be a bare wildcard")
-		}
-	}
-	return nil
+	return core.ValidatePluginManifest(m)
 }
 
 func normalizeExtensions(list []string) []string {
-	out := make([]string, 0, len(list))
-	seen := map[string]bool{}
-	for _, ext := range list {
-		cleaned := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
-		if cleaned == "" || seen[cleaned] {
-			continue
-		}
-		seen[cleaned] = true
-		out = append(out, cleaned)
-	}
-	return out
+	return core.NormalizePluginExtensions(list)
 }
 
 // RegisterBuiltin adds official plugins that are compiled into the desktop
@@ -615,6 +408,31 @@ func (h *Host) MatchPreview(extension, mimeType string) *Plugin {
 	cp := *best
 	return &cp
 }
+// MatchPreviewWebView returns the highest-priority enabled plugin that
+// contributes a self-maintained WebView preview (`preview.entry`) for the
+// given extension or MIME type.
+func (h *Host) MatchPreviewWebView(extension, mimeType string) *Plugin {
+	var best *Plugin
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, p := range h.plugins {
+		if !p.Enabled || p.Manifest.Preview.Entry == "" || p.Manifest.Kind != "preview" {
+			continue
+		}
+		if !manifestMatchesItem(p.Manifest, extension, mimeType) {
+			continue
+		}
+		if best == nil || p.Manifest.Priority > best.Manifest.Priority {
+			best = p
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	cp := *best
+	return &cp
+}
+
 func (h *Host) Plugins() []*Plugin {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -853,6 +671,7 @@ type InspectSection struct {
 	Title      string        `json:"title"`
 	Rows       []InspectRow  `json:"rows"`
 	TextBlocks []InspectText `json:"textBlocks"`
+	Actions    []Action      `json:"actions,omitempty"`
 }
 
 // InspectResult is what inspect returns.
@@ -1086,6 +905,11 @@ func (h *Host) Inspect(item map[string]any) []InspectSection {
 		}
 		var result InspectResult
 		if err := h.call(p, "inspect", ItemContext{Item: item}, &result); err == nil {
+			for i := range result.Sections {
+				for j := range result.Sections[i].Actions {
+					result.Sections[i].Actions[j].ID = p.Manifest.ID + ":" + result.Sections[i].Actions[j].ID
+				}
+			}
 			out = append(out, result.Sections...)
 		}
 	}
@@ -1174,6 +998,22 @@ func (h *Host) CallAction(pluginID, actionID string, params map[string]any, out 
 		payload[k] = v
 	}
 	return h.call(p, "runAction", payload, out)
+}
+
+// SettingOption is one option returned by the settingOptions hook.
+type SettingOption = core.PluginSettingOption
+
+// SettingOptions asks a plugin's settingOptions hook for dynamic dropdown options.
+func (h *Host) SettingOptions(pluginID, key string) ([]SettingOption, error) {
+	p, ok := h.Get(pluginID)
+	if !ok || !p.Enabled || p.Manifest.Main == "" || !hasHook(p.Manifest, "settingOptions") {
+		return nil, ErrHookNotDeclared
+	}
+	var out []SettingOption
+	if err := h.call(p, "settingOptions", map[string]any{"key": key}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // CanGenerateThumbnail reports whether an enabled JS plugin advertises the

@@ -11,6 +11,7 @@ import (
 	"bowerbird/internal/i18n"
 	"bowerbird/internal/theme"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -1062,6 +1063,46 @@ func (a *App) settingsPlugins(c *ui.Context) {
 						fieldID := pl.ID + ":" + setting.Key
 						a.settingsRow(c, setting.Label, setting.Help, func() {
 							ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
+								if setting.Type == "select" {
+									options := make([]SelectOption, 0, len(setting.Options)+1)
+									if cached, ok := a.pluginSettingOptions[fieldID]; ok && len(cached) > 0 {
+										options = append(options, cached...)
+									} else {
+										for _, opt := range setting.Options {
+											label := opt.Label
+											if label == "" {
+												label = opt.Value
+											}
+											options = append(options, SelectOption{Value: opt.Value, Label: label})
+										}
+									}
+									if setting.OptionsHook != "" && !a.pluginSettingLoading[fieldID] {
+										if _, loaded := a.pluginSettingOptions[fieldID]; !loaded {
+											a.loadPluginSettingOptions(pl.ID, setting.Key)
+										}
+									}
+									if val != "" {
+										hasVal := false
+										for _, opt := range options {
+											if opt.Value == val {
+												hasVal = true
+												break
+											}
+										}
+										if !hasVal {
+											options = append([]SelectOption{{Value: val, Label: val}}, options...)
+										}
+									}
+									if selected, changed := a.dropdown(c, "plugin-setting-"+fieldID, val, options); changed {
+										a.pluginHost.SetSetting(pl.ID, setting.Key, selected)
+									}
+									if setting.OptionsHook != "" {
+										a.iconButton(c, "plugin-setting-refresh-"+fieldID, iconRefresh, false, a.t("settings.plugins.refresh"), func() {
+											a.loadPluginSettingOptions(pl.ID, setting.Key)
+										})
+									}
+									return
+								}
 								input := ui.TextInput(c.Key("plugin-setting-"+fieldID), &val).Width(220).FontSize(12)
 								if setting.Placeholder != "" {
 									input.Placeholder(setting.Placeholder)
@@ -1106,6 +1147,17 @@ func (a *App) settingsPlugins(c *ui.Context) {
 						}
 					}
 				}
+				if a.pluginHost != nil {
+					if hosted, ok := a.pluginHost.Get(pl.ID); ok && len(hosted.Manifest.UI.Windows) > 0 {
+						if ui.Button(c.Key("plugin-clear-cache-"+pl.ID), "清理缓存").Clicked() {
+							if err := mygo.NewSession("plugin:" + pl.ID).ClearData(mygo.SiteDataAll); err != nil {
+								a.showToast(err.Error())
+							} else {
+								a.showToast("已清理插件缓存")
+							}
+						}
+					}
+				}
 				if ui.Button(c, a.t("settings.plugins.openStore")).Clicked() {
 					a.openPluginStore(pl.ID)
 				}
@@ -1115,6 +1167,43 @@ func (a *App) settingsPlugins(c *ui.Context) {
 			})
 		})
 	}
+}
+
+// loadPluginSettingOptions fetches dynamic dropdown options via a plugin's settingOptions hook.
+func (a *App) loadPluginSettingOptions(pluginID, key string) {
+	if a.pluginHost == nil {
+		return
+	}
+	fieldID := pluginID + ":" + key
+	if a.pluginSettingLoading == nil {
+		a.pluginSettingLoading = make(map[string]bool)
+	}
+	if a.pluginSettingLoading[fieldID] {
+		return
+	}
+	a.pluginSettingLoading[fieldID] = true
+	go func() {
+		opts, err := a.pluginHost.SettingOptions(pluginID, key)
+		a.post(func() {
+			a.pluginSettingLoading[fieldID] = false
+			if a.pluginSettingOptions == nil {
+				a.pluginSettingOptions = make(map[string][]SelectOption)
+			}
+			if err != nil {
+				a.pluginSettingOptions[fieldID] = nil
+				return
+			}
+			mapped := make([]SelectOption, 0, len(opts))
+			for _, opt := range opts {
+				label := opt.Label
+				if label == "" {
+					label = opt.Value
+				}
+				mapped = append(mapped, SelectOption{Value: opt.Value, Label: label})
+			}
+			a.pluginSettingOptions[fieldID] = mapped
+		})
+	}()
 }
 
 // rescanPlugins discovers manually added or removed plugins without blocking the settings UI.

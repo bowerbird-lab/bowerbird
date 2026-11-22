@@ -65,12 +65,9 @@ func (a *App) openPluginUIForItem(pluginID string, entry plugin.PluginUIEntry, i
 	if title == "" {
 		title = p.Manifest.Name
 	}
-	var session *mygo.Session
-	if isExternal {
-		session = mygo.NewSession("plugin:" + pluginID)
-	} else {
-		session = mygo.NewEphemeralSession()
-	}
+	// Use a per-plugin persistent session so IndexedDB/localStorage survive
+	// window closes while remaining isolated and Untrusted.
+	session := mygo.NewSession("plugin:" + pluginID)
 	var view *mygo.WebView
 	win := mygo.NewWindow(mygo.WindowOptions{
 		Title: title, Width: 1100, Height: 760, MinWidth: 480, MinHeight: 360,
@@ -80,7 +77,10 @@ func (a *App) openPluginUIForItem(pluginID string, entry plugin.PluginUIEntry, i
 			}
 		}),
 	})
-	created, err := win.NewWebView(mygo.WebViewOptions{Page: mygo.PageOptions{Untrusted: true, Session: session}})
+	created, err := win.NewWebView(mygo.WebViewOptions{
+		Transparent: !isExternal,
+		Page:        mygo.PageOptions{Untrusted: true, Session: session},
+	})
 	if err != nil {
 		win.Destroy()
 		return err

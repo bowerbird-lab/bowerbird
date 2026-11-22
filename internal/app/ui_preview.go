@@ -3,13 +3,16 @@ package app
 import (
 	"fmt"
 	"math"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"bowerbird/core"
 	"bowerbird/internal/player"
+	"bowerbird/internal/plugin"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
@@ -135,47 +138,51 @@ func (a *App) viewPreviewBody(c *ui.Context, item core.Item) {
 	renderMain := func() {
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).FillHeight().Clip().Children(func() {
 			ext := strings.ToLower(item.Extension)
-			switch {
-			case ext == "psd" || ext == "psb":
-				if a.nativeFeature("official.psd-preview") {
-					a.previewPSD(c, item)
-				} else {
+			if pl := a.matchPreviewWebViewPlugin(item); pl != nil && pl.Manifest.Native == "" {
+				a.previewPluginWebView(c, item, pl)
+			} else {
+				switch {
+				case ext == "psd" || ext == "psb":
+					if a.nativeFeature("official.psd-preview") {
+						a.previewPSD(c, item)
+					} else {
+						a.previewDocument(c, item)
+					}
+				case ext == "hsj":
+					if a.nativeFeature("official.hsj-preview") {
+						a.previewPSD(c, item)
+					} else {
+						a.previewDocument(c, item)
+					}
+				case ext == "ipv":
+					if a.nativeFeature("official.ipv-preview") {
+						a.previewPSD(c, item)
+					} else {
+						a.previewDocument(c, item)
+					}
+				case ext == "pntr":
+					if a.nativeFeature("official.pntr-preview") {
+						a.previewPSD(c, item)
+					} else {
+						a.previewDocument(c, item)
+					}
+				case categoryOf(item) == "image":
+					a.previewImage(c, item)
+				case categoryOf(item) == "audio":
+					if a.nativeFeature("official.audio-player") {
+						a.previewAudio(c, item)
+					} else {
+						a.previewDocument(c, item)
+					}
+				case categoryOf(item) == "video":
+					if a.nativeFeature("builtin.video") {
+						a.previewVideo(c, item)
+					} else {
+						a.previewDocument(c, item)
+					}
+				default:
 					a.previewDocument(c, item)
 				}
-			case ext == "hsj":
-				if a.nativeFeature("official.hsj-preview") {
-					a.previewPSD(c, item)
-				} else {
-					a.previewDocument(c, item)
-				}
-			case ext == "ipv":
-				if a.nativeFeature("official.ipv-preview") {
-					a.previewPSD(c, item)
-				} else {
-					a.previewDocument(c, item)
-				}
-			case ext == "pntr":
-				if a.nativeFeature("official.pntr-preview") {
-					a.previewPSD(c, item)
-				} else {
-					a.previewDocument(c, item)
-				}
-			case categoryOf(item) == "image":
-				a.previewImage(c, item)
-			case categoryOf(item) == "audio":
-				if a.nativeFeature("official.audio-player") {
-					a.previewAudio(c, item)
-				} else {
-					a.previewDocument(c, item)
-				}
-			case categoryOf(item) == "video":
-				if a.nativeFeature("builtin.video") {
-					a.previewVideo(c, item)
-				} else {
-					a.previewDocument(c, item)
-				}
-			default:
-				a.previewDocument(c, item)
 			}
 			// Film strip of the current page. It takes the width the window has
 			// and shows as many cells as fit in it, so a wide window offers more
@@ -818,6 +825,79 @@ func (a *App) previewPSD(c *ui.Context, item core.Item) {
 			ui.Column(c).Fill().Center().Gap(8).Children(func() {
 				ui.Icon(c, iconImage).Size(34, 34).TextColor(p.faint)
 				ui.Text(c, a.previewError).FontSize(12).TextColor(p.muted)
+			})
+		} else {
+			ui.Column(c).Fill().Center().Children(func() { ui.Spinner(c) })
+		}
+	})
+}
+
+func (a *App) matchPreviewWebViewPlugin(item core.Item) *plugin.Plugin {
+	if a.pluginHost == nil {
+		return nil
+	}
+	return a.pluginHost.MatchPreviewWebView(item.Extension, item.MimeType)
+}
+
+func (a *App) closePreviewWebView() {
+	if a.previewWebView != nil {
+		a.pluginUISessions.Detach(a.previewWebView.Page())
+		a.previewWebView.Destroy()
+		a.previewWebView = nil
+	}
+	a.previewWebViewKey = ""
+	a.previewWebViewErr = ""
+}
+
+func (a *App) previewPluginWebView(c *ui.Context, item core.Item, pl *plugin.Plugin) {
+	p := a.palette(c)
+	key := pl.Manifest.ID + ":" + item.ID + ":" + pl.Manifest.Preview.Entry
+	if a.previewWebViewKey != key {
+		a.closePreviewWebView()
+		a.previewWebViewKey = key
+		if a.win == nil || pl.Dir == "" {
+			a.previewWebViewErr = "preview unavailable"
+		} else {
+			created, err := a.win.NewWebView(mygo.WebViewOptions{
+				Transparent: true,
+				Page:        mygo.PageOptions{Untrusted: true, Session: mygo.NewEphemeralSession()},
+			})
+			if err != nil {
+				a.previewWebViewErr = err.Error()
+			} else {
+				selected := item
+				dir := pl.Dir
+				pluginID := pl.Manifest.ID
+				page := created.Page()
+				a.pluginUISessions.Attach(page, dir, func() bool {
+					if a.pluginHost == nil {
+						return false
+					}
+					current, ok := a.pluginHost.Get(pluginID)
+					return ok && a.pluginHost.IsEnabled(pluginID) && current.Dir == dir
+				}, a.pluginWindowAPI(pluginID, &selected))
+				parts := strings.Split(pl.Manifest.Preview.Entry, "/")
+				for i := range parts {
+					parts[i] = url.PathEscape(parts[i])
+				}
+				targetURL := "bowerplugin://localhost/" + strings.Join(parts, "/")
+				if err := page.LoadURL(targetURL); err != nil {
+					a.pluginUISessions.Detach(page)
+					created.Destroy()
+					a.previewWebViewErr = err.Error()
+				} else {
+					a.previewWebView = created
+				}
+			}
+		}
+	}
+	ui.Box(c).Fill().Grow(1).Shrink(1).Clip().Children(func() {
+		if a.previewWebView != nil {
+			ui.WebView(c, a.previewWebView).Fill()
+		} else if a.previewWebViewErr != "" {
+			ui.Column(c).Fill().Center().Gap(8).Children(func() {
+				ui.Icon(c, iconImage).Size(34, 34).TextColor(p.faint)
+				ui.Text(c, a.previewWebViewErr).FontSize(12).TextColor(p.muted)
 			})
 		} else {
 			ui.Column(c).Fill().Center().Children(func() { ui.Spinner(c) })

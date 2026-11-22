@@ -807,6 +807,7 @@ func (a *App) closePreview() {
 	a.previewBitmap = nil
 	a.psdInfo = nil
 	a.closeVideo()
+	a.closePreviewWebView()
 	a.previewOpen = false
 	a.previewVariantID = ""
 	a.previewText = ""

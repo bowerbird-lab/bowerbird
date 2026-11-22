@@ -364,8 +364,26 @@ func (a *App) viewSingleInspector(c *ui.Context, item core.Item) {
 				a.metaRowCopy(c, row.Label, row.Value, row.Copyable)
 			}
 			for _, block := range section.TextBlocks {
-				ui.Text(c, block.Title).FontSize(10).FontWeight(650).TextColor(p.faint).Margin(4, 0, 0, 0)
+				if block.Title != "" {
+					ui.Text(c, block.Title).FontSize(10).FontWeight(650).TextColor(p.faint).Margin(4, 0, 0, 0)
+				}
 				ui.Text(c, block.Text).FontSize(11.5).TextColor(p.muted).Wrap().MaxLines(8)
+			}
+			for _, act := range section.Actions {
+				if ui.Button(c.Key("inspect-act-"+section.Title+"-"+act.ID), act.Title).FillWidth().Clicked() && a.pluginHost != nil {
+					actID := act.ID
+					ctx := pluginContext([]core.Item{item}, a.folderID)
+					go func() {
+						err := a.pluginHost.RunAction(actID, ctx)
+						a.post(func() {
+							if err != nil {
+								a.showToast(err.Error())
+							} else {
+								a.loadInspector(item.ID)
+							}
+						})
+					}()
+				}
 			}
 		}
 		a.viewInspectorPluginActions(c, item)

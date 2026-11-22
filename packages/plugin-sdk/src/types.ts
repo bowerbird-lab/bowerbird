@@ -1,20 +1,20 @@
 /**
- * Bowerbird native plugin SDK.
+ * Bowerbird plugin SDK.
  *
- * A plugin is a single JavaScript/TypeScript module loaded by the desktop host.
- * Existing hook plugins return plain data for the native host to render.
- * HTML UI contributions describe packaged views for hosts that support them.
+ * Plugins are self-maintained packages loaded by the native Bowerbird host.
+ * A plugin can contribute:
+ * 1. Isolated WebView pages (`preview.entry`, `ui.windows`, `ui.panels`)
+ *    with transparent background support and `/_api/*` bridge endpoints.
+ * 2. Zero-build JavaScript/TypeScript hooks executed in an embedded moejs
+ *    sandbox (`resolveUrl`, `inspect`, `actions`, `runAction`, `thumbnail`).
  */
 
 /** Capability group advertised by a plugin. */
 export type PluginKind = "preview" | "metadata" | "resolver" | "action";
 
 /**
- * Identifier of a renderer implemented by the native host.
- *
- * Plugins cannot draw their own UI. Instead they declare which native renderer
- * should handle a file, and the host maps that id to its built-in `mygo/ui`
- * view (markdown, audio, psd, image, video, ...).
+ * @deprecated Legacy host-rendered preview id. New plugins should provide their
+ * own WebView `preview.entry` page so the host stays decoupled from plugin formats.
  */
 export type NativeRenderer =
   | "markdown"
@@ -43,10 +43,18 @@ export interface PluginPermissions {
   openExternal?: boolean;
 }
 
+/** One selectable option for a `"select"` plugin setting. */
+export interface PluginSettingOption {
+  value: string;
+  label: string;
+}
+
 /** One editable row rendered in the plugin settings card. */
 export interface PluginSetting {
   key: string;
   label: string;
+  /** Input control type rendered in Settings ("text" by default, or "select"). */
+  type?: "text" | "select";
   help?: string;
   /** Optional placeholder for the native text field. */
   placeholder?: string;
@@ -54,13 +62,17 @@ export interface PluginSetting {
   default?: string;
   /** Treat the value as a secret in the settings UI. */
   secret?: boolean;
+  /** Static/fallback options when `type` is `"select"`. */
+  options?: PluginSettingOption[];
+  /** Hook name (e.g. `"settingOptions"`) used to fetch dynamic dropdown options. */
+  optionsHook?: string;
 }
 
 /** Fields contributed by a preview plugin. */
 export interface PreviewContribution {
-  /** Renderer used by the host ("webview" or a native renderer id). */
-  renderer: NativeRenderer | "webview";
-  /** Entry HTML file relative to the plugin folder when renderer is "webview". */
+  /** Renderer used by the host ("webview" by default for self-maintained previews). */
+  renderer?: "webview" | NativeRenderer;
+  /** Entry HTML file relative to the plugin folder for WebView previews. */
   entry?: string;
   /** Lowercase extensions without a leading dot. */
   extensions?: string[];
@@ -74,10 +86,15 @@ export interface PreviewContribution {
   platforms?: ("desktop" | "mobile" | (string & {}))[];
 }
 
-/** A packaged HTML view contributed by a plugin. */
+/** A packaged HTML view or controlled external HTTPS page contributed by a plugin. */
 export interface PluginUIEntry {
   id: string;
-  entry: string;
+  /** Local HTML file relative to the plugin folder (mutually exclusive with `url`). */
+  entry?: string;
+  /** External HTTPS URL for `ui.windows` (mutually exclusive with `entry`). */
+  url?: string;
+  /** Intercept downloads in external windows and import them into the active library. */
+  interceptDownloads?: boolean;
   title?: string;
   location?: "inspector";
 }
@@ -101,10 +118,12 @@ export interface PluginManifest {
 
   /** Primary capability group. Defaults to "preview" for preview plugins. */
   kind?: PluginKind;
-  /** Native renderer id for preview plugins. */
+  /** @deprecated Use `preview.entry` for WebView previews. */
   native?: NativeRenderer;
-  /** Optional declarative preview contribution (alias of `native` + lists). */
+  /** Declarative preview contribution. */
   preview?: PreviewContribution;
+  /** Supported platforms (e.g. "desktop", "mobile"). */
+  platforms?: ("desktop" | "mobile" | (string & {}))[];
 
   /** Lowercase extensions without a leading dot. */
   extensions?: string[];
@@ -163,7 +182,8 @@ export type PluginHookName =
   | "inspect"
   | "actions"
   | "runAction"
-  | "thumbnail";
+  | "thumbnail"
+  | "settingOptions";
 
 /** Extended media metadata extracted by the core scanner. */
 export interface PluginItemMeta {
@@ -261,6 +281,15 @@ export interface ResolveUrlInput {
   url: string;
 }
 
+/** Single resolved media entry inside a multi-item URL resolution. */
+export interface PluginUrlResolveItem {
+  url: string;
+  candidates?: string[];
+  sourceUrl?: string;
+  name?: string;
+  tags?: string[];
+}
+
 /** Result of resolving a page/short link to direct media. */
 export interface PluginUrlResolution {
   /** Preferred direct media URL. */
@@ -273,6 +302,10 @@ export interface PluginUrlResolution {
   name?: string;
   /** Tags applied on import. */
   tags?: string[];
+  /** Suggested folder name when importing multiple items. */
+  folderName?: string;
+  /** Multi-item resolution result. */
+  items?: PluginUrlResolveItem[];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -294,6 +327,7 @@ export interface InspectSection {
   title: string;
   rows?: InspectRow[];
   textBlocks?: InspectTextBlock[];
+  actions?: PluginAction[];
 }
 
 export interface InspectResult {
@@ -381,6 +415,86 @@ export interface PluginHooks {
  */
 export interface PluginDefinition extends PluginHooks {
   manifest?: PluginManifest;
+}
+
+/* -------------------------------------------------------------------------- */
+/* WebView Bridge API (/_api/*)                                               */
+/* -------------------------------------------------------------------------- */
+
+/** Response from `GET /_api/asset`. */
+export interface PluginUIAssetResponse {
+  id: string;
+  name: string;
+  filename: string;
+  mimeType: string;
+  bodyBase64: string;
+}
+
+/** Request body for `POST /_api/asset/save`. */
+export interface PluginUISaveAssetRequest {
+  mode: "create" | "replace" | "variant" | "page";
+  filename: string;
+  bodyBase64: string;
+  prompt?: string;
+}
+
+/** Semantic theme palette returned by `GET /_api/theme`. */
+export interface PluginUIThemePalette {
+  dark: boolean;
+  colors: {
+    bg: string;
+    sidebar: string;
+    surface: string;
+    surface2: string;
+    text: string;
+    muted: string;
+    faint: string;
+    hairline: string;
+    hover: string;
+    press: string;
+    accent: string;
+    onAccent: string;
+    danger: string;
+    warning: string;
+    info: string;
+  };
+  radius: {
+    button: number;
+    menu: number;
+    pill: number;
+  };
+}
+
+/** Response from `GET /_api/theme`. */
+export interface PluginUIThemeResponse {
+  mode: "system" | "light" | "dark" | (string & {});
+  light: PluginUIThemePalette;
+  dark: PluginUIThemePalette;
+}
+
+/** Response from `POST /_api/asset/save`. */
+export interface PluginUISaveAssetResponse {
+  id: string;
+}
+
+/** Request body for `POST /_api/network`. */
+export interface PluginUINetworkRequest {
+  url: string;
+  method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+  headers?: Record<string, string>;
+  bodyBase64?: string;
+}
+
+/** Response from `POST /_api/network`. */
+export interface PluginUINetworkResponse {
+  status: number;
+  contentType: string;
+  bodyBase64: string;
+}
+
+/** Response from `GET /_api/settings/{key}`. */
+export interface PluginUISettingResponse {
+  value: string;
 }
 
 declare global {

@@ -24,51 +24,6 @@ var (
 	validPluginIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-.]+$`)
 )
 
-// PluginPreviewManifest describes a preview contribution in plugin.json / manifest.json.
-type PluginPreviewManifest struct {
-	Renderer string `json:"renderer,omitempty"`
-	Entry    string `json:"entry,omitempty"`
-}
-
-// PluginUIEntryManifest describes an HTML panel or window entry.
-type PluginUIEntryManifest struct {
-	ID                 string `json:"id"`
-	Entry              string `json:"entry,omitempty"`
-	URL                string `json:"url,omitempty"`
-	InterceptDownloads bool   `json:"interceptDownloads,omitempty"`
-}
-
-// PluginUIManifest describes HTML pages packaged with the plugin.
-type PluginUIManifest struct {
-	Panels  []PluginUIEntryManifest `json:"panels,omitempty"`
-	Windows []PluginUIEntryManifest `json:"windows,omitempty"`
-}
-
-// PluginManifest defines the schema for remote Bowerbird plugin manifests.
-type PluginManifest struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	Version      string                 `json:"version"`
-	Description  string                 `json:"description"`
-	Author       string                 `json:"author"`
-	Kind         string                 `json:"kind"` // "preview" | "metadata" | "resolver" | "action"
-	Native       string                 `json:"native,omitempty"`
-	Preview      *PluginPreviewManifest `json:"preview,omitempty"`
-	UI           *PluginUIManifest      `json:"ui,omitempty"`
-	Hooks        []string               `json:"hooks,omitempty"`
-	Priority     int                    `json:"priority"`
-	Extensions   []string               `json:"extensions"`
-	MimePrefixes []string               `json:"mimePrefixes,omitempty"`
-	SupportsZoom bool                   `json:"supportsZoom,omitempty"`
-	Main         string                 `json:"main,omitempty"` // default "index.js" for JS-only plugins
-	Style        string                 `json:"style,omitempty"`
-	Icon         string                 `json:"icon,omitempty"`
-	Homepage     string                 `json:"homepage,omitempty"`
-	Repository   string                 `json:"repository,omitempty"`
-	License      string                 `json:"license,omitempty"`
-	DownloadURL  string                 `json:"downloadUrl,omitempty"`
-}
-
 // InstalledPlugin represents an installed plugin persisted in installed.json.
 type InstalledPlugin struct {
 	ID             string   `json:"id"`
@@ -82,7 +37,6 @@ type InstalledPlugin struct {
 	MimePrefixes   []string `json:"mimePrefixes,omitempty"`
 	SupportsZoom   bool     `json:"supportsZoom,omitempty"`
 	Main           string   `json:"main"`
-	Style          string   `json:"style,omitempty"`
 	Enabled        bool     `json:"enabled"`
 	InstalledAt    string   `json:"installedAt"`
 	SourceURL      string   `json:"sourceUrl"`
@@ -250,56 +204,28 @@ func (pm *PluginManager) GetPluginDir(id string) string {
 	return filepath.Join(pm.baseDir, id)
 }
 
-func cleanRelativePluginPath(raw string) (string, error) {
-	cleaned := filepath.Clean(raw)
-	if cleaned == "." || strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "/") || strings.HasPrefix(cleaned, "\\") || strings.Contains(raw, "\\") {
-		return "", fmt.Errorf("invalid file path %q: path traversal or absolute paths not allowed", raw)
-	}
-	return filepath.ToSlash(cleaned), nil
-}
-
-func hasNativeOrUIRuntime(m *PluginManifest) bool {
+func hasPreviewOrUIRuntime(m *PluginManifest) bool {
 	if strings.TrimSpace(m.Native) != "" {
 		return true
 	}
-	if m.Preview != nil && strings.TrimSpace(m.Preview.Renderer) != "" {
+	if strings.TrimSpace(m.Preview.Renderer) != "" || strings.TrimSpace(m.Preview.Entry) != "" {
 		return true
 	}
-	if m.UI != nil && (len(m.UI.Panels) > 0 || len(m.UI.Windows) > 0) {
+	if len(m.UI.Panels) > 0 || len(m.UI.Windows) > 0 {
 		return true
 	}
 	return false
 }
 
-// ValidateManifest validates plugin manifest fields and prevents path traversal.
+// ValidateManifest validates marketplace/installed plugin manifest fields and prevents path traversal.
 func ValidateManifest(m *PluginManifest) error {
 	if m == nil {
 		return errors.New("manifest is nil")
 	}
-	id := strings.TrimSpace(m.ID)
-	if id == "" {
-		return errors.New("missing or empty plugin id")
-	}
-	if !validPluginIDRegex.MatchString(id) {
-		return fmt.Errorf("invalid plugin id %q: only alphanumeric, dots, dashes, and underscores allowed", id)
-	}
-	if strings.Contains(id, "..") {
-		return errors.New("plugin id cannot contain path traversal")
-	}
-	m.ID = id
-
-	if strings.TrimSpace(m.Name) == "" {
-		return errors.New("missing or empty plugin name")
-	}
-	if strings.TrimSpace(m.Version) == "" {
-		return errors.New("missing or empty plugin version")
-	}
 	if strings.TrimSpace(m.Author) == "" {
 		return errors.New("missing or empty plugin author")
 	}
-	switch m.Kind {
-	case "preview", "metadata", "resolver", "action":
-	default:
+	if strings.TrimSpace(m.Kind) == "" {
 		return fmt.Errorf("invalid kind %q: must be 'preview', 'metadata', 'resolver', or 'action'", m.Kind)
 	}
 	if m.Priority < 0 || m.Priority > 100 {
@@ -308,71 +234,10 @@ func ValidateManifest(m *PluginManifest) error {
 	if m.Priority == 0 {
 		m.Priority = 50
 	}
-
-	if m.Main == "" && !hasNativeOrUIRuntime(m) {
+	if m.Main == "" && !hasPreviewOrUIRuntime(m) {
 		m.Main = "index.js"
 	}
-	if m.Main != "" {
-		cleanMain, err := cleanRelativePluginPath(m.Main)
-		if err != nil {
-			return fmt.Errorf("invalid main file path %q: path traversal or absolute paths not allowed", m.Main)
-		}
-		m.Main = cleanMain
-	}
-
-	if m.Style != "" {
-		cleanStyle, err := cleanRelativePluginPath(m.Style)
-		if err != nil {
-			return fmt.Errorf("invalid style file path %q: path traversal or absolute paths not allowed", m.Style)
-		}
-		m.Style = cleanStyle
-	}
-
-	if m.Preview != nil && m.Preview.Entry != "" {
-		cleanEntry, err := cleanRelativePluginPath(m.Preview.Entry)
-		if err != nil {
-			return fmt.Errorf("invalid preview entry path %q: path traversal or absolute paths not allowed", m.Preview.Entry)
-		}
-		m.Preview.Entry = cleanEntry
-	}
-
-	if m.UI != nil {
-		for i := range m.UI.Panels {
-			if m.UI.Panels[i].Entry != "" {
-				cleanEntry, err := cleanRelativePluginPath(m.UI.Panels[i].Entry)
-				if err != nil {
-					return fmt.Errorf("invalid UI panel entry path %q: path traversal or absolute paths not allowed", m.UI.Panels[i].Entry)
-				}
-				m.UI.Panels[i].Entry = cleanEntry
-			}
-		}
-		for i := range m.UI.Windows {
-			if m.UI.Windows[i].URL != "" {
-				parsed, err := url.Parse(m.UI.Windows[i].URL)
-				if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
-					return fmt.Errorf("invalid UI window url %q: must be a valid https URL", m.UI.Windows[i].URL)
-				}
-			}
-			if m.UI.Windows[i].Entry != "" {
-				cleanEntry, err := cleanRelativePluginPath(m.UI.Windows[i].Entry)
-				if err != nil {
-					return fmt.Errorf("invalid UI window entry path %q: path traversal or absolute paths not allowed", m.UI.Windows[i].Entry)
-				}
-				m.UI.Windows[i].Entry = cleanEntry
-			}
-		}
-	}
-
-	normExtensions := make([]string, 0, len(m.Extensions))
-	for _, ext := range m.Extensions {
-		cleaned := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
-		if cleaned != "" {
-			normExtensions = append(normExtensions, cleaned)
-		}
-	}
-	m.Extensions = normExtensions
-
-	return nil
+	return ValidatePluginManifest(m)
 }
 
 // loadIndexLocked reads installed.json if present.
@@ -522,15 +387,6 @@ func (pm *PluginManager) scanLocalPluginsLocked() bool {
 			}
 		}
 
-		// Verify style file if defined
-		if m.Style != "" {
-			styleFile := filepath.Join(pluginFolder, filepath.FromSlash(m.Style))
-			if info, err := os.Stat(styleFile); err != nil || info.IsDir() {
-				RecordLog("warn", "plugin", fmt.Sprintf("Plugin style file %q not found in %s", m.Style, name), "", 0)
-				continue
-			}
-		}
-
 		seenIDs[m.ID] = true
 		scanned++
 
@@ -539,7 +395,7 @@ func (pm *PluginManager) scanLocalPluginsLocked() bool {
 			metaUpdated := false
 			if existing.Name != m.Name || existing.Version != m.Version ||
 				existing.Description != m.Description || existing.Author != m.Author ||
-				existing.Priority != m.Priority || existing.Main != m.Main || existing.Style != m.Style {
+				existing.Priority != m.Priority || existing.Main != m.Main {
 				metaUpdated = true
 				existing.Name = m.Name
 				existing.Version = m.Version
@@ -550,7 +406,6 @@ func (pm *PluginManager) scanLocalPluginsLocked() bool {
 				existing.MimePrefixes = m.MimePrefixes
 				existing.SupportsZoom = m.SupportsZoom
 				existing.Main = m.Main
-				existing.Style = m.Style
 				changed = true
 			}
 
@@ -574,7 +429,6 @@ func (pm *PluginManager) scanLocalPluginsLocked() bool {
 				MimePrefixes: m.MimePrefixes,
 				SupportsZoom: m.SupportsZoom,
 				Main:         m.Main,
-				Style:        m.Style,
 				Enabled:      false, // 默认禁用 per user requirement
 				InstalledAt:  time.Now().UTC().Format(time.RFC3339),
 				SourceURL:    "manual",
@@ -724,7 +578,7 @@ func (pm *PluginManager) InstallPluginFromURL(pluginURL string) (*InstalledPlugi
 	}
 
 	// Verify preview entry file if declared
-	if manifest.Preview != nil && manifest.Preview.Entry != "" {
+	if manifest.Preview.Entry != "" {
 		previewPath := filepath.Join(stagingDir, filepath.FromSlash(manifest.Preview.Entry))
 		if info, err := os.Stat(previewPath); err != nil || info.IsDir() {
 			RecordLog("error", "plugin", fmt.Sprintf("[Phase 3/5] Plugin preview entry check failed: %q (err: %v)", manifest.Preview.Entry, err), "", 0)
@@ -733,28 +587,18 @@ func (pm *PluginManager) InstallPluginFromURL(pluginURL string) (*InstalledPlugi
 	}
 
 	// Verify UI entry files if declared
-	if manifest.UI != nil {
-		for _, entry := range append(append([]PluginUIEntryManifest{}, manifest.UI.Panels...), manifest.UI.Windows...) {
-			if entry.Entry == "" {
-				continue
-			}
-			uiPath := filepath.Join(stagingDir, filepath.FromSlash(entry.Entry))
-			if info, err := os.Stat(uiPath); err != nil || info.IsDir() {
-				RecordLog("error", "plugin", fmt.Sprintf("[Phase 3/5] Plugin UI entry check failed: %q (err: %v)", entry.Entry, err), "", 0)
-				return nil, fmt.Errorf("plugin UI entry %q not found or is a directory", entry.Entry)
-			}
+	for _, entry := range append(append([]PluginUIEntry{}, manifest.UI.Panels...), manifest.UI.Windows...) {
+		if entry.Entry == "" {
+			continue
+		}
+		uiPath := filepath.Join(stagingDir, filepath.FromSlash(entry.Entry))
+		if info, err := os.Stat(uiPath); err != nil || info.IsDir() {
+			RecordLog("error", "plugin", fmt.Sprintf("[Phase 3/5] Plugin UI entry check failed: %q (err: %v)", entry.Entry, err), "", 0)
+			return nil, fmt.Errorf("plugin UI entry %q not found or is a directory", entry.Entry)
 		}
 	}
 
-	// Verify style file if specified
-	if manifest.Style != "" {
-		stylePath := filepath.Join(stagingDir, filepath.FromSlash(manifest.Style))
-		if info, err := os.Stat(stylePath); err != nil || info.IsDir() {
-			RecordLog("error", "plugin", fmt.Sprintf("[Phase 3/5] Plugin style file check failed: %q (err: %v)", manifest.Style, err), "", 0)
-			return nil, fmt.Errorf("plugin style file %q not found", manifest.Style)
-		}
-	}
-	RecordLog("info", "plugin", fmt.Sprintf("[Phase 3/5] Plugin validation passed: %s (main: %s, style: %s)", manifest.ID, manifest.Main, manifest.Style), "", 0)
+	RecordLog("info", "plugin", fmt.Sprintf("[Phase 3/5] Plugin validation passed: %s (main: %s)", manifest.ID, manifest.Main), "", 0)
 
 	destDir := filepath.Join(pm.baseDir, manifest.ID)
 
@@ -785,7 +629,6 @@ func (pm *PluginManager) InstallPluginFromURL(pluginURL string) (*InstalledPlugi
 		MimePrefixes:   manifest.MimePrefixes,
 		SupportsZoom:   manifest.SupportsZoom,
 		Main:           manifest.Main,
-		Style:          manifest.Style,
 		Enabled:        true,
 		InstalledAt:    time.Now().UTC().Format(time.RFC3339),
 		SourceURL:      pluginURL,
@@ -935,29 +778,20 @@ func (pm *PluginManager) downloadAndExtract(rawURL string, stagingDir string) (*
 		}
 	}
 
-	// Download style CSS if specified
-	if m.Style != "" {
-		if err := pm.downloadAssetToStaging(&baseURL, m.Style, stagingDir, m.ID); err != nil {
-			return nil, fmt.Errorf("failed to download style file %q: %w", m.Style, err)
-		}
-	}
-
 	// Download preview entry if specified
-	if m.Preview != nil && m.Preview.Entry != "" {
+	if m.Preview.Entry != "" {
 		if err := pm.downloadAssetToStaging(&baseURL, m.Preview.Entry, stagingDir, m.ID); err != nil {
 			return nil, fmt.Errorf("failed to download preview entry %q: %w", m.Preview.Entry, err)
 		}
 	}
 
 	// Download UI entries if specified
-	if m.UI != nil {
-		for _, entry := range append(append([]PluginUIEntryManifest{}, m.UI.Panels...), m.UI.Windows...) {
-			if entry.Entry == "" {
-				continue
-			}
-			if err := pm.downloadAssetToStaging(&baseURL, entry.Entry, stagingDir, m.ID); err != nil {
-				return nil, fmt.Errorf("failed to download UI entry %q: %w", entry.Entry, err)
-			}
+	for _, entry := range append(append([]PluginUIEntry{}, m.UI.Panels...), m.UI.Windows...) {
+		if entry.Entry == "" {
+			continue
+		}
+		if err := pm.downloadAssetToStaging(&baseURL, entry.Entry, stagingDir, m.ID); err != nil {
+			return nil, fmt.Errorf("failed to download UI entry %q: %w", entry.Entry, err)
 		}
 	}
 

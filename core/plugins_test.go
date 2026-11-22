@@ -31,7 +31,7 @@ func TestValidateManifest(t *testing.T) {
 				Priority:    50,
 				Extensions:  []string{".MD", "markdown"},
 				Main:        "index.js",
-				Style:       "style.css",
+				Hooks:       []string{"inspect"},
 			},
 			wantErr: false,
 		},
@@ -88,7 +88,8 @@ func TestValidateManifest(t *testing.T) {
 				Author:  "Tester",
 				Kind:    "preview",
 				Main:    "index.js",
-				Style:   "/etc/style.css",
+				Hooks:   []string{"inspect"},
+				Preview: PreviewContribution{Entry: "/etc/view.html"},
 			},
 			wantErr: true,
 		},
@@ -151,12 +152,11 @@ func TestPluginManager_InstallFromManifestURL(t *testing.T) {
 		Priority:     60,
 		Extensions:   []string{"md"},
 		Main:         "index.js",
-		Style:        "style.css",
+		Hooks:        []string{"inspect"},
 		SupportsZoom: true,
 	}
 
 	mainJS := "console.log('markdown plugin loaded');"
-	styleCSS := "body { color: red; }"
 
 	// Start test HTTP server serving the manifest and assets
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -167,9 +167,6 @@ func TestPluginManager_InstallFromManifestURL(t *testing.T) {
 		case "/plugin/index.js":
 			w.Header().Set("Content-Type", "application/javascript")
 			_, _ = w.Write([]byte(mainJS))
-		case "/plugin/style.css":
-			w.Header().Set("Content-Type", "text/css")
-			_, _ = w.Write([]byte(styleCSS))
 		default:
 			http.NotFound(w, r)
 		}
@@ -192,9 +189,6 @@ func TestPluginManager_InstallFromManifestURL(t *testing.T) {
 	pluginDir := filepath.Join(tempDir, "test.markdown")
 	if data, err := os.ReadFile(filepath.Join(pluginDir, "index.js")); err != nil || string(data) != mainJS {
 		t.Fatalf("index.js mismatch or missing: %v", err)
-	}
-	if data, err := os.ReadFile(filepath.Join(pluginDir, "style.css")); err != nil || string(data) != styleCSS {
-		t.Fatalf("style.css mismatch or missing: %v", err)
 	}
 
 	// Verify installed.json persistence
@@ -267,6 +261,7 @@ func TestPluginManager_InstallFromZipBundle(t *testing.T) {
 		Priority:    40,
 		Extensions:  []string{"mp3", "wav"},
 		Main:        "index.js",
+		Hooks:       []string{"inspect"},
 	}
 
 	// Create test zip in memory
@@ -553,7 +548,8 @@ func TestPluginManager_ScanLocalPlugins(t *testing.T) {
 		"kind": "preview",
 		"priority": 40,
 		"extensions": ["custom"],
-		"main": "index.js"
+		"main": "index.js",
+		"hooks": ["inspect"]
 	}`
 	if err := os.WriteFile(filepath.Join(manualPluginDir, "manifest.json"), []byte(manifestContent), 0644); err != nil {
 		t.Fatalf("failed to write manifest: %v", err)

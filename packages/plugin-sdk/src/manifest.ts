@@ -13,7 +13,7 @@ export interface ManifestValidationResult {
 }
 
 const KINDS: PluginKind[] = ["preview", "metadata", "resolver", "action"];
-const HOOKS: PluginHookName[] = ["resolveUrl", "inspect", "actions", "runAction", "thumbnail"];
+const HOOKS: PluginHookName[] = ["resolveUrl", "inspect", "actions", "runAction", "thumbnail", "settingOptions"];
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((v) => typeof v === "string");
@@ -48,17 +48,79 @@ export function validatePluginManifest(manifest: unknown): ManifestValidationRes
     errors.push(`Invalid 'kind': expected one of ${KINDS.join(", ")}`);
   }
 
-  const native = m.native ?? (m.preview && (m.preview as Record<string, unknown>).renderer);
+  const preview = m.preview as Record<string, unknown> | undefined;
+  const previewEntry = preview && typeof preview.entry === "string" ? preview.entry.trim() : "";
+  const native = m.native ?? (preview && preview.renderer);
   if (native !== undefined && (typeof native !== "string" || !native.trim())) {
     errors.push("Invalid 'native': must be a non-empty renderer id");
   }
   if (m.main !== undefined && (typeof m.main !== "string" || !m.main.trim())) {
     errors.push("If specified, 'main' must be a non-empty string");
   }
-  const ui = m.ui as { panels?: unknown[]; windows?: unknown[] } | undefined;
+  const ui = m.ui as {
+    panels?: Array<Record<string, unknown>>;
+    windows?: Array<Record<string, unknown>>;
+    inspector?: Array<Record<string, unknown>>;
+  } | undefined;
   const hasUI = Boolean(ui && ((Array.isArray(ui.panels) && ui.panels.length > 0) || (Array.isArray(ui.windows) && ui.windows.length > 0)));
-  if (m.main === undefined && native === undefined && !hasUI) {
-    errors.push("A plugin must declare 'main' (JS hooks), 'native'/'preview.renderer' (host/webview renderer), or 'ui' (WebView panels/windows)");
+  if (m.main === undefined && native === undefined && !previewEntry && !hasUI) {
+    errors.push("A plugin must declare 'main' (JS hooks), 'preview.entry'/'native' (preview), or 'ui' (WebView panels/windows)");
+  }
+
+  const windowIds = new Set<string>();
+  if (ui) {
+    for (const [groupName, entries] of [
+      ["panels", ui.panels],
+      ["windows", ui.windows],
+    ] as const) {
+      if (!Array.isArray(entries)) continue;
+      const seen = new Set<string>();
+      for (const entry of entries) {
+        const id = typeof entry?.id === "string" ? entry.id : "";
+        if (!id || /[/\\]/.test(id) || seen.has(id)) {
+          errors.push(`Invalid or duplicate plugin UI id '${id}' in ui.${groupName}`);
+          continue;
+        }
+        seen.add(id);
+        if (groupName === "windows") windowIds.add(id);
+        const rawUrl = typeof entry.url === "string" ? entry.url : "";
+        const rawEntry = typeof entry.entry === "string" ? entry.entry : "";
+        if (rawUrl) {
+          if (groupName === "panels") {
+            errors.push(`Plugin UI panel '${id}' cannot use an external url`);
+          } else if (rawEntry) {
+            errors.push(`Plugin UI window '${id}' cannot specify both entry and url`);
+          } else {
+            try {
+              const parsed = new URL(rawUrl);
+              if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password) {
+                errors.push(`Plugin UI window url must be a valid https URL: '${rawUrl}'`);
+              }
+            } catch {
+              errors.push(`Plugin UI window url must be a valid https URL: '${rawUrl}'`);
+            }
+          }
+          continue;
+        }
+        if (!rawEntry || rawEntry.startsWith("/") || rawEntry.includes("\\") || rawEntry === ".." || rawEntry.startsWith("../") || rawEntry.includes("/../")) {
+          errors.push(`Plugin UI entry must stay inside its directory: '${rawEntry}'`);
+        }
+      }
+    }
+    if (Array.isArray(ui.inspector)) {
+      const seenActionIds = new Set<string>();
+      for (const action of ui.inspector) {
+        const id = typeof action?.id === "string" ? action.id : "";
+        const title = typeof action?.title === "string" ? action.title.trim() : "";
+        const type = action?.type;
+        const win = typeof action?.window === "string" ? action.window : "";
+        if (!id || /[/\\]/.test(id) || seenActionIds.has(id) || !title || type !== "window" || !windowIds.has(win)) {
+          errors.push(`Invalid inspector action '${id}'`);
+        } else {
+          seenActionIds.add(id);
+        }
+      }
+    }
   }
 
   if (m.extensions !== undefined && !isStringArray(m.extensions)) {
@@ -170,7 +232,7 @@ export function normalizePluginManifest(manifest: PluginManifest): PluginManifes
     settings: (manifest.settings ?? []) as PluginSetting[],
     hooks: normalizeList(manifest.hooks) as PluginHookName[],
   };
-  if (!normalized.main && (normalized.native || normalized.ui?.windows?.length || normalized.ui?.panels?.length)) {
+  if (!normalized.main && (normalized.native || preview?.entry || normalized.ui?.windows?.length || normalized.ui?.panels?.length)) {
     delete normalized.main;
   } else if (!normalized.main) {
     normalized.main = "index.js";

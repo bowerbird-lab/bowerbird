@@ -419,9 +419,14 @@ type App struct {
 	// Plugins.
 	plugins             []installedPluginRow
 	pluginHost          *plugin.Host
-	pluginSecretVisible map[string]bool
-	pluginUISessions    plugin.UISessions
+	pluginSecretVisible  map[string]bool
+	pluginSettingOptions map[string][]SelectOption
+	pluginSettingLoading map[string]bool
+	pluginUISessions     plugin.UISessions
 	pluginUIWindows     map[string]*mygo.Window
+	previewWebView      *mygo.WebView
+	previewWebViewKey   string
+	previewWebViewErr   string
 	pluginScanning      bool
 	pendingInstall      *core.PluginInstallRequest
 
