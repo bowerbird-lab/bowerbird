@@ -231,8 +231,9 @@ type App struct {
 	searchExtra  query.Spec
 
 	// Detail screen
-	detailIndex   *core.Signal[int]
-	detailChrome  *core.Signal[bool]
+	detailIndex     *core.Signal[int]
+	detailPageIndex *core.Signal[int]
+	detailChrome    *core.Signal[bool]
 	metaOpen      *core.Signal[bool]
 	confirmDel    *core.Signal[bool]
 	videoPaused    *core.Signal[bool]
@@ -391,6 +392,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		galleryRef:           &core.Ref{},
 		searchRef:            &core.Ref{},
 		detailIndex:          core.NewSignal(cx, 0),
+		detailPageIndex:      core.NewSignal(cx, 0),
 		matchStage:           core.NewSignal(cx, 0),
 		matchDetail:          core.NewSignal(cx, false),
 		matchRev:             core.NewSignal(cx, 0),

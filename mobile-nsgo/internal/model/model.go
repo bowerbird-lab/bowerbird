@@ -83,6 +83,8 @@ type ItemSummary struct {
 	Orientation  string   `json:"orientation"`
 	Tags         []string `json:"tags"`
 	Folders      []string `json:"folders"`
+	Variants     []string `json:"variants,omitempty"`
+	VariantOf    string   `json:"variantOf,omitempty"`
 }
 
 // ItemsPage is the reply of /query, /items and collection endpoints.
@@ -167,6 +169,8 @@ type ItemDetail struct {
 	FilePath      string     `json:"filePath"`
 	OriginalURL   string     `json:"originalUrl"`
 	ThumbnailURL  string     `json:"thumbnailUrl"`
+	Variants      []string   `json:"variants,omitempty"`
+	VariantOf     string     `json:"variantOf,omitempty"`
 }
 
 // UploadResult is POST /api/v1/upload's reply.
@@ -256,6 +260,19 @@ func (i ItemSummary) DisplayName() string {
 	return i.ID
 }
 
+// HasPages reports whether the item belongs to a multi-page group.
+func (i ItemSummary) HasPages() bool {
+	return len(i.Variants) > 0 || i.VariantOf != ""
+}
+
+// PageCount returns the number of pages when this item is the group cover, or 0.
+func (i ItemSummary) PageCount() int {
+	if len(i.Variants) > 0 {
+		return len(i.Variants) + 1
+	}
+	return 0
+}
+
 // Summary converts a detail reply into a summary, for usage history and
 // places that only hold an ID.
 func (d ItemDetail) Summary() ItemSummary {
@@ -290,6 +307,8 @@ func (d ItemDetail) Summary() ItemSummary {
 		Orientation:  orientation,
 		Tags:         d.Tags,
 		Folders:      d.Folders,
+		Variants:     d.Variants,
+		VariantOf:    d.VariantOf,
 	}
 }
 

@@ -63,7 +63,9 @@ class GalleryGridComponent(
         val shareMarked: Boolean,
         val selected: Boolean,
         val collapsed: Boolean = false,
-        val thumbUrls: List<String> = emptyList()
+        val thumbUrls: List<String> = emptyList(),
+        val pageCount: Int = 0,
+        val isPageChild: Boolean = false
     )
 
     data class LayoutConfig(
@@ -454,7 +456,9 @@ class GalleryGridComponent(
                             shareMarked = m["shareMarked"] == true,
                             selected = m["selected"] == true,
                             collapsed = m["collapsed"] == true,
-                            thumbUrls = thumbUrls
+                            thumbUrls = thumbUrls,
+                            pageCount = (m["pageCount"] as? Number)?.toInt() ?: 0,
+                            isPageChild = m["isPageChild"] == true
                         )
                     )
                 }
@@ -702,7 +706,9 @@ class GalleryGridComponent(
             bmpH = bmp?.height ?: 0,
             badge = entry.badge,
             shareMarked = entry.shareMarked,
-            selected = entry.selected
+            selected = entry.selected,
+            pageCount = entry.pageCount,
+            isPageChild = entry.isPageChild
         )
     }
 
@@ -943,7 +949,9 @@ class GalleryGridComponent(
         val bmpH: Int,
         val badge: String,
         val shareMarked: Boolean,
-        val selected: Boolean
+        val selected: Boolean,
+        val pageCount: Int,
+        val isPageChild: Boolean
     )
 
     private data class MorphHeader(
@@ -1075,6 +1083,11 @@ class GalleryGridComponent(
                 borderPaint.alpha = (a * Color.alpha(theme.border)).toInt()
                 canvas.drawRoundRect(tmpRect, tileRadius, tileRadius, borderPaint)
 
+                if (t.pageCount > 1 && dw > dp(44) && dh > dp(44)) {
+                    drawTopLeftPill(canvas, "${t.pageCount} 页", theme.onAccent, theme.accent, a)
+                } else if (t.isPageChild && dw > dp(44) && dh > dp(44)) {
+                    drawTopLeftPill(canvas, "页", theme.onBadge, theme.badge, a)
+                }
                 if (t.badge.isNotEmpty() && dw > dp(44) && dh > dp(44)) {
                     drawPill(canvas, t.badge, badgeTextPaint, theme.badge, a, topRight = true)
                 }
@@ -1128,6 +1141,30 @@ class GalleryGridComponent(
             textPaint.alpha = (alpha * Color.alpha(theme.onBadge)).toInt()
             val baseY = badgeRect.centerY() - (fm.ascent + fm.descent) * 0.5f
             canvas.drawText(label, badgeRect.left + badgePadX, baseY, textPaint)
+        }
+
+        private fun drawTopLeftPill(
+            canvas: Canvas,
+            label: String,
+            textColor: Int,
+            bgColor: Int,
+            alpha: Float
+        ) {
+            badgeTextPaint.color = textColor
+            badgeTextPaint.alpha = (alpha * Color.alpha(textColor)).toInt()
+            val fm = badgeTextPaint.fontMetrics
+            val textW = badgeTextPaint.measureText(label)
+            val textH = fm.descent - fm.ascent
+            val pillW = textW + badgePadX * 2f
+            val pillH = textH + badgePadY * 2f
+            val left = tmpRect.left + badgeMargin
+            val top = tmpRect.top + badgeMargin
+            badgeRect.set(left, top, left + pillW, top + pillH)
+            badgeBgPaint.color = bgColor
+            badgeBgPaint.alpha = (alpha * Color.alpha(bgColor)).toInt()
+            canvas.drawRoundRect(badgeRect, badgeRadius, badgeRadius, badgeBgPaint)
+            val baseY = badgeRect.centerY() - (fm.ascent + fm.descent) * 0.5f
+            canvas.drawText(label, badgeRect.left + badgePadX, baseY, badgeTextPaint)
         }
 
         private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
@@ -1664,6 +1701,29 @@ class GalleryGridComponent(
             }
         )
 
+        val pageBadge = TextView(context).apply {
+            id = ID_TILE_PAGE_BADGE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(theme.onAccent)
+            setPadding(dp(5), dp(1), dp(5), dp(1))
+            background = GradientDrawable().apply {
+                setColor(theme.accent)
+                cornerRadius = dp(4).toFloat()
+            }
+            visibility = View.GONE
+        }
+        container.addView(
+            pageBadge,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.START
+            ).apply {
+                setMargins(dp(5), dp(5), 0, 0)
+            }
+        )
+
         val shareBadge = TextView(context).apply {
             id = ID_TILE_SHARE
             text = "分享"
@@ -1738,6 +1798,7 @@ class GalleryGridComponent(
     ) : RecyclerView.ViewHolder(root) {
         private val image = root.findViewById<ImageView>(ID_TILE_IMAGE)
         private val badge = root.findViewById<TextView>(ID_TILE_BADGE)
+        private val pageBadge = root.findViewById<TextView>(ID_TILE_PAGE_BADGE)
         private val share = root.findViewById<TextView>(ID_TILE_SHARE)
         private val selectOverlay = root.findViewById<View>(ID_TILE_SELECT)
         private var currentEntry: GridEntry? = null
@@ -1813,6 +1874,19 @@ class GalleryGridComponent(
                 badge.visibility = View.VISIBLE
             } else {
                 badge.visibility = View.GONE
+            }
+            if (entry.pageCount > 1) {
+                pageBadge.text = "${entry.pageCount} 页"
+                pageBadge.setTextColor(theme.onAccent)
+                (pageBadge.background as? GradientDrawable)?.setColor(theme.accent)
+                pageBadge.visibility = View.VISIBLE
+            } else if (entry.isPageChild) {
+                pageBadge.text = "页"
+                pageBadge.setTextColor(theme.onBadge)
+                (pageBadge.background as? GradientDrawable)?.setColor(theme.badge)
+                pageBadge.visibility = View.VISIBLE
+            } else {
+                pageBadge.visibility = View.GONE
             }
             share.visibility = if (entry.shareMarked) View.VISIBLE else View.GONE
             selectOverlay.visibility = if (entry.selected) View.VISIBLE else View.GONE
@@ -2150,6 +2224,7 @@ class GalleryGridComponent(
         private const val ID_TILE_SHARE = 2003
         private const val ID_TILE_SELECT = 2004
         private const val ID_TILE_SELECT_CHECK = 2005
+        private const val ID_TILE_PAGE_BADGE = 2006
         private const val ID_FOLDER_HEADER_CHEVRON = 3001
         private const val ID_FOLDER_HEADER_TITLE = 3002
         private const val ID_FOLDER_PREVIEW = 3003

@@ -676,12 +676,15 @@ func (a *App) buildNativeSubfolderEntriesFor(folderID string, collapsed bool) []
 }
 
 func (a *App) buildNativeGridEntries(items []model.ItemSummary, monthGrouped bool, from string) []map[string]any {
-	out := make([]map[string]any, 0, len(items)+8)
+	slots := visibleTileSlots(items)
+	out := make([]map[string]any, 0, len(slots)+8)
 	lastMonth := ""
 	monthCountIdx := -1
 	headerSeq := 0
 	multi := from == screenGallery && a.multiSelect.Get()
-	for idx, item := range items {
+	for _, slot := range slots {
+		idx := slot.FlatIndex
+		item := slot.Item
 		if monthGrouped {
 			m := monthLabel(item.BestDate())
 			if m != lastMonth {
@@ -722,6 +725,8 @@ func (a *App) buildNativeGridEntries(items []model.ItemSummary, monthGrouped boo
 			"width":       item.Width,
 			"height":      item.Height,
 			"badge":       badge,
+			"pageCount":   item.PageCount(),
+			"isPageChild": item.VariantOf != "",
 			"shareMarked": a.isItemShareMarked(item.ID),
 			"selected":    multi && a.selectedIDs[item.ID],
 		})
@@ -1133,6 +1138,35 @@ func (a *App) slotTile(cx *core.Scope, slotAt func() (TileSlot, bool), from stri
 					Children: []core.Node{
 						core.Image{SourceFunc: source, ResizeMode: core.Cover, FadeDuration: time.Millisecond,
 							Style: core.Style{Width: core.Pct(100), Height: core.Pct(100), CornerRadius: 8, Background: core.Transparent}},
+						core.Show{When: func() bool {
+							slot, ok := slotAt()
+							return ok && (slot.Item.PageCount() > 1 || slot.Item.VariantOf != "")
+						}, Then: func(cx *core.Scope) core.Node {
+							slot, _ := slotAt()
+							if slot.Item.PageCount() > 1 {
+								return core.View{
+									TestID: "gallery.tile.pages",
+									Style: core.Style{
+										Position: core.Absolute, Left: core.Pt(5), Top: core.Pt(5),
+										Direction: core.Row, AlignItems: core.AlignCenter, Gap: 3,
+										Padding: core.Symmetric(2, 5), CornerRadius: 4, Background: colors.AccentFill(),
+									},
+									Children: []core.Node{
+										nsui.Icon(lucide.Layers, 10, colors.OnAccent),
+										core.Text{Content: itoa(slot.Item.PageCount()),
+											Style: core.Style{FontSize: 10, LineHeight: 13, Color: colors.OnAccent()}},
+									},
+								}
+							}
+							return core.View{
+								TestID: "gallery.tile.pages",
+								Style: core.Style{
+									Position: core.Absolute, Left: core.Pt(5), Top: core.Pt(5),
+									Padding: core.Symmetric(2, 5), CornerRadius: 4, Background: themeRole(cx, "badge"),
+								},
+								Children: []core.Node{nsui.Icon(lucide.Layers, 10, func() core.Color { return themeRole(cx, "onBadge") })},
+							}
+						}},
 						core.Show{When: func() bool { return badgeText() != "" }, Then: func(cx *core.Scope) core.Node {
 							return core.View{
 								Style: core.Style{Position: core.Absolute, Right: core.Pt(5), Top: core.Pt(5),

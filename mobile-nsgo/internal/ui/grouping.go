@@ -35,6 +35,30 @@ type GalleryRow struct {
 	Slots     []TileSlot
 }
 
+// visibleTileSlots filters out child pages whose parent is already present in
+// items, preserving each kept item's flat index in the underlying slice.
+func visibleTileSlots(items []model.ItemSummary) []TileSlot {
+	if len(items) == 0 {
+		return nil
+	}
+	present := make(map[string]struct{}, len(items))
+	for _, it := range items {
+		if it.ID != "" {
+			present[it.ID] = struct{}{}
+		}
+	}
+	slots := make([]TileSlot, 0, len(items))
+	for idx, it := range items {
+		if it.VariantOf != "" {
+			if _, hasParent := present[it.VariantOf]; hasParent {
+				continue
+			}
+		}
+		slots = append(slots, TileSlot{FlatIndex: idx, Item: it})
+	}
+	return slots
+}
+
 // BuildMonthRows groups items by month (preserving input order) and packs each
 // month's items into rows of cols columns. Each item retains its stable flat
 // index so detail navigation maps 1:1.
@@ -45,7 +69,8 @@ func BuildMonthRows(items []model.ItemSummary, cols int) []GalleryRow {
 	if cols > 5 {
 		cols = 5
 	}
-	if len(items) == 0 {
+	slots := visibleTileSlots(items)
+	if len(slots) == 0 {
 		return nil
 	}
 	type monthBucket struct {
@@ -54,15 +79,15 @@ func BuildMonthRows(items []model.ItemSummary, cols int) []GalleryRow {
 	}
 	var buckets []*monthBucket
 	byKey := map[string]*monthBucket{}
-	for idx, item := range items {
-		label := monthLabel(item.BestDate())
+	for _, slot := range slots {
+		label := monthLabel(slot.Item.BestDate())
 		b, ok := byKey[label]
 		if !ok {
 			b = &monthBucket{key: label}
 			byKey[label] = b
 			buckets = append(buckets, b)
 		}
-		b.slots = append(b.slots, TileSlot{FlatIndex: idx, Item: item})
+		b.slots = append(b.slots, slot)
 	}
 
 	rows := make([]GalleryRow, 0, len(buckets)+len(items)/cols+1)
@@ -98,23 +123,20 @@ func BuildFlatRows(items []model.ItemSummary, cols int) []GalleryRow {
 	if cols > 5 {
 		cols = 5
 	}
-	if len(items) == 0 {
+	visible := visibleTileSlots(items)
+	if len(visible) == 0 {
 		return nil
 	}
-	rows := make([]GalleryRow, 0, len(items)/cols+1)
-	for start := 0; start < len(items); start += cols {
+	rows := make([]GalleryRow, 0, len(visible)/cols+1)
+	for start := 0; start < len(visible); start += cols {
 		end := start + cols
-		if end > len(items) {
-			end = len(items)
-		}
-		slots := make([]TileSlot, 0, end-start)
-		for idx := start; idx < end; idx++ {
-			slots = append(slots, TileSlot{FlatIndex: idx, Item: items[idx]})
+		if end > len(visible) {
+			end = len(visible)
 		}
 		rows = append(rows, GalleryRow{
-			Key:   "r:" + slots[0].Item.ID,
+			Key:   "r:" + visible[start].Item.ID,
 			Kind:  RowTileGroup,
-			Slots: slots,
+			Slots: visible[start:end],
 		})
 	}
 	return rows

@@ -22,6 +22,7 @@ import (
 
 func (a *App) openDetail(cx *core.Scope, flatIndex int, from string, src core.Bounds) {
 	a.detailIndex.Set(flatIndex)
+	a.detailPageIndex.Set(0)
 	a.detailFrom = from
 	a.detailChrome.Set(false) // Immersive fullscreen by default; tap to toggle header
 	a.videoError.Set("")
@@ -30,6 +31,12 @@ func (a *App) openDetail(cx *core.Scope, flatIndex int, from string, src core.Bo
 	if flatIndex >= 0 && flatIndex < len(items) {
 		item := items[flatIndex]
 		a.ensureItemDetail(cx, item.ID)
+		if item.VariantOf != "" {
+			a.ensureItemDetail(cx, item.VariantOf)
+		}
+		for _, vid := range item.Variants {
+			a.ensureItemDetail(cx, vid)
+		}
 		thumb := a.client.MediaURL(item.ThumbnailURL)
 		if thumb == "" {
 			thumb = a.client.ThumbURL(item.ID)
@@ -97,6 +104,7 @@ func (a *App) cancelPreviewMatch() {
 
 func (a *App) canRunHeroBack() bool {
 	return a.detailIndex.Get() == a.matchOpenedIndex &&
+		a.detailPageIndex.Get() == 0 &&
 		a.matchThumb != "" &&
 		a.matchFrom.Size.Width >= 24 &&
 		a.matchFrom.Size.Height >= 24 &&
@@ -498,16 +506,113 @@ func (a *App) previewMatchOverlay(cx *core.Scope) core.Node {
 	}}
 }
 
+func (a *App) resolveDetailPages(cx *core.Scope, galleryItems []model.ItemSummary, galleryIdx int) ([]model.ItemSummary, int) {
+	if galleryIdx < 0 || galleryIdx >= len(galleryItems) {
+		return nil, 0
+	}
+	base := galleryItems[galleryIdx]
+	byID := make(map[string]model.ItemSummary, len(galleryItems)+len(a.detailCache))
+	for _, it := range galleryItems {
+		byID[it.ID] = it
+	}
+	for id, d := range a.detailCache {
+		byID[id] = d.Summary()
+	}
+	if d, ok := byID[base.ID]; ok && len(d.Variants) > len(base.Variants) {
+		base = d
+	}
+
+	root := base
+	if base.VariantOf != "" {
+		if parent, ok := byID[base.VariantOf]; ok {
+			root = parent
+		} else {
+			parentID := base.VariantOf
+			a.post(func() { a.ensureItemDetail(cx, parentID) })
+			return []model.ItemSummary{base}, 0
+		}
+	}
+
+	if len(root.Variants) == 0 {
+		return []model.ItemSummary{base}, 0
+	}
+
+	orderedIDs := make([]string, 0, 1+len(root.Variants))
+	orderedIDs = append(orderedIDs, root.ID)
+	seen := map[string]bool{root.ID: true}
+	for _, vid := range root.Variants {
+		if vid == "" || seen[vid] {
+			continue
+		}
+		seen[vid] = true
+		orderedIDs = append(orderedIDs, vid)
+	}
+
+	pages := make([]model.ItemSummary, 0, len(orderedIDs))
+	var missing []string
+	for _, pid := range orderedIDs {
+		if it, ok := byID[pid]; ok {
+			pages = append(pages, it)
+			if _, cached := a.detailCache[pid]; !cached {
+				missing = append(missing, pid)
+			}
+		} else {
+			pages = append(pages, model.ItemSummary{
+				ID:           pid,
+				Name:         pid,
+				ThumbnailURL: "/api/v1/thumbs/" + pid,
+				OriginalURL:  "/api/v1/originals/" + pid,
+			})
+			missing = append(missing, pid)
+		}
+	}
+	if len(missing) > 0 {
+		a.post(func() {
+			for _, pid := range missing {
+				a.ensureItemDetail(cx, pid)
+			}
+		})
+	}
+
+	pageIdx := a.detailPageIndex.Get()
+	if pageIdx < 0 {
+		pageIdx = 0
+	}
+	if pageIdx >= len(pages) {
+		pageIdx = len(pages) - 1
+	}
+	return pages, pageIdx
+}
+
+func visibleGalleryPosition(items []model.ItemSummary, flatIdx int) (pos, total int, prevIdx, nextIdx int) {
+	slots := visibleTileSlots(items)
+	total = len(slots)
+	prevIdx, nextIdx = -1, -1
+	for i, s := range slots {
+		if s.FlatIndex == flatIdx {
+			pos = i
+			if i > 0 {
+				prevIdx = slots[i-1].FlatIndex
+			}
+			if i+1 < len(slots) {
+				nextIdx = slots[i+1].FlatIndex
+			}
+			return pos, total, prevIdx, nextIdx
+		}
+	}
+	return flatIdx, len(items), flatIdx - 1, flatIdx + 1
+}
+
 func (a *App) detailPage(cx *core.Scope) core.Node {
 	colors := nsui.ColorsOf(cx)
 	onPreview := func() core.Color { return themeRole(cx, "onBadge") }
 	onPreviewMuted := func() core.Color { return themeRole(cx, "onBadge").Faded(0.72) }
 	overlay := func() core.Color { return themeRole(cx, "badge") }
 
-	currentItem := func() (model.ItemSummary, int, int, bool) {
+	currentItem := func() ([]model.ItemSummary, int, bool) {
 		items := a.currentGalleryFor(a.detailFrom).Snapshot().Items
 		if len(items) == 0 {
-			return model.ItemSummary{}, 0, 0, false
+			return nil, 0, false
 		}
 		index := a.detailIndex.Get()
 		if index < 0 {
@@ -516,13 +621,15 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 		if index >= len(items) {
 			index = len(items) - 1
 		}
-		return items[index], index, len(items), true
+		return items, index, true
 	}
 
 	return core.Dynamic(func(cx *core.Scope) core.Node {
 		_ = a.detailIndex.Get()
+		_ = a.detailPageIndex.Get()
+		_ = a.rev.Get()
 		_ = a.videoError.Get()
-		item, index, total, ok := currentItem()
+		items, index, ok := currentItem()
 		if !ok {
 			return core.View{
 				StyleFunc: func() core.Style {
@@ -541,6 +648,9 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 				},
 			}
 		}
+		pages, pageIdx := a.resolveDetailPages(cx, items, index)
+		item := pages[pageIdx]
+		visPos, visTotal, prevGalleryIdx, nextGalleryIdx := visibleGalleryPosition(items, index)
 		a.post(func() { a.ensureItemDetail(cx, item.ID) })
 
 		zoom := core.NewSignal(cx, float32(1))
@@ -565,16 +675,41 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 			return v
 		}
 
-		goTo := func(next int) {
-			if next < 0 || next >= total {
+		goToGallery := func(next int) {
+			if next < 0 || next >= len(items) {
 				return
 			}
 			a.videoError.Set("")
 			a.videoPaused.Set(false)
+			a.detailPageIndex.Set(0)
 			a.detailIndex.Set(next)
-			items := a.currentGalleryFor(a.detailFrom).Snapshot().Items
-			if next < len(items) {
-				a.ensureItemDetail(cx, items[next].ID)
+			a.ensureItemDetail(cx, items[next].ID)
+		}
+
+		goToPage := func(nextPage int) {
+			if nextPage < 0 || nextPage >= len(pages) {
+				return
+			}
+			a.videoError.Set("")
+			a.videoPaused.Set(false)
+			a.detailPageIndex.Set(nextPage)
+			a.ensureItemDetail(cx, pages[nextPage].ID)
+		}
+
+		canStepPrev := pageIdx > 0 || prevGalleryIdx >= 0
+		canStepNext := pageIdx < len(pages)-1 || nextGalleryIdx >= 0
+		stepPrev := func() {
+			if pageIdx > 0 {
+				goToPage(pageIdx - 1)
+			} else if prevGalleryIdx >= 0 {
+				goToGallery(prevGalleryIdx)
+			}
+		}
+		stepNext := func() {
+			if pageIdx < len(pages)-1 {
+				goToPage(pageIdx + 1)
+			} else if nextGalleryIdx >= 0 {
+				goToGallery(nextGalleryIdx)
 			}
 		}
 
@@ -674,16 +809,16 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 								swipeX.Set(0)
 								return
 							}
-							if (index == 0 && dx > 0) || (index == total-1 && dx < 0) {
+							if (!canStepPrev && dx > 0) || (!canStepNext && dx < 0) {
 								dx *= 0.25
 							}
 							swipeX.Set(dx)
 							return
 						}
 						if !switchingMode && math.Abs(float64(dx)) > math.Abs(float64(dy))*1.6 {
-							if atLeftEdge && dx > 20 && index > 0 {
+							if atLeftEdge && dx > 20 && canStepPrev {
 								switchingMode = true
-							} else if atRightEdge && dx < -20 && index < total-1 {
+							} else if atRightEdge && dx < -20 && canStepNext {
 								switchingMode = true
 							}
 						}
@@ -718,10 +853,10 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 							if threshold < 84 {
 								threshold = 84
 							}
-							if (dx < -threshold || (flick && vx < 0)) && index < total-1 {
-								goTo(index + 1)
-							} else if (dx > threshold || (flick && vx > 0)) && index > 0 {
-								goTo(index - 1)
+							if (dx < -threshold || (flick && vx < 0)) && canStepNext {
+								stepNext()
+							} else if (dx > threshold || (flick && vx > 0)) && canStepPrev {
+								stepPrev()
 							}
 						}
 					}
@@ -793,10 +928,10 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 					if threshold < 84 {
 						threshold = 84
 					}
-					if dx < -threshold && index < total-1 {
-						goTo(index + 1)
-					} else if dx > threshold && index > 0 {
-						goTo(index - 1)
+					if dx < -threshold && canStepNext {
+						stepNext()
+					} else if dx > threshold && canStepPrev {
+						stepPrev()
 					}
 				},
 				Children: []core.Node{a.nonImageMediaNode(cx, item)},
@@ -832,7 +967,13 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 						core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 1}, Children: []core.Node{
 							core.Text{Content: item.DisplayName(), MaxLines: 1,
 								Style: nsui.TypeBody.Merge(core.Style{Color: onPreview()})},
-							core.Text{Content: itoa(index+1) + " / " + itoa(total),
+							core.Text{Content: func() string {
+								s := itoa(visPos+1) + " / " + itoa(visTotal)
+								if len(pages) > 1 {
+									s += " · 第 " + itoa(pageIdx+1) + "/" + itoa(len(pages)) + " 页"
+								}
+								return s
+							}(),
 								Style: nsui.TypeCaption.Merge(core.Style{Color: onPreviewMuted()})},
 						}},
 						mobileIconButton(cx, mobileIconBtnSpec{
@@ -871,6 +1012,189 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 			},
 		}
 
+		pageBar := core.Show{
+			When: func() bool { return len(pages) > 1 },
+			Then: func(cx *core.Scope) core.Node {
+				return core.Show{
+					When: func() bool { return a.detailChrome.Get() },
+					Then: func(cx *core.Scope) core.Node {
+						thumbs := make([]core.Node, 0, len(pages))
+						for i, pItem := range pages {
+							idxCopy := i
+							active := i == pageIdx
+							thumbURL := a.itemThumbURL(pItem)
+							thumbs = append(thumbs, core.View{
+								TestID: "detail.page." + itoa(i),
+								StyleFunc: func() core.Style {
+									bc := core.Transparent
+									bw := core.Points(0)
+									if active {
+										bc = colors.Accent()
+										bw = 2
+									}
+									return core.Style{
+										Width: core.Pt(44), Height: core.Pt(44),
+										CornerRadius: 6, Overflow: core.Hidden,
+										BorderWidth: bw, BorderColor: bc,
+										Background: themeRole(cx, "surfaceAlt"),
+										FlexShrink: 0,
+									}
+								},
+								OnPress: func(core.PressEvent) { goToPage(idxCopy) },
+								Children: []core.Node{
+									core.Image{
+										Source:       core.Src(thumbURL),
+										ResizeMode:   core.Cover,
+										FadeDuration: time.Millisecond,
+										Style:        core.Style{Width: core.Pct(100), Height: core.Pct(100)},
+									},
+									core.View{
+										Style: core.Style{
+											Position: core.Absolute, Right: core.Pt(2), Bottom: core.Pt(2),
+											Padding: core.Symmetric(1, 4), CornerRadius: 3, Background: overlay(),
+										},
+										Children: []core.Node{
+											core.Text{Content: itoa(i + 1), Style: core.Style{FontSize: 9, LineHeight: 11, Color: onPreview()}},
+										},
+									},
+								},
+							})
+						}
+						return core.View{
+							TestID: "detail.pageStrip",
+							StyleFunc: func() core.Style {
+								safe := cx.Env().SafeArea()
+								return core.Style{
+									Position: core.Absolute, Bottom: core.Pt(0), Left: core.Pt(0), Right: core.Pt(0),
+									Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6,
+									Padding: core.Edges{
+										Top: 8, Bottom: safe.Bottom + 10, Left: safe.Left + 8, Right: safe.Right + 8,
+									},
+									Background: overlay(),
+									ZIndex:     20,
+								}
+							},
+							Children: []core.Node{
+								mobileIconButton(cx, mobileIconBtnSpec{
+									TestID: "detail.pagePrev", Label: "上一页", Icon: lucide.ChevronLeft, IconSize: 18,
+									Variant: mobileIconGhost, Tint: func() core.Color {
+										if pageIdx == 0 {
+											return onPreviewMuted()
+										}
+										return onPreview()
+									},
+									OnPress: func() {
+										if pageIdx > 0 {
+											goToPage(pageIdx - 1)
+										}
+									},
+								}),
+								core.Scroll{
+									Horizontal: true,
+									Style:      core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)},
+									Children: []core.Node{
+										core.View{
+											Style:    core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 6},
+											Children: thumbs,
+										},
+									},
+								},
+								mobileIconButton(cx, mobileIconBtnSpec{
+									TestID: "detail.pageNext", Label: "下一页", Icon: lucide.ChevronRight, IconSize: 18,
+									Variant: mobileIconGhost, Tint: func() core.Color {
+										if pageIdx >= len(pages)-1 {
+											return onPreviewMuted()
+										}
+										return onPreview()
+									},
+									OnPress: func() {
+										if pageIdx < len(pages)-1 {
+											goToPage(pageIdx + 1)
+										}
+									},
+								}),
+							},
+						}
+					},
+					Else: func(cx *core.Scope) core.Node {
+						return core.View{
+							TestID: "detail.pagePill",
+							StyleFunc: func() core.Style {
+								safe := cx.Env().SafeArea()
+								return core.Style{
+									Position: core.Absolute, Bottom: core.Pt(safe.Bottom + 16), Left: core.Pt(0), Right: core.Pt(0),
+									AlignItems: core.AlignCenter, ZIndex: 19,
+								}
+							},
+							Children: []core.Node{
+								core.View{
+									StyleFunc: func() core.Style {
+										return core.Style{
+											Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4,
+											Padding: core.Symmetric(4, 8), CornerRadius: 16,
+											Background: overlay(),
+										}
+									},
+									Children: []core.Node{
+										core.View{
+											TestID: "detail.pagePillPrev",
+											Style: core.Style{
+												Width: core.Pt(24), Height: core.Pt(24),
+												AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+											},
+											OnPress: func(core.PressEvent) {
+												if pageIdx > 0 {
+													goToPage(pageIdx - 1)
+												}
+											},
+											Children: []core.Node{nsui.Icon(lucide.ChevronLeft, 15, func() core.Color {
+												if pageIdx == 0 {
+													return onPreviewMuted()
+												}
+												return onPreview()
+											})},
+										},
+										core.View{
+											Style: core.Style{
+												Direction: core.Row, AlignItems: core.AlignCenter, Gap: 4,
+												Padding: core.Symmetric(2, 4),
+											},
+											OnPress: func(core.PressEvent) { a.detailChrome.Set(true) },
+											Children: []core.Node{
+												nsui.Icon(lucide.Layers, 13, onPreview),
+												core.Text{
+													Content: itoa(pageIdx+1) + " / " + itoa(len(pages)),
+													Style:   nsui.TypeCaption.Merge(core.Style{Color: onPreview()}),
+												},
+											},
+										},
+										core.View{
+											TestID: "detail.pagePillNext",
+											Style: core.Style{
+												Width: core.Pt(24), Height: core.Pt(24),
+												AlignItems: core.AlignCenter, JustifyContent: core.JustifyCenter,
+											},
+											OnPress: func(core.PressEvent) {
+												if pageIdx < len(pages)-1 {
+													goToPage(pageIdx + 1)
+												}
+											},
+											Children: []core.Node{nsui.Icon(lucide.ChevronRight, 15, func() core.Color {
+												if pageIdx >= len(pages)-1 {
+													return onPreviewMuted()
+												}
+												return onPreview()
+											})},
+										},
+									},
+								},
+							},
+						}
+					},
+				}
+			},
+		}
+
 		return core.View{
 			StyleFunc: func() core.Style {
 				return core.Style{
@@ -882,6 +1206,7 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 			Children: []core.Node{
 				mediaContent,
 				floatingHeader,
+				pageBar,
 				a.metadataSheet(cx, item),
 				a.deleteDialog(cx),
 			},
@@ -1312,7 +1637,7 @@ func (a *App) backFromDetail() {
 	}
 	a.videoPaused.Set(true)
 	from := a.detailReturnScreen()
-	if a.detailIndex.Get() != a.matchOpenedIndex {
+	if a.detailIndex.Get() != a.matchOpenedIndex || a.detailPageIndex.Get() != 0 {
 		a.cancelPreviewMatch()
 		a.screen.Set(from)
 		return

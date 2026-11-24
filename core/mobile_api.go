@@ -130,6 +130,8 @@ type MobileItemSummary struct {
 	Orientation  string   `json:"orientation"`
 	Tags         []string `json:"tags"`
 	Folders      []string `json:"folders"`
+	Variants     []string `json:"variants,omitempty"`
+	VariantOf    string   `json:"variantOf,omitempty"`
 }
 
 // MobileItemsResponse wraps paginated item results.
@@ -1727,6 +1729,8 @@ func mobileItemSummaries(items []Item) []MobileItemSummary {
 			Orientation:  deriveOrientation(it),
 			Tags:         it.Tags,
 			Folders:      it.Folders,
+			Variants:     it.Variants,
+			VariantOf:    it.VariantOf,
 		})
 	}
 	return summaries
