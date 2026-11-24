@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -264,7 +263,6 @@ func (s *MobileServer) Start() error {
 	mux.HandleFunc("/api/v1/items", s.authMiddleware(s.handleItemsList))
 	mux.HandleFunc("/api/v1/query", s.authMiddleware(s.handleQuery))
 	mux.HandleFunc("/api/v1/stats", s.authMiddleware(s.handleStats))
-	mux.HandleFunc("/api/v1/plugins/preview", s.authMiddleware(s.handlePreviewPlugins))
 	mux.HandleFunc("/api/v1/items/collection", s.authMiddleware(s.handleCollectionItems))
 	mux.HandleFunc("/api/v1/items/", s.authMiddleware(s.handleItemRoutes))
 	mux.HandleFunc("/api/v1/thumbs/", s.authMiddleware(s.handleThumbnail))
@@ -2438,85 +2436,4 @@ func (s *MobileServer) GetStatus() MobileServerStatus {
 		AvailableNetworks: GetAvailableNetworkInterfaces(allowed),
 		Devices:           s.listDevices(),
 	}
-}
-
-func (s *MobileServer) handlePreviewPlugins(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	type previewDesc struct {
-		ID           string   `json:"id"`
-		Name         string   `json:"name"`
-		Version      string   `json:"version"`
-		Renderer     string   `json:"renderer"`
-		Extensions   []string `json:"extensions,omitempty"`
-		MimePrefixes []string `json:"mimePrefixes,omitempty"`
-		SupportsZoom bool     `json:"supportsZoom,omitempty"`
-		Priority     int      `json:"priority,omitempty"`
-		Platforms    []string `json:"platforms,omitempty"`
-		Enabled      bool     `json:"enabled"`
-	}
-	type rawManifest struct {
-		ID           string   `json:"id"`
-		Name         string   `json:"name"`
-		Version      string   `json:"version"`
-		Kind         string   `json:"kind"`
-		Native       string   `json:"native"`
-		Extensions   []string `json:"extensions"`
-		MimePrefixes []string `json:"mimePrefixes"`
-		SupportsZoom bool     `json:"supportsZoom"`
-		Priority     int      `json:"priority"`
-		Capabilities []string `json:"capabilities"`
-		Platforms    []string `json:"platforms"`
-	}
-	cfgDir, _ := os.UserConfigDir()
-	pluginsDir := filepath.Join(cfgDir, "Bowerbird", "plugins")
-	var out []previewDesc
-	entries, _ := os.ReadDir(pluginsDir)
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(pluginsDir, e.Name(), "plugin.json"))
-		if err != nil {
-			continue
-		}
-		var m rawManifest
-		if err := json.Unmarshal(data, &m); err != nil {
-			continue
-		}
-		if !strings.EqualFold(m.Kind, "preview") && m.Native == "" {
-			continue
-		}
-		platforms := m.Platforms
-		if len(platforms) == 0 {
-			platforms = []string{"desktop", "mobile"}
-		}
-		out = append(out, previewDesc{
-			ID:           m.ID,
-			Name:         m.Name,
-			Version:      m.Version,
-			Renderer:     m.Native,
-			Extensions:   m.Extensions,
-			MimePrefixes: m.MimePrefixes,
-			SupportsZoom: m.SupportsZoom,
-			Priority:     m.Priority,
-			Platforms:    platforms,
-			Enabled:      true,
-		})
-	}
-	raw, _ := json.Marshal(out)
-	sum := sha256.Sum256(raw)
-	hostName, _ := os.Hostname()
-	bundle := map[string]any{
-		"hostId":      hostName,
-		"hostName":    hostName,
-		"count":       len(out),
-		"hash":        hex.EncodeToString(sum[:]),
-		"generatedAt": time.Now().UTC(),
-		"plugins":     out,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(bundle)
 }

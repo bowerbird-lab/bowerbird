@@ -112,3 +112,26 @@ func TestResolveDetailPagesFromGalleryAndCache(t *testing.T) {
 		t.Fatalf("clampedIdx = %d, want 2", clampedIdx)
 	}
 }
+
+func TestPageGroupFoldingToggleInSlotsAndPosition(t *testing.T) {
+	items := []model.ItemSummary{
+		{ID: "p1", Variants: []string{"v1"}},
+		{ID: "v1", VariantOf: "p1"},
+		{ID: "s1"},
+	}
+
+	folded := visibleTileSlotsWithFold(items, true)
+	if len(folded) != 2 || folded[0].Item.ID != "p1" || folded[1].Item.ID != "s1" {
+		t.Fatalf("folded slots = %+v", folded)
+	}
+
+	flat := visibleTileSlotsWithFold(items, false)
+	if len(flat) != 3 || flat[0].Item.ID != "p1" || flat[1].Item.ID != "v1" || flat[2].Item.ID != "s1" {
+		t.Fatalf("flat slots = %+v", flat)
+	}
+
+	pos, total, prevIdx, nextIdx := visibleGalleryPositionWithFold(items, 1, false)
+	if pos != 1 || total != 3 || prevIdx != 0 || nextIdx != 2 {
+		t.Fatalf("visibleGalleryPositionWithFold(1, false) = (%d, %d, %d, %d), want (1, 3, 0, 2)", pos, total, prevIdx, nextIdx)
+	}
+}

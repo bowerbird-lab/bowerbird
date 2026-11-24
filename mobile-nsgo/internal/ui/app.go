@@ -5,7 +5,6 @@ import (
 	"context"
 	"log"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,7 +17,6 @@ import (
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/app"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/platform"
-	"github.com/owocc/bowerbird/mobile-nsgo/internal/plugin"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/query"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/storage"
 	apptheme "github.com/owocc/bowerbird/mobile-nsgo/internal/theme"
@@ -182,6 +180,7 @@ type App struct {
 	settingsDarkTheme    *core.Signal[string]
 	settingsSystemAccent   *core.Signal[bool]
 	settingsPredictiveBack *core.Signal[bool]
+	settingsFoldPageGroups *core.Signal[bool]
 	settingsThemeOpen      *core.Signal[bool]
 	settingsThemePick    apptheme.Appearance
 	settingsBackScreen   string
@@ -245,9 +244,7 @@ type App struct {
 	videoError     *core.Signal[string]
 	videoLocalPath *core.Signal[string]
 	videoLocalID   string
-	pluginGlue     *plugin.PreviewGlue
-	pluginsSyncing *core.Signal[bool]
-	detailCache   map[string]model.ItemDetail
+	detailCache    map[string]model.ItemDetail
 	detailLoading map[string]bool
 	toast         *core.Signal[string]
 
@@ -307,6 +304,7 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		settingsDarkTheme:    core.NewSignal(cx, prefs.DarkTheme),
 		settingsSystemAccent:   core.NewSignal(cx, prefs.SystemAccent),
 		settingsPredictiveBack: core.NewSignal(cx, prefs.PredictiveBackEnabled()),
+		settingsFoldPageGroups: core.NewSignal(cx, prefs.FoldPageGroupsEnabled()),
 		settingsThemeOpen:      core.NewSignal(cx, false),
 		settingsThemePick:    apptheme.Light,
 		detailCache:          map[string]model.ItemDetail{},
@@ -409,8 +407,6 @@ func rootWithDir(cx *core.Scope, dataDir string) core.Node {
 		videoRef:             &core.Ref{},
 		videoError:           core.NewSignal(cx, ""),
 		videoLocalPath:       core.NewSignal(cx, ""),
-		pluginGlue:           plugin.NewPreviewGlue(os.TempDir()),
-		pluginsSyncing:       core.NewSignal(cx, false),
 		toast:                core.NewSignal(cx, ""),
 		sidebarView:          SidebarAll,
 		rootSidebarView:      SidebarAll,
@@ -580,25 +576,6 @@ func (a *App) Render(cx *core.Scope) core.Node {
 			a.shareFolderPickerDialog(cx),
 			a.backGuard(cx),
 			a.previewMatchOverlay(cx),
-			core.Show{When: func() bool { return a.pluginsSyncing.Get() }, Then: func(cx *core.Scope) core.Node {
-				return core.View{
-					StyleFunc: func() core.Style {
-						return core.Style{
-							Position:       core.Absolute,
-							Top:            core.Pt(0),
-							Left:           core.Pt(0),
-							Right:          core.Pt(0),
-							Bottom:         core.Pt(0),
-							AlignItems:     core.AlignCenter,
-							JustifyContent: core.JustifyCenter,
-							Background:     colors.Background(),
-						}
-					},
-					Children: []core.Node{
-						core.Text{Content: "正在加载插件...", Style: nsui.TypeTitle, StyleFunc: nsui.Colored(colors.Text)},
-					},
-				}
-			}},
 			core.Show{When: func() bool { return a.toast.Get() != "" }, Then: func(cx *core.Scope) core.Node {
 				return core.View{
 					StyleFunc: func() core.Style {
@@ -946,19 +923,24 @@ func (a *App) subfoldersForFolder(folderID string) []model.Folder {
 	return f.Children
 }
 
+func (a *App) foldPageGroups() bool {
+	return a.settingsFoldPageGroups == nil || a.settingsFoldPageGroups.Get()
+}
+
 func (a *App) rebuildFrameRows(frame *folderFrame) {
+	fold := a.foldPageGroups()
 	if frame == nil {
 		snap := a.gallery.Snapshot()
 		if a.sidebarView == SidebarFolder && a.activeFolderID != "" {
-			a.cachedRows = BuildGalleryRows(a.currentSubfolders(), a.subfoldersCollapsed, snap.Items, a.effectiveGridCols())
+			a.cachedRows = BuildGalleryRowsWithFold(a.currentSubfolders(), a.subfoldersCollapsed, snap.Items, a.effectiveGridCols(), fold)
 		} else {
-			a.cachedRows = BuildFlatRows(snap.Items, a.effectiveGridCols())
+			a.cachedRows = BuildFlatRowsWithFold(snap.Items, a.effectiveGridCols(), fold)
 		}
 		a.bumpGallery()
 		return
 	}
 	snap := frame.gallery.Snapshot()
-	frame.cachedRows = BuildGalleryRows(a.subfoldersForFolder(frame.folderID), frame.subfoldersCollapsed, snap.Items, a.effectiveGridCols())
+	frame.cachedRows = BuildGalleryRowsWithFold(a.subfoldersForFolder(frame.folderID), frame.subfoldersCollapsed, snap.Items, a.effectiveGridCols(), fold)
 	a.bumpGallery()
 }
 
@@ -968,7 +950,7 @@ func (a *App) rebuildGalleryRows() {
 
 func (a *App) rebuildSearchRows() {
 	snap := a.searchGallery.Snapshot()
-	a.cachedSearchRows = BuildFlatRows(snap.Items, a.effectiveGridCols())
+	a.cachedSearchRows = BuildFlatRowsWithFold(snap.Items, a.effectiveGridCols(), a.foldPageGroups())
 	a.bumpGallery()
 }
 
@@ -1301,15 +1283,6 @@ func (a *App) loadSidebarData(cx *core.Scope) {
 		ctx, cancel := context.WithTimeout(a.rootCtx(), 15*time.Second)
 		defer cancel()
 		stats, statsErr := a.client.Stats(ctx)
-		if a.pluginGlue != nil {
-			a.pluginsSyncing.Set(true)
-			if bundle, err := a.client.PreviewPlugins(ctx); err == nil {
-				if a.pluginGlue.NeedsSync(bundle.Count, bundle.Hash) {
-					_ = a.pluginGlue.ApplyBundle(bundle)
-				}
-			}
-			a.pluginsSyncing.Set(false)
-		}
 		folders, foldersErr := a.client.Folders(ctx)
 		tags, tagsErr := a.client.Tags(ctx)
 		colors, colorsErr := a.client.Colors(ctx)

@@ -676,7 +676,7 @@ func (a *App) buildNativeSubfolderEntriesFor(folderID string, collapsed bool) []
 }
 
 func (a *App) buildNativeGridEntries(items []model.ItemSummary, monthGrouped bool, from string) []map[string]any {
-	slots := visibleTileSlots(items)
+	slots := visibleTileSlotsWithFold(items, a.foldPageGroups())
 	out := make([]map[string]any, 0, len(slots)+8)
 	lastMonth := ""
 	monthCountIdx := -1

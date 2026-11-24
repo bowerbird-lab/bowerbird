@@ -847,11 +847,17 @@ type Preferences struct {
 	ShareMode              string `json:"shareMode"`     // "auto" or "choose"
 	ShareNotifyDisabled    bool   `json:"shareNotifyDisabled,omitempty"`
 	PredictiveBackDisabled bool   `json:"predictiveBackDisabled,omitempty"`
+	FoldPageGroupsDisabled bool   `json:"foldPageGroupsDisabled,omitempty"`
 }
 
 // PredictiveBackEnabled reports whether Android predictive back is enabled.
 func (p Preferences) PredictiveBackEnabled() bool {
 	return !p.PredictiveBackDisabled
+}
+
+// FoldPageGroupsEnabled reports whether multi-page groups are collapsed under their cover.
+func (p Preferences) FoldPageGroupsEnabled() bool {
+	return !p.FoldPageGroupsDisabled
 }
 
 // PreferencesVersion is the current preferences document version.

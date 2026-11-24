@@ -16,7 +16,6 @@ import (
 	nsui "github.com/nsgo-dev/nsgo/ui"
 
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
-	"github.com/owocc/bowerbird/mobile-nsgo/internal/plugin"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/transport"
 )
 
@@ -33,6 +32,13 @@ func (a *App) openDetail(cx *core.Scope, flatIndex int, from string, src core.Bo
 		a.ensureItemDetail(cx, item.ID)
 		if item.VariantOf != "" {
 			a.ensureItemDetail(cx, item.VariantOf)
+			pages, _ := a.resolveDetailPages(cx, items, flatIndex)
+			for pi, p := range pages {
+				if p.ID == item.ID {
+					a.detailPageIndex.Set(pi)
+					break
+				}
+			}
 		}
 		for _, vid := range item.Variants {
 			a.ensureItemDetail(cx, vid)
@@ -585,7 +591,11 @@ func (a *App) resolveDetailPages(cx *core.Scope, galleryItems []model.ItemSummar
 }
 
 func visibleGalleryPosition(items []model.ItemSummary, flatIdx int) (pos, total int, prevIdx, nextIdx int) {
-	slots := visibleTileSlots(items)
+	return visibleGalleryPositionWithFold(items, flatIdx, true)
+}
+
+func visibleGalleryPositionWithFold(items []model.ItemSummary, flatIdx int, fold bool) (pos, total int, prevIdx, nextIdx int) {
+	slots := visibleTileSlotsWithFold(items, fold)
 	total = len(slots)
 	prevIdx, nextIdx = -1, -1
 	for i, s := range slots {
@@ -650,13 +660,14 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 		}
 		pages, pageIdx := a.resolveDetailPages(cx, items, index)
 		item := pages[pageIdx]
-		visPos, visTotal, prevGalleryIdx, nextGalleryIdx := visibleGalleryPosition(items, index)
+		visPos, visTotal, prevGalleryIdx, nextGalleryIdx := visibleGalleryPositionWithFold(items, index, a.foldPageGroups())
 		a.post(func() { a.ensureItemDetail(cx, item.ID) })
 
 		zoom := core.NewSignal(cx, float32(1))
 		panX := core.NewSignal(cx, core.Points(0))
 		panY := core.NewSignal(cx, core.Points(0))
 		swipeX := core.NewSignal(cx, core.Points(0))
+		swipeY := core.NewSignal(cx, core.Points(0))
 		smooth := core.NewSignal(cx, true)
 
 		maxPan := func(z float32, dim core.Points) core.Points {
@@ -696,8 +707,12 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 			a.ensureItemDetail(cx, pages[nextPage].ID)
 		}
 
-		canStepPrev := pageIdx > 0 || prevGalleryIdx >= 0
-		canStepNext := pageIdx < len(pages)-1 || nextGalleryIdx >= 0
+		canGalleryPrev := prevGalleryIdx >= 0
+		canGalleryNext := nextGalleryIdx >= 0
+		canPagePrev := pageIdx > 0
+		canPageNext := pageIdx < len(pages)-1
+		canStepPrev := canPagePrev || canGalleryPrev
+		canStepNext := canPageNext || canGalleryNext
 		stepPrev := func() {
 			if pageIdx > 0 {
 				goToPage(pageIdx - 1)
@@ -717,7 +732,7 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 		var startZoom float32 = 1
 		var startPanX, startPanY core.Points
 		var atLeftEdge, atRightEdge, switchingMode bool
-		var axisLocked, horizontalSwipe bool
+		var axisLocked, horizontalSwipe, verticalSwipe bool
 		var lastTapAt time.Time
 
 		onMediaTap := func() {
@@ -792,33 +807,44 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 						switchingMode = false
 						axisLocked = false
 						horizontalSwipe = false
+						verticalSwipe = false
 					case core.GestureChanged:
 						dx := ev.Translation.X
 						dy := ev.Translation.Y
 						if startZoom <= 1.02 {
-							// Lock the gesture to an axis first: a mostly
-							// vertical swipe must not page sideways because
-							// of the small sideways wobble of a finger.
+							// Lock the gesture to an axis first: horizontal switches
+							// gallery items; vertical flips pages in multi-page mode.
 							if !axisLocked {
 								if math.Abs(float64(dx)) > 8 || math.Abs(float64(dy)) > 8 {
 									axisLocked = true
 									horizontalSwipe = math.Abs(float64(dx)) > math.Abs(float64(dy))*1.35
+									verticalSwipe = !horizontalSwipe && len(pages) > 1 && math.Abs(float64(dy)) > math.Abs(float64(dx))*1.35
 								}
 							}
-							if !horizontalSwipe {
+							if horizontalSwipe {
+								if (!canGalleryPrev && dx > 0) || (!canGalleryNext && dx < 0) {
+									dx *= 0.25
+								}
+								swipeX.Set(dx)
+								swipeY.Set(0)
+								return
+							}
+							if verticalSwipe {
+								if (!canPagePrev && dy > 0) || (!canPageNext && dy < 0) {
+									dy *= 0.25
+								}
+								swipeY.Set(dy)
 								swipeX.Set(0)
 								return
 							}
-							if (!canStepPrev && dx > 0) || (!canStepNext && dx < 0) {
-								dx *= 0.25
-							}
-							swipeX.Set(dx)
+							swipeX.Set(0)
+							swipeY.Set(0)
 							return
 						}
 						if !switchingMode && math.Abs(float64(dx)) > math.Abs(float64(dy))*1.6 {
-							if atLeftEdge && dx > 20 && canStepPrev {
+							if atLeftEdge && dx > 20 && canGalleryPrev {
 								switchingMode = true
-							} else if atRightEdge && dx < -20 && canStepNext {
+							} else if atRightEdge && dx < -20 && canGalleryNext {
 								switchingMode = true
 							}
 						}
@@ -833,30 +859,47 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 						smooth.Set(true)
 						if startZoom <= 1.02 || switchingMode {
 							dx := swipeX.Get()
+							dy := swipeY.Get()
 							swipeX.Set(0)
+							swipeY.Set(0)
 							if ev.Phase != core.GestureEnded {
 								return
 							}
-							if startZoom <= 1.02 && !horizontalSwipe {
-								return
-							}
-							// A page turn needs both a clear sideways intent
-							// and a distance or a fast sideways flick.
-							dy := ev.Translation.Y
 							vx, vy := ev.Velocity.X, ev.Velocity.Y
-							sideways := math.Abs(float64(dx)) > math.Abs(float64(dy))*1.35
-							flick := math.Abs(float64(vx)) > 700 && math.Abs(float64(vx)) > math.Abs(float64(vy))*1.6
-							if !sideways && !flick {
+							if horizontalSwipe || switchingMode {
+								rawDY := ev.Translation.Y
+								sideways := math.Abs(float64(dx)) > math.Abs(float64(rawDY))*1.35
+								flick := math.Abs(float64(vx)) > 700 && math.Abs(float64(vx)) > math.Abs(float64(vy))*1.6
+								if !sideways && !flick {
+									return
+								}
+								threshold := win.Width * 0.2
+								if threshold < 84 {
+									threshold = 84
+								}
+								if (dx < -threshold || (flick && vx < 0)) && canGalleryNext {
+									goToGallery(nextGalleryIdx)
+								} else if (dx > threshold || (flick && vx > 0)) && canGalleryPrev {
+									goToGallery(prevGalleryIdx)
+								}
 								return
 							}
-							threshold := win.Width * 0.2
-							if threshold < 84 {
-								threshold = 84
-							}
-							if (dx < -threshold || (flick && vx < 0)) && canStepNext {
-								stepNext()
-							} else if (dx > threshold || (flick && vx > 0)) && canStepPrev {
-								stepPrev()
+							if verticalSwipe && len(pages) > 1 {
+								rawDX := ev.Translation.X
+								vertical := math.Abs(float64(dy)) > math.Abs(float64(rawDX))*1.35
+								flick := math.Abs(float64(vy)) > 700 && math.Abs(float64(vy)) > math.Abs(float64(vx))*1.6
+								if !vertical && !flick {
+									return
+								}
+								threshold := win.Height * 0.14
+								if threshold < 72 {
+									threshold = 72
+								}
+								if (dy < -threshold || (flick && vy < 0)) && canPageNext {
+									goToPage(pageIdx + 1)
+								} else if (dy > threshold || (flick && vy > 0)) && canPagePrev {
+									goToPage(pageIdx - 1)
+								}
 							}
 						}
 					}
@@ -874,7 +917,7 @@ func (a *App) detailPage(cx *core.Scope) core.Node {
 								Transform: core.Transform{
 									Scale:      zoom.Get(),
 									TranslateX: panX.Get() + swipeX.Get(),
-									TranslateY: panY.Get(),
+									TranslateY: panY.Get() + swipeY.Get(),
 								},
 								Transition: tr,
 							}
@@ -1810,77 +1853,6 @@ func (a *App) ensureVideoCached(cx *core.Scope, item model.ItemSummary) {
 			a.videoLocalPath.Set(cachePath)
 		}
 	}()
-}
-
-func (a *App) renderPluginUI(cx *core.Scope, item model.ItemSummary, node plugin.UINode, videoSource string) core.Node {
-	colors := nsui.ColorsOf(cx)
-	switch node.Type {
-	case "video":
-		src := videoSource
-		if src == "" {
-			src = node.Source
-		}
-		return core.View{
-			Style: core.Style{Width: core.Pct(100), FlexGrow: 1, Background: colors.Background()},
-			Children: []core.Node{
-				core.Video{
-					Source:     src,
-					Controls:   true,
-					ResizeMode: core.Contain,
-					PausedFunc: func() bool {
-						return a.screen.Get() != screenDetail ||
-							cx.Env().Lifecycle() != core.LifecycleActive ||
-							a.videoPaused.Get() ||
-							a.metaOpen.Get()
-					},
-					OnError: func(err error) {
-						a.videoError.Set("不支持的编码格式或播放失败: " + err.Error())
-					},
-					Style:  core.Style{Width: core.Pct(100), Height: core.Pct(100)},
-					TestID: "detail.video",
-				},
-			},
-		}
-	case "title":
-		return core.Text{
-			Content:   node.Text,
-			MaxLines:  2,
-			Style:     nsui.TypeTitle,
-			StyleFunc: nsui.Colored(colors.Text),
-		}
-	case "button":
-		action := node.Action
-		return mobileActionButton(cx, colors, mobileBtnSpec{
-			Text:    node.Text,
-			Variant: nsui.ButtonSecondary,
-			OnPress: func() {
-				switch action {
-				case "download":
-					a.exportItem(cx, item, false)
-				case "openExternal":
-					a.exportItem(cx, item, true)
-				}
-			},
-		})
-	case "row":
-		var children []core.Node
-		for _, ch := range node.Children {
-			children = append(children, a.renderPluginUI(cx, item, ch, videoSource))
-		}
-		return core.View{
-			Style:    core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 8},
-			Children: children,
-		}
-	default: // "column"
-		var children []core.Node
-		for _, ch := range node.Children {
-			children = append(children, a.renderPluginUI(cx, item, ch, videoSource))
-		}
-		return core.View{
-			Style:    core.Style{Width: core.Pct(100), Height: core.Pct(100), Gap: 10, Padding: core.Symmetric(12, 12)},
-			Children: children,
-		}
-	}
 }
 
 func formatDur(d time.Duration) string {

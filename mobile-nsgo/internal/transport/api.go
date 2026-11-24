@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/model"
-	"github.com/owocc/bowerbird/mobile-nsgo/internal/plugin"
 	"github.com/owocc/bowerbird/mobile-nsgo/internal/query"
 )
 
@@ -579,13 +578,4 @@ func DescribeFailure(err error) string {
 	default:
 		return fmt.Sprintf("%v", err)
 	}
-}
-
-// PreviewPlugins fetches the synced preview plugin bundle from the connected PC.
-func (c *Client) PreviewPlugins(ctx context.Context) (plugin.PreviewSyncBundle, error) {
-	var out plugin.PreviewSyncBundle
-	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/plugins/preview", nil, nil, &out); err != nil {
-		return out, err
-	}
-	return out, nil
 }

@@ -38,18 +38,25 @@ type GalleryRow struct {
 // visibleTileSlots filters out child pages whose parent is already present in
 // items, preserving each kept item's flat index in the underlying slice.
 func visibleTileSlots(items []model.ItemSummary) []TileSlot {
+	return visibleTileSlotsWithFold(items, true)
+}
+
+func visibleTileSlotsWithFold(items []model.ItemSummary, fold bool) []TileSlot {
 	if len(items) == 0 {
 		return nil
 	}
-	present := make(map[string]struct{}, len(items))
-	for _, it := range items {
-		if it.ID != "" {
-			present[it.ID] = struct{}{}
+	var present map[string]struct{}
+	if fold {
+		present = make(map[string]struct{}, len(items))
+		for _, it := range items {
+			if it.ID != "" {
+				present[it.ID] = struct{}{}
+			}
 		}
 	}
 	slots := make([]TileSlot, 0, len(items))
 	for idx, it := range items {
-		if it.VariantOf != "" {
+		if fold && it.VariantOf != "" {
 			if _, hasParent := present[it.VariantOf]; hasParent {
 				continue
 			}
@@ -63,13 +70,18 @@ func visibleTileSlots(items []model.ItemSummary) []TileSlot {
 // month's items into rows of cols columns. Each item retains its stable flat
 // index so detail navigation maps 1:1.
 func BuildMonthRows(items []model.ItemSummary, cols int) []GalleryRow {
+	return BuildMonthRowsWithFold(items, cols, true)
+}
+
+// BuildMonthRowsWithFold is like BuildMonthRows with configurable page-group folding.
+func BuildMonthRowsWithFold(items []model.ItemSummary, cols int, fold bool) []GalleryRow {
 	if cols < 2 {
 		cols = 2
 	}
 	if cols > 5 {
 		cols = 5
 	}
-	slots := visibleTileSlots(items)
+	slots := visibleTileSlotsWithFold(items, fold)
 	if len(slots) == 0 {
 		return nil
 	}
@@ -117,13 +129,18 @@ func BuildMonthRows(items []model.ItemSummary, cols int) []GalleryRow {
 // BuildFlatRows packs items into rows of cols columns without month headers
 // (used by search/history views).
 func BuildFlatRows(items []model.ItemSummary, cols int) []GalleryRow {
+	return BuildFlatRowsWithFold(items, cols, true)
+}
+
+// BuildFlatRowsWithFold is like BuildFlatRows with configurable page-group folding.
+func BuildFlatRowsWithFold(items []model.ItemSummary, cols int, fold bool) []GalleryRow {
 	if cols < 2 {
 		cols = 2
 	}
 	if cols > 5 {
 		cols = 5
 	}
-	visible := visibleTileSlots(items)
+	visible := visibleTileSlotsWithFold(items, fold)
 	if len(visible) == 0 {
 		return nil
 	}
@@ -145,6 +162,11 @@ func BuildFlatRows(items []model.ItemSummary, cols int) []GalleryRow {
 // BuildGalleryRows prepends the current folder's subfolders (if any) ahead of
 // the flat item rows.
 func BuildGalleryRows(subfolders []model.Folder, collapsed bool, items []model.ItemSummary, cols int) []GalleryRow {
+	return BuildGalleryRowsWithFold(subfolders, collapsed, items, cols, true)
+}
+
+// BuildGalleryRowsWithFold is like BuildGalleryRows with configurable page-group folding.
+func BuildGalleryRowsWithFold(subfolders []model.Folder, collapsed bool, items []model.ItemSummary, cols int, fold bool) []GalleryRow {
 	if cols < 2 {
 		cols = 2
 	}
@@ -175,7 +197,7 @@ func BuildGalleryRows(subfolders []model.Folder, collapsed bool, items []model.I
 			}
 		}
 	}
-	itemRows := BuildFlatRows(items, cols)
+	itemRows := BuildFlatRowsWithFold(items, cols, fold)
 	if len(rows) == 0 {
 		return itemRows
 	}

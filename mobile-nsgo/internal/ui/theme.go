@@ -1,9 +1,6 @@
 package ui
 
 import (
-	"context"
-	"fmt"
-	"time"
 	"io"
 	"log"
 	"math"
@@ -278,6 +275,7 @@ func (a *App) savePreferences() {
 		ShareMode:              a.shareMode.Get(),
 		ShareNotifyDisabled:    !a.shareNotify.Get(),
 		PredictiveBackDisabled: !a.settingsPredictiveBack.Get(),
+		FoldPageGroupsDisabled: !a.foldPageGroups(),
 	}
 	if err := a.local.SavePreferences(prefs); err != nil {
 		log.Printf("[Settings] saving preferences: %v", err)
@@ -314,6 +312,21 @@ func (a *App) setPredictiveBack(enabled bool) {
 	}
 	a.settingsPredictiveBack.Set(enabled)
 	a.savePreferences()
+	a.bump()
+}
+
+func (a *App) setFoldPageGroups(enabled bool) {
+	if a.foldPageGroups() == enabled {
+		return
+	}
+	if a.settingsFoldPageGroups != nil {
+		a.settingsFoldPageGroups.Set(enabled)
+	}
+	a.savePreferences()
+	if !a.env.HasHost {
+		a.rebuildGalleryRows()
+		a.rebuildSearchRows()
+	}
 	a.bump()
 }
 
@@ -773,6 +786,16 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 								nsui.Switch{Checked: func() bool { return a.settingsPredictiveBack.Get() },
 									OnChange: a.setPredictiveBack, Label: "预见式返回", TestID: "settings.predictiveBack"},
 							}},
+							divider,
+							core.View{Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10}, Children: []core.Node{
+								core.View{Style: core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0), Gap: 2}, Children: []core.Node{
+									core.Text{Content: "页面组折叠显示", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
+									core.Text{Content: "开启后在画廊中将多页收纳到封面下；关闭则平铺显示全部页面。",
+										MaxLines: 2, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
+								}},
+								nsui.Switch{Checked: func() bool { return a.foldPageGroups() },
+									OnChange: a.setFoldPageGroups, Label: "页面组折叠显示", TestID: "settings.foldPageGroups"},
+							}},
 						),
 						card("分享与通知",
 							core.View{Style: core.Style{Gap: 8}, Children: []core.Node{
@@ -851,7 +874,6 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 								}),
 							}},
 						),
-						a.pluginsSettingsCard(cx),
 						core.Text{Content: "版本 1.1.0", Style: nsui.TypeCaption.Merge(core.Style{Color: colors.Faint(), TextAlign: core.TextAlignCenter, Padding: core.All(8)})},
 					}},
 				},
@@ -874,102 +896,4 @@ func (a *App) settingsPage(cx *core.Scope) core.Node {
 			a.themePickerSheet(cx),
 		},
 	}
-}
-
-func (a *App) pluginsSettingsCard(cx *core.Scope) core.Node {
-	colors := nsui.ColorsOf(cx)
-	var children []core.Node
-	children = append(children,
-		core.Text{Content: "已同步插件", Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Muted)},
-	)
-	var pluginsList []pluginDescView
-	if a.pluginGlue != nil {
-		for _, p := range a.pluginGlue.Plugins() {
-			pluginsList = append(pluginsList, pluginDescView{
-				name:     p.Name,
-				version:  p.Version,
-				renderer: p.Renderer,
-			})
-		}
-	}
-	if len(pluginsList) == 0 {
-		children = append(children,
-			core.Text{
-				Content:   "当前尚未从电脑同步预览插件。连接电脑后将自动接收支持移动端的预览插件。",
-				Style:     nsui.TypeCaption,
-				StyleFunc: nsui.Colored(colors.Muted),
-			},
-		)
-	} else {
-		for _, p := range pluginsList {
-			children = append(children, core.View{
-				StyleFunc: func() core.Style {
-					return core.Style{
-						Direction:    core.Row,
-						AlignItems:   core.AlignCenter,
-						Padding:      core.Symmetric(8, 10),
-						CornerRadius: 8,
-						Background:   colors.Inset(),
-						BorderWidth:  1,
-						BorderColor:  colors.Border(),
-					}
-				},
-				Children: []core.Node{
-					core.View{Style: core.Style{FlexGrow: 1, Gap: 2}, Children: []core.Node{
-						core.Text{Content: p.name + " v" + p.version, Style: nsui.TypeBody, StyleFunc: nsui.Colored(colors.Text)},
-						core.Text{Content: "渲染器: " + p.renderer, Style: nsui.TypeCaption, StyleFunc: nsui.Colored(colors.Muted)},
-					}},
-				},
-			})
-		}
-	}
-	return core.View{
-		StyleFunc: func() core.Style {
-			return core.Style{
-				Padding:      core.All(14),
-				CornerRadius: 14,
-				Gap:          10,
-				Background:   colors.Surface(),
-				BorderWidth:  1,
-				BorderColor:  colors.Border(),
-			}
-		},
-		Children: append(children,
-			core.View{Style: core.Style{Direction: core.Row, Wrap: core.Wrap, Gap: 8}, Children: []core.Node{
-				mobileActionButton(cx, colors, mobileBtnSpec{
-					TestID: "settings.plugins.sync", Text: "立即同步插件", Variant: nsui.ButtonSecondary,
-					OnPress: func() { a.syncPreviewPluginsNow() },
-				}),
-			}},
-		),
-	}
-}
-
-type pluginDescView struct {
-	name     string
-	version  string
-	renderer string
-}
-
-func (a *App) syncPreviewPluginsNow() {
-	if a.pluginGlue == nil || a.client == nil {
-		a.showToast("尚未连接到电脑")
-		return
-	}
-	go func() {
-		a.pluginsSyncing.Set(true)
-		defer a.pluginsSyncing.Set(false)
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		bundle, err := a.client.PreviewPlugins(ctx)
-		if err != nil {
-			a.showToast("同步插件失败: " + err.Error())
-			return
-		}
-		if err := a.pluginGlue.ApplyBundle(bundle); err != nil {
-			a.showToast("保存插件缓存失败: " + err.Error())
-			return
-		}
-		a.showToast(fmt.Sprintf("已同步 %d 个插件", len(bundle.Plugins)))
-	}()
 }
