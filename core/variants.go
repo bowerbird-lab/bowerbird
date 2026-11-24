@@ -166,10 +166,32 @@ func (m *LibraryManager) LinkVariants(parentID string, variantIDs []string) (*It
 		_ = tx.Rollback()
 		return nil, err
 	}
+	// Sync folder memberships of newly linked pages/variants to match parent.
+	var parentFolders []string
+	if fRows, qErr := tx.Query("SELECT folder_id FROM item_folders WHERE item_id = ?", parent.ID); qErr == nil {
+		for fRows.Next() {
+			var fid string
+			if fRows.Scan(&fid) == nil && fid != "" {
+				parentFolders = append(parentFolders, fid)
+			}
+		}
+		fRows.Close()
+	}
+
 	for _, vid := range toAdd {
 		if _, err := tx.Exec("UPDATE items SET variant_of = ?, updated_at = ? WHERE id = ?", parent.ID, now, vid); err != nil {
 			_ = tx.Rollback()
 			return nil, err
+		}
+		if _, err := tx.Exec("DELETE FROM item_folders WHERE item_id = ?", vid); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		for _, fid := range parentFolders {
+			if _, err := tx.Exec("INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)", vid, fid, now); err != nil {
+				_ = tx.Rollback()
+				return nil, err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -191,8 +213,10 @@ func (m *LibraryManager) LinkVariants(parentID string, variantIDs []string) (*It
 		upserted = append(upserted, *updatedParent)
 	}
 	for _, vid := range toAdd {
+		copiedFolders := append([]string(nil), parentFolders...)
 		m.mutateCachedItem(vid, func(it *Item) {
 			it.VariantOf = parent.ID
+			it.Folders = copiedFolders
 			it.UpdatedAt = now
 		})
 		if vIt, gErr := m.GetItem(vid); gErr == nil && vIt != nil {

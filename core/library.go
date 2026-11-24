@@ -3703,7 +3703,25 @@ func (m *LibraryManager) DeleteFolder(id string) error {
 	return nil
 }
 
-// AddItemToFolder links an item to a folder.
+// collectionTargetIDs returns itemID plus all variant/page IDs when itemID is a
+// collection primary item, so folder operations keep every page in sync.
+func (m *LibraryManager) collectionTargetIDs(itemID string) []string {
+	ids := []string{itemID}
+	it, err := m.GetItem(itemID)
+	if err != nil || it == nil || len(it.Variants) == 0 {
+		return ids
+	}
+	seen := map[string]bool{itemID: true}
+	for _, vid := range it.Variants {
+		if vid != "" && !seen[vid] {
+			seen[vid] = true
+			ids = append(ids, vid)
+		}
+	}
+	return ids
+}
+
+// AddItemToFolder links an item (and its collection pages, if primary) to a folder.
 func (m *LibraryManager) AddItemToFolder(itemID string, folderID string) error {
 	m.mu.RLock()
 	db := m.db
@@ -3713,24 +3731,41 @@ func (m *LibraryManager) AddItemToFolder(itemID string, folderID string) error {
 		return errors.New("no active library")
 	}
 
-	_, err := db.Exec("INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)",
-		itemID, folderID, time.Now().Unix(),
-	)
-	if err == nil && folderID != "" {
-		m.mutateCachedItem(itemID, func(it *Item) {
-			for _, f := range it.Folders {
-				if f == folderID {
-					return
+	targetIDs := m.collectionTargetIDs(itemID)
+	now := time.Now().Unix()
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, id := range targetIDs {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)",
+			id, folderID, now,
+		); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if folderID != "" {
+		for _, id := range targetIDs {
+			m.mutateCachedItem(id, func(it *Item) {
+				for _, f := range it.Folders {
+					if f == folderID {
+						return
+					}
 				}
-			}
-			it.Folders = append(append([]string{}, it.Folders...), folderID)
-		})
+				it.Folders = append(append([]string{}, it.Folders...), folderID)
+			})
+		}
 		m.notifyItemsUpdated()
 	}
-	return err
+	return nil
 }
 
-// RemoveItemFromFolder unlinks an item from a folder.
+// RemoveItemFromFolder unlinks an item (and its collection pages, if primary) from a folder.
 func (m *LibraryManager) RemoveItemFromFolder(itemID string, folderID string) error {
 	m.mu.RLock()
 	db := m.db
@@ -3740,20 +3775,36 @@ func (m *LibraryManager) RemoveItemFromFolder(itemID string, folderID string) er
 		return errors.New("no active library")
 	}
 
-	_, err := db.Exec("DELETE FROM item_folders WHERE item_id = ? AND folder_id = ?", itemID, folderID)
-	if err == nil && folderID != "" {
-		m.mutateCachedItem(itemID, func(it *Item) {
-			next := make([]string, 0, len(it.Folders))
-			for _, f := range it.Folders {
-				if f != folderID {
-					next = append(next, f)
+	targetIDs := m.collectionTargetIDs(itemID)
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, id := range targetIDs {
+		if _, err := tx.Exec("DELETE FROM item_folders WHERE item_id = ? AND folder_id = ?", id, folderID); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if folderID != "" {
+		for _, id := range targetIDs {
+			m.mutateCachedItem(id, func(it *Item) {
+				next := make([]string, 0, len(it.Folders))
+				for _, f := range it.Folders {
+					if f != folderID {
+						next = append(next, f)
+					}
 				}
-			}
-			it.Folders = next
-		})
+				it.Folders = next
+			})
+		}
 		m.notifyItemsUpdated()
 	}
-	return err
+	return nil
 }
 
 // BatchRemoveItemsFromFolders unlinks many items from many folders in one
@@ -3830,15 +3881,12 @@ func (m *LibraryManager) SetItemFolders(itemID string, folderIDs []string) error
 		return errors.New("no active library")
 	}
 
+	targetIDs := m.collectionTargetIDs(itemID)
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	if _, err := tx.Exec("DELETE FROM item_folders WHERE item_id = ?", itemID); err != nil {
-		return err
-	}
 
 	now := time.Now().Unix()
 	stmt, err := tx.Prepare("INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)")
@@ -3851,18 +3899,29 @@ func (m *LibraryManager) SetItemFolders(itemID string, folderIDs []string) error
 	for _, fID := range folderIDs {
 		trimmed := strings.TrimSpace(fID)
 		if trimmed != "" {
-			if _, err := stmt.Exec(itemID, trimmed, now); err != nil {
+			cleanFolders = append(cleanFolders, trimmed)
+		}
+	}
+
+	for _, id := range targetIDs {
+		if _, err := tx.Exec("DELETE FROM item_folders WHERE item_id = ?", id); err != nil {
+			return err
+		}
+		for _, trimmed := range cleanFolders {
+			if _, err := stmt.Exec(id, trimmed, now); err != nil {
 				return err
 			}
-			cleanFolders = append(cleanFolders, trimmed)
 		}
 	}
 
 	err = tx.Commit()
 	if err == nil {
-		m.mutateCachedItem(itemID, func(it *Item) {
-			it.Folders = cleanFolders
-		})
+		for _, id := range targetIDs {
+			copied := append([]string(nil), cleanFolders...)
+			m.mutateCachedItem(id, func(it *Item) {
+				it.Folders = copied
+			})
+		}
 		m.notifyItemsUpdated()
 	}
 	return err
@@ -4322,7 +4381,7 @@ func (m *LibraryManager) GetTrashCount() (int, error) {
 	return count, err
 }
 
-// MoveItemToFolder moves an item from one folder to another. If fromFolderID is empty, it replaces item folders with toFolderID.
+// MoveItemToFolder moves an item (and its collection pages, if primary) from one folder to another. If fromFolderID is empty, it replaces item folders with toFolderID.
 func (m *LibraryManager) MoveItemToFolder(itemID string, fromFolderID string, toFolderID string) error {
 	m.mu.RLock()
 	db := m.db
@@ -4338,46 +4397,52 @@ func (m *LibraryManager) MoveItemToFolder(itemID string, fromFolderID string, to
 		return nil
 	}
 
+	targetIDs := m.collectionTargetIDs(itemID)
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if cleanFrom != "" {
-		_, _ = tx.Exec("DELETE FROM item_folders WHERE item_id = ? AND folder_id = ?", itemID, cleanFrom)
-	} else {
-		_, _ = tx.Exec("DELETE FROM item_folders WHERE item_id = ?", itemID)
-	}
+	now := time.Now().Unix()
+	for _, id := range targetIDs {
+		if cleanFrom != "" {
+			_, _ = tx.Exec("DELETE FROM item_folders WHERE item_id = ? AND folder_id = ?", id, cleanFrom)
+		} else {
+			_, _ = tx.Exec("DELETE FROM item_folders WHERE item_id = ?", id)
+		}
 
-	if cleanTo != "" {
-		_, err = tx.Exec("INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)",
-			itemID, cleanTo, time.Now().Unix(),
-		)
-		if err != nil {
-			return err
+		if cleanTo != "" {
+			_, err = tx.Exec("INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)",
+				id, cleanTo, now,
+			)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	err = tx.Commit()
 	if err == nil {
-		m.mutateCachedItem(itemID, func(it *Item) {
-			var next []string
-			if cleanFrom != "" {
-				for _, f := range it.Folders {
-					if f != cleanFrom && f != cleanTo {
-						next = append(next, f)
+		for _, id := range targetIDs {
+			m.mutateCachedItem(id, func(it *Item) {
+				var next []string
+				if cleanFrom != "" {
+					for _, f := range it.Folders {
+						if f != cleanFrom && f != cleanTo {
+							next = append(next, f)
+						}
 					}
 				}
-			}
-			if cleanTo != "" {
-				next = append(next, cleanTo)
-			}
-			if next == nil {
-				next = []string{}
-			}
-			it.Folders = next
-		})
+				if cleanTo != "" {
+					next = append(next, cleanTo)
+				}
+				if next == nil {
+					next = []string{}
+				}
+				it.Folders = next
+			})
+		}
 		m.notifyItemsUpdated()
 	}
 	return err

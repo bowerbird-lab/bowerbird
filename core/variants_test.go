@@ -277,3 +277,70 @@ func TestReorderVariants(t *testing.T) {
 		t.Fatalf("omitted.Variants = %v, want [%s, %s, %s]", omitted.Variants, p3, p1, p2)
 	}
 }
+
+func TestVariantFolderSync(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := &LibraryManager{}
+	if _, err := mgr.CreateLibrary(tmp, "VariantFolderSync"); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	defer mgr.CloseLibrary()
+
+	f1, err := mgr.CreateFolder("FolderA", "")
+	if err != nil {
+		t.Fatalf("CreateFolder A: %v", err)
+	}
+	f2, err := mgr.CreateFolder("FolderB", "")
+	if err != nil {
+		t.Fatalf("CreateFolder B: %v", err)
+	}
+
+	p1 := filepath.Join(tmp, "a.png")
+	p2 := filepath.Join(tmp, "b.png")
+	p3 := filepath.Join(tmp, "c.png")
+	for _, p := range []string{p1, p2, p3} {
+		if err := os.WriteFile(p, makeSolidPNG(t, 16, 16, color.RGBA{R: 100, G: 120, B: 140, A: 255}), 0o644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+
+	items, err := mgr.ImportFiles([]string{p1, p2})
+	if err != nil || len(items) != 2 {
+		t.Fatalf("ImportFiles: %v", err)
+	}
+	primary, page := items[0].ID, items[1].ID
+
+	// Put primary into FolderA, then link page -> page inherits FolderA.
+	if err := mgr.AddItemToFolder(primary, f1.ID); err != nil {
+		t.Fatalf("AddItemToFolder: %v", err)
+	}
+	if _, err := mgr.LinkVariants(primary, []string{page}); err != nil {
+		t.Fatalf("LinkVariants: %v", err)
+	}
+	gotPage, _ := mgr.GetItem(page)
+	if len(gotPage.Folders) != 1 || gotPage.Folders[0] != f1.ID {
+		t.Fatalf("page folders after LinkVariants = %v, want [%s]", gotPage.Folders, f1.ID)
+	}
+
+	// Move primary from FolderA to FolderB -> page moves from FolderA to FolderB too.
+	if err := mgr.MoveItemToFolder(primary, f1.ID, f2.ID); err != nil {
+		t.Fatalf("MoveItemToFolder: %v", err)
+	}
+	gotPrimary, _ := mgr.GetItem(primary)
+	gotPage, _ = mgr.GetItem(page)
+	if len(gotPrimary.Folders) != 1 || gotPrimary.Folders[0] != f2.ID {
+		t.Fatalf("primary folders after move = %v, want [%s]", gotPrimary.Folders, f2.ID)
+	}
+	if len(gotPage.Folders) != 1 || gotPage.Folders[0] != f2.ID {
+		t.Fatalf("page folders after move = %v, want [%s]", gotPage.Folders, f2.ID)
+	}
+
+	// Drop new file p3 directly onto pages -> p3 inherits FolderB.
+	added, err := mgr.AddVariantFromFile(primary, p3)
+	if err != nil {
+		t.Fatalf("AddVariantFromFile: %v", err)
+	}
+	if len(added.Folders) != 1 || added.Folders[0] != f2.ID {
+		t.Fatalf("added page folders = %v, want [%s]", added.Folders, f2.ID)
+	}
+}
