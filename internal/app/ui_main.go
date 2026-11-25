@@ -28,7 +28,11 @@ func (a *App) viewMain(c *ui.Context) {
 	}
 	a.handleMainShortcuts(c)
 	a.applyVibrancyRoot(c)
+	insetUI := a.insetUIActive(c)
 	root := ui.Box(c).Fill()
+	if insetUI {
+		root.Background(a.insetFrameTint(p))
+	}
 	a.attachURLDropTarget(root)
 	root.Children(func() {
 		if a.isImmersiveFullscreen() && len(a.items) > 0 && a.previewIndex >= 0 && a.previewIndex < len(a.items) {
@@ -37,47 +41,23 @@ func (a *App) viewMain(c *ui.Context) {
 			})
 			return
 		}
-		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-			if a.prefs.SidebarOpen {
-				a.viewSidebar(c)
-				ui.Box(c).Width(1).FillHeight().Background(p.hairline)
-			}
-			ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0).Children(func() {
-				if a.previewOpen && a.previewMode == "inline" {
-					inline := ui.Column(c.Key("inline-preview")).Fill().Focusable().AutoFocus()
-					a.handlePreviewContainerInput(inline)
-					inline.Children(func() {
-						a.viewPreviewToolbar(c)
-						ui.Box(c).FillWidth().Height(1).Background(p.hairline)
-						a.mainBodySurface(c, 0, func() {
-							if len(a.items) > 0 && a.previewIndex >= 0 && a.previewIndex < len(a.items) {
-								a.viewPreviewBody(c, a.currentPreviewItem())
-							}
-						})
-					})
-				} else {
-					a.mainBodySurface(c, mainHeaderHeight, func() {
-						if a.library == nil {
-							a.emptyState(c, iconLibrary, a.t("app.noActiveLibrary"), a.t("app.openSetup"))
-							return
-						}
-						if a.nav == NavTags {
-							a.viewTags(c)
-							return
-						}
-						a.viewGallery(c)
-					})
-					a.viewHeader(c)
+		if insetUI {
+			topPad := a.insetFrameTopPadding(c, a.win)
+			split := a.prefs.ExperimentalInsetGap
+			ui.Box(c).Fill().Padding(topPad, insetOuterPadding, insetOuterPadding, insetOuterPadding).DragWindow().Children(func() {
+				if split {
+					a.viewMainWorkspace(c, true)
+					return
 				}
-				if a.prefs.SidebarOpen {
-					a.viewSidebarResizer(c)
-				}
+				ui.Box(c).Fill().Radius(insetCardRadius).Clip().
+					Shadow(0, 4, 20, 0, p.cardShade).
+					Children(func() {
+						a.viewMainWorkspace(c, false)
+					})
 			})
-			if a.inspectorVisible() {
-				ui.Box(c).Width(1).FillHeight().Background(p.hairline)
-				a.viewInspector(c)
-			}
-		})
+		} else {
+			a.viewMainWorkspace(c, false)
+		}
 		if a.previewOpen && a.previewMode == "full" {
 			ui.Overlay(c, func() {
 				overlay := ui.Box(c).Absolute().Fill().Background(p.bg).Focusable().AutoFocus().Modal()
@@ -92,6 +72,74 @@ func (a *App) viewMain(c *ui.Context) {
 		a.viewDialog(c)
 		a.viewCropDialog(c)
 		a.viewIndexProgressDialog(c)
+	})
+}
+
+func (a *App) viewMainWorkspace(c *ui.Context, inset bool) {
+	p := a.palette(c)
+	wrapInsetPanel := func(body func()) {
+		if !inset {
+			body()
+			return
+		}
+		ui.Box(c).FillHeight().Radius(insetCardRadius).Clip().Shadow(0, 4, 20, 0, p.cardShade).Children(body)
+	}
+	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+		if a.prefs.SidebarOpen {
+			wrapInsetPanel(func() {
+				a.viewSidebar(c)
+			})
+			if inset {
+				ui.Box(c).Width(insetOuterPadding).FillHeight()
+			} else {
+				ui.Box(c).Width(1).FillHeight().Background(p.hairline)
+			}
+		}
+		mainCol := ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0)
+		if inset {
+			mainCol.Radius(insetCardRadius).Clip().Shadow(0, 4, 20, 0, p.cardShade)
+		}
+		mainCol.Children(func() {
+			if a.previewOpen && a.previewMode == "inline" {
+				inline := ui.Column(c.Key("inline-preview")).Fill().Focusable().AutoFocus()
+				a.handlePreviewContainerInput(inline)
+				inline.Children(func() {
+					a.viewPreviewToolbar(c)
+					ui.Box(c).FillWidth().Height(1).Background(p.hairline)
+					a.mainBodySurface(c, 0, func() {
+						if len(a.items) > 0 && a.previewIndex >= 0 && a.previewIndex < len(a.items) {
+							a.viewPreviewBody(c, a.currentPreviewItem())
+						}
+					})
+				})
+			} else {
+				a.mainBodySurface(c, mainHeaderHeight, func() {
+					if a.library == nil {
+						a.emptyState(c, iconLibrary, a.t("app.noActiveLibrary"), a.t("app.openSetup"))
+						return
+					}
+					if a.nav == NavTags {
+						a.viewTags(c)
+						return
+					}
+					a.viewGallery(c)
+				})
+				a.viewHeader(c)
+			}
+			if a.prefs.SidebarOpen {
+				a.viewSidebarResizer(c)
+			}
+		})
+		if a.inspectorVisible() {
+			if inset {
+				ui.Box(c).Width(insetOuterPadding).FillHeight()
+			} else {
+				ui.Box(c).Width(1).FillHeight().Background(p.hairline)
+			}
+			wrapInsetPanel(func() {
+				a.viewInspector(c)
+			})
+		}
 	})
 }
 

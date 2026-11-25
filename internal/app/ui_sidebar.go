@@ -32,10 +32,14 @@ func (a *App) viewSidebar(c *ui.Context) {
 		// this strip only drags the window and clears the traffic lights.
 		bar := c.TitleBar()
 		var sidebarHeaderHeight float32 = headerHeight
-		if runtime.GOOS == "windows" {
+		leftPad := bar.Left + gallerySidePadding
+		if a.insetUIActive(c) {
+			sidebarHeaderHeight = 12
+			leftPad = gallerySidePadding
+		} else if runtime.GOOS == "windows" {
 			sidebarHeaderHeight = 12
 		}
-		ui.Row(c).Height(sidebarHeaderHeight).FillWidth().Padding(0, 8, 0, bar.Left+gallerySidePadding).DragWindow()
+		ui.Row(c).Height(sidebarHeaderHeight).FillWidth().Padding(0, 8, 0, leftPad).DragWindow()
 		a.sidebarLibrarySwitcher(c)
 		ui.Scroll(c).Grow(1).Shrink(1).Padding(4, 10, 12, 10).Children(func() {
 			a.navRow(c, NavAll, iconAll, a.t("sidebar.allItems"), a.stats.Total)

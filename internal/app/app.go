@@ -65,9 +65,11 @@ type Filters struct {
 // Prefs are the native-only appearance preferences that used to live in
 // localStorage.
 type Prefs struct {
-	VibrancySidebar    bool     `json:"vibrancySidebar"`
-	VibrancyHeader     bool     `json:"vibrancyHeader"`
-	LightTheme         string   `json:"lightTheme"`
+	VibrancySidebar      bool     `json:"vibrancySidebar"`
+	VibrancyHeader       bool     `json:"vibrancyHeader"`
+	ExperimentalInsetUI  bool     `json:"experimentalInsetUi"`
+	ExperimentalInsetGap bool     `json:"experimentalInsetGap"`
+	LightTheme           string   `json:"lightTheme"`
 	DarkTheme          string   `json:"darkTheme"`
 	SystemAccent       bool     `json:"systemAccent"`
 	InspectorOpen      bool     `json:"inspectorOpen"`
@@ -95,9 +97,10 @@ type Prefs struct {
 
 func defaultPrefs() Prefs {
 	return Prefs{
-		VibrancySidebar:    true,
-		VibrancyHeader:     true,
-		LightTheme:         "default-light",
+		VibrancySidebar:      true,
+		VibrancyHeader:       true,
+		ExperimentalInsetGap: true,
+		LightTheme:           "default-light",
 		DarkTheme:          "default-dark",
 		SystemAccent:       true,
 		InspectorOpen:      true,

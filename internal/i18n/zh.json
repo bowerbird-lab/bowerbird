@@ -380,6 +380,13 @@
       "titlebar": "标题栏使用材质",
       "titlebarDescription": "内容滚动到标题栏下方时使用系统模糊材质；未滚动时标题栏使用与主界面一致的底色。"
     },
+    "experimental": {
+      "title": "实验性界面",
+      "insetUI": "内嵌圆角界面",
+      "insetUIDescription": "将整个界面内嵌在圆角容器中，外层背景透出系统模糊（Windows 上启用 Acrylic 模糊）。",
+      "insetGap": "面板留白分割",
+      "insetGapDescription": "开启后侧边栏、主工作区与详细栏之间使用透明留白分割；关闭后合并为同一张圆角卡片并使用细线分割。"
+    },
     "lightweight": {
       "title": "轻量模式",
       "description": "开启后，关闭窗口一分钟将停止 WebView 进程，仅保留核心 Go 进程（托盘、截图、API）。也可从菜单栏/托盘立即进入轻量模式。",

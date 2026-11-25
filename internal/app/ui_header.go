@@ -54,6 +54,9 @@ func (a *App) commonHeader(c *ui.Context, opts commonHeaderOptions, body, extra 
 				a.iconButton(c, "sidebar-toggle", iconSidebar, false, a.t("common.toggleSidebar"), a.toggleSidebar)
 			}
 			body()
+			if (opts.spansWindow || !a.inspectorVisible()) && a.customWindowControlsActive(c, a.win) {
+				a.viewWindowControls(c, a.win)
+			}
 		})
 		if extra != nil {
 			extra()
@@ -69,13 +72,16 @@ func (a *App) commonHeader(c *ui.Context, opts commonHeaderOptions, body, extra 
 // past the sidebar on the left, past the inspector on the right, or on both
 // sides in the full-window preview.
 func (a *App) headerInsets(c *ui.Context, spansWindow bool, pad float32) (left, right float32) {
+	if !spansWindow && a.insetUIActive(c) {
+		return pad, pad
+	}
 	bar := c.TitleBar()
 	left = pad
 	if spansWindow || !a.prefs.SidebarOpen {
 		left += bar.Left
 	}
 	right = pad
-	if spansWindow || !a.inspectorVisible() {
+	if (spansWindow || !a.inspectorVisible()) && !a.customWindowControlsActive(c, a.win) {
 		r := bar.Right
 		if r == 0 && runtime.GOOS == "windows" {
 			r = 138

@@ -71,17 +71,55 @@ func (a *App) viewSettings(c *ui.Context) {
 	p := a.palette(c)
 	a.applyVibrancyRoot(c)
 	a.handleSettingsShortcuts(c)
+	insetSettings := a.insetUIWindowActive(c, a.settingsWin)
+	root := ui.Box(c).Fill()
+	if insetSettings {
+		root.Background(a.insetFrameTint(p))
+	}
+	root.Children(func() {
+		if insetSettings {
+			topPad := a.insetFrameTopPadding(c, a.settingsWin)
+			split := a.prefs.ExperimentalInsetGap
+			ui.Box(c).Fill().Padding(topPad, insetOuterPadding, insetOuterPadding, insetOuterPadding).DragWindow().Children(func() {
+				if split {
+					a.viewSettingsBody(c, true, true)
+					return
+				}
+				ui.Box(c).Fill().Radius(insetCardRadius).Clip().
+					Shadow(0, 4, 20, 0, p.cardShade).
+					Children(func() {
+						a.viewSettingsBody(c, true, false)
+					})
+			})
+		} else {
+			a.viewSettingsBody(c, false, false)
+		}
+		if a.shortcutEditID != "" {
+			a.viewShortcutDialog(c)
+		}
+	})
+}
+
+func (a *App) viewSettingsBody(c *ui.Context, inset bool, split bool) {
+	p := a.palette(c)
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		bar := c.TitleBar()
 		// Section rail. Its header matches the main window's sidebar header:
 		// the title sits right of the traffic lights, on the same line and
 		// with the same inset as the sidebar toggle there.
 		rail := ui.Column(c).Width(defaultSidebarWidth).FillHeight()
+		if split {
+			rail.Radius(insetCardRadius).Clip().Shadow(0, 4, 20, 0, p.cardShade)
+		}
 		a.applySidebarSurface(c, rail)
 		rail.Children(func() {
-			ui.Row(c).Height(headerHeight).FillWidth().Padding(0, 8, 0, bar.Left+gallerySidePadding).AlignItems(ui.Center).DragWindow().Children(func() {
-				ui.Text(c, a.t("settings.title")).FontSize(14).FontWeight(650).TextColor(p.text)
-			})
+			if !inset {
+				ui.Row(c).Height(headerHeight).FillWidth().Padding(0, 8, 0, bar.Left+gallerySidePadding).AlignItems(ui.Center).DragWindow().Children(func() {
+					ui.Text(c, a.t("settings.title")).FontSize(14).FontWeight(650).TextColor(p.text)
+				})
+			} else {
+				ui.Box(c).Height(12).FillWidth().DragWindow()
+			}
 			ui.Column(c).FillWidth().Grow(1).Shrink(1).Padding(10, 10, 10, 10).Children(func() {
 				labels := a.settingsSectionLabels()
 				for i, label := range labels {
@@ -106,8 +144,15 @@ func (a *App) viewSettings(c *ui.Context) {
 				ui.Textf(c, "v%s", "1.0.0-alpha-1").FontSize(10).TextColor(p.faint).Padding(10, 8)
 			})
 		})
-		ui.Box(c).Width(1).FillHeight().Background(p.hairline)
+		if split {
+			ui.Box(c).Width(insetOuterPadding).FillHeight()
+		} else {
+			ui.Box(c).Width(1).FillHeight().Background(p.hairline)
+		}
 		content := ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0)
+		if split {
+			content.Radius(insetCardRadius).Clip().Shadow(0, 4, 20, 0, p.cardShade)
+		}
 		// As in the main window, the header paints its own strip at rest and
 		// blurs the content once it scrolls underneath.
 		a.paintBelowHeader(c, content, headerHeight)
@@ -137,11 +182,8 @@ func (a *App) viewSettings(c *ui.Context) {
 					a.settingsAbout(c)
 				}
 			})
-			a.viewSettingsHeader(c)
+			a.viewSettingsHeader(c, inset)
 		})
-		if a.shortcutEditID != "" {
-			a.viewShortcutDialog(c)
-		}
 	})
 }
 
@@ -156,18 +198,30 @@ func (a *App) settingsHeaderHasContentUnder() bool {
 // viewSettingsHeader draws the shared settings header over the scrolling
 // content, with the same material, drag area and divider behaviour as the main
 // toolbar.
-func (a *App) viewSettingsHeader(c *ui.Context) {
+func (a *App) viewSettingsHeader(c *ui.Context, inset bool) {
 	p := a.palette(c)
 	header := ui.Column(c).FillWidth().Height(headerHeight).Absolute().Top(0).Left(0).Right(0)
 	headerBlurActive := a.applyHeaderSurface(c, header, a.settingsHeaderHasContentUnder())
 	header.Children(func() {
-		bar := c.TitleBar()
-		r := bar.Right
-		if r == 0 && runtime.GOOS == "windows" {
-			r = 138
+		customControls := a.customWindowControlsActive(c, a.settingsWin)
+		var r float32
+		if !inset && !customControls {
+			bar := c.TitleBar()
+			r = bar.Right
+			if r == 0 && runtime.GOOS == "windows" {
+				r = 138
+			}
 		}
-		ui.Row(c).FillWidth().Height(headerHeight).Padding(0, r+24, 0, 24).AlignItems(ui.Center).DragWindow().Children(func() {
+		rightPad := r + 24
+		if customControls {
+			rightPad = 12
+		}
+		ui.Row(c).FillWidth().Height(headerHeight).Padding(0, rightPad, 0, 24).AlignItems(ui.Center).DragWindow().Children(func() {
 			ui.Text(c, a.settingsSectionTitle(a.settingsSection)).FontSize(16).FontWeight(650).TextColor(p.text)
+			if customControls {
+				ui.Box(c).Grow(1)
+				a.viewWindowControls(c, a.settingsWin)
+			}
 		})
 		if headerBlurActive {
 			ui.Box(c).Absolute().Bottom(0).FillWidth().Height(1).Background(p.hairline)
@@ -536,6 +590,27 @@ func (a *App) settingsAppearance(c *ui.Context) {
 				on := a.prefs.VibrancyHeader
 				if ui.Switch(c.Key("vibrancy-titlebar"), &on).Changed() {
 					a.prefs.VibrancyHeader = on
+					a.savePrefs()
+					a.invalidateWindows()
+				}
+			})
+		}
+	})
+	a.settingsCard(c, a.t("settings.experimental.title"), func() {
+		a.settingsRowInfo(c, a.t("settings.experimental.insetUI"), a.t("settings.experimental.insetUIDescription"), func() {
+			on := a.prefs.ExperimentalInsetUI
+			if ui.Switch(c.Key("experimental-inset-ui"), &on).Changed() {
+				a.prefs.ExperimentalInsetUI = on
+				a.savePrefs()
+				a.syncWindowVibrancy()
+			}
+		})
+		if a.prefs.ExperimentalInsetUI {
+			ui.Box(c).FillWidth().Height(1).Background(p.hairline)
+			a.settingsRowInfo(c, a.t("settings.experimental.insetGap"), a.t("settings.experimental.insetGapDescription"), func() {
+				on := a.prefs.ExperimentalInsetGap
+				if ui.Switch(c.Key("experimental-inset-gap"), &on).Changed() {
+					a.prefs.ExperimentalInsetGap = on
 					a.savePrefs()
 					a.invalidateWindows()
 				}

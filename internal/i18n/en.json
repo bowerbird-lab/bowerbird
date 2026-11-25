@@ -380,6 +380,13 @@
       "titlebar": "Use the material in the title bar",
       "titlebarDescription": "Use the system blur material once content scrolls under the title bar; at rest it keeps the same background as the workspace."
     },
+    "experimental": {
+      "title": "Experimental UI",
+      "insetUI": "Inset rounded UI",
+      "insetUIDescription": "Embed the entire UI inside rounded containers with a system blur backdrop behind them (uses Acrylic blur on Windows).",
+      "insetGap": "Separate panels with gap",
+      "insetGapDescription": "Separate sidebar, workspace, and inspector into individual rounded cards with a blurred gap; when off, keep them in one rounded card with hairline dividers."
+    },
     "lightweight": {
       "title": "Lightweight mode",
       "description": "When enabled, closing the window starts a one-minute timer. After that, webview processes are stopped and only the core Go process (tray, capture, API) stays running. You can also enter this mode immediately from the menu bar / tray.",

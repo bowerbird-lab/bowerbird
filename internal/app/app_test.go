@@ -1135,6 +1135,29 @@ func TestVibrancyMaterialRequiresMasterSwitch(t *testing.T) {
 	}
 }
 
+func TestExperimentalInsetUIRendersAndSelectsMaterial(t *testing.T) {
+	a := seededApp(t)
+	a.prefs.ExperimentalInsetUI = true
+	a.vibrancyValue = false
+
+	mat := a.WindowVibrancyMaterial(false)
+	if mat == "" {
+		t.Fatal("expected system blur material when ExperimentalInsetUI is enabled")
+	}
+
+	mainTester := ui.NewTester(a.viewMain, 1280, 800)
+	mainTester.SetVibrancy(true)
+	mainTester.Frame()
+
+	a.settingsSection = 1 // Appearance
+	settingsTester := ui.NewTester(a.viewSettings, 1000, 700)
+	settingsTester.SetVibrancy(true)
+	settingsTester.Frame()
+	if !settingsTester.HasText(a.t("settings.experimental.insetUI")) {
+		t.Fatal("experimental inset UI setting not rendered in Appearance")
+	}
+}
+
 func TestHeaderBlurStartsWhenContentReachesHeader(t *testing.T) {
 	a := seededApp(t)
 	a.galleryScroll.Y = 0
