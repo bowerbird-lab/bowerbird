@@ -67,12 +67,22 @@ func (a *App) loadInspector(id string) {
 
 func (a *App) viewInspector(c *ui.Context) {
 	p := a.palette(c)
+	customControls := a.customWindowControlsActive(c, a.win)
 	top := float32(inspectorTopHeight)
-	if bar := c.TitleBar(); bar.Right > 0 {
-		top = maxF(top, bar.Height)
+	if customControls {
+		top = 36
+	} else if !a.insetUIActive(c) {
+		if bar := c.TitleBar(); bar.Right > 0 {
+			top = maxF(top, bar.Height)
+		}
 	}
 	ui.Column(c).Width(a.inspectorWidth).FillHeight().Background(p.sidebar).Children(func() {
-		ui.Row(c).Height(top).PaddingX(14).AlignItems(ui.Center).DragWindow()
+		ui.Row(c).Height(top).Padding(0, 10, 0, 14).AlignItems(ui.Center).DragWindow().Children(func() {
+			if customControls {
+				ui.Box(c).Grow(1)
+				a.viewWindowControls(c, a.win)
+			}
+		})
 		ui.Scroll(c).Grow(1).Shrink(1).Padding(0, 14, 20, 14).Children(func() {
 			if len(a.selected) > 1 {
 				a.viewMultiInspector(c)

@@ -641,6 +641,8 @@ func (h *appHost) windowOptions(spec core.WindowSpec) mygo.WindowOptions {
 		opts.TitleBarStyle = mygo.TitleBarHidden
 		if runtime.GOOS == "darwin" {
 			opts.TrafficLightPosition = &mygo.Point{X: 20, Y: 20}
+		} else if runtime.GOOS == "windows" {
+			opts.HideWindowButtons = true
 		}
 		if spec.TitleBarHeight > 0 {
 			opts.TitleBarHeight = spec.TitleBarHeight
@@ -655,10 +657,19 @@ func (h *appHost) windowOptions(spec core.WindowSpec) mygo.WindowOptions {
 // setting. Every window is created with a material so the switch can add it
 // back later on Windows; when the setting is off, remove it now.
 func (h *appHost) applyWindowVibrancy(w *mygo.Window) {
-	if w == nil || h.svc == nil || h.svc.GetVibrancyEnabled() {
+	if w == nil || h.svc == nil {
 		return
 	}
-	w.SetVibrancy(mygo.VibrancyNone)
+	material := windowVibrancyMaterial
+	if h.views != nil {
+		material = h.views.WindowVibrancyMaterial(h.svc.GetVibrancyEnabled())
+	} else if !h.svc.GetVibrancyEnabled() {
+		material = mygo.VibrancyNone
+	}
+	if material == windowVibrancyMaterial {
+		return
+	}
+	w.SetVibrancy(material)
 }
 
 func nativeThemeSource(theme string) mygo.ThemeSource {
@@ -677,7 +688,9 @@ func nativeThemeSource(theme string) mygo.ThemeSource {
 // touches the window side; the vibrancy-changed event makes the views repaint.
 func (h *appHost) ApplyVibrancy(enabled bool) {
 	material := mygo.VibrancyNone
-	if enabled {
+	if h.views != nil {
+		material = h.views.WindowVibrancyMaterial(enabled)
+	} else if enabled {
 		material = windowVibrancyMaterial
 	}
 	h.mu.RLock()

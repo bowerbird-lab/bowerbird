@@ -68,7 +68,12 @@ func (a *App) viewLogs(c *ui.Context) {
 	entries := a.filteredLogs()
 	a.logsList.FollowEnd = a.logsAutoScroll
 	ui.Column(c).Fill().Background(p.bg).Children(func() {
-		ui.Row(c).Height(40).DragWindow()
+		ui.Row(c).Height(40).FillWidth().Padding(0, 12, 0, 12).AlignItems(ui.Center).DragWindow().Children(func() {
+			if a.customWindowControlsActive(c, a.logsWin) {
+				ui.Box(c).Grow(1)
+				a.viewWindowControls(c, a.logsWin)
+			}
+		})
 		ui.Row(c).Height(50).PaddingX(16).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, a.t("logs.title")).FontSize(16).FontWeight(700).TextColor(p.text)
 			ui.Textf(c, "%d", len(entries)).FontSize(10.5).TextColor(p.faint).FontFeatures("tnum")

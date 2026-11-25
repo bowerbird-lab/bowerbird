@@ -34,6 +34,8 @@ var (
 	iconPlus            = strokeIcon(`<path d="M12 5v14M5 12h14"/>`)
 	iconMinus           = strokeIcon(`<path d="M5 12h14"/>`)
 	iconClose           = strokeIcon(`<path d="m6 6 12 12M18 6 6 18"/>`)
+	iconWindowMaximize  = strokeIcon(`<rect x="5" y="5" width="14" height="14" rx="2"/>`)
+	iconWindowRestore   = strokeIcon(`<rect x="8" y="4" width="12" height="12" rx="1.5"/><path d="M16 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2"/>`)
 	iconCheck           = strokeIcon(`<path d="m5 12 4 4L19 6"/>`)
 	iconMore            = strokeIcon(`<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>`)
 	iconLayoutJustified = strokeIcon(`<path d="M4 6h16M4 12h16M4 18h16"/>`)
