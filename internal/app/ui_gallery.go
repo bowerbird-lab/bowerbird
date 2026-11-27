@@ -1001,7 +1001,7 @@ func (a *App) itemDragData(item core.Item) transfer.Data {
 			}
 		}()
 	}
-	urls := make([]string, 0, len(ids))
+	dragItems := make([]transfer.Item, 0, len(ids))
 	wanted := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		wanted[id] = true
@@ -1014,10 +1014,14 @@ func (a *App) itemDragData(item core.Item) transfer.Data {
 	}
 	for _, it := range a.fullWorkspaceItems(selected) {
 		if it.FileURL != "" {
-			urls = append(urls, it.FileURL)
+			// Provide both FileList (Windows/macOS) and URIList (Linux/GTK) per item.
+			dragItems = append(dragItems, transfer.NewItem(
+				transfer.Bytes(transfer.FileList, []byte(it.FileURL)),
+				transfer.Bytes(transfer.URIList, []byte(it.FileURL)),
+			))
 		}
 	}
-	return transfer.New(transfer.NewItem(transfer.Bytes(transfer.FileList, []byte(strings.Join(urls, "\r\n")))))
+	return transfer.New(dragItems...)
 }
 
 // clearItemClick forgets the click that may start a manual double click.
