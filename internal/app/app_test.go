@@ -466,6 +466,13 @@ func TestItemDragDataFollowsSelection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read file list: %v", err)
 		}
+		uriBytes, err := data.Read(transfer.URIList)
+		if err != nil {
+			t.Fatalf("read uri list: %v", err)
+		}
+		if string(uriBytes) != string(b) {
+			t.Fatalf("uri list = %q, want %q", string(uriBytes), string(b))
+		}
 		return string(b)
 	}
 
